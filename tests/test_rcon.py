@@ -81,7 +81,7 @@ async def test_auth_failure_raises():
     port = PORT_BASE + 2
 
     async def handler(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
-        rid, _, _ = await _read_packet(r)
+        await _read_packet(r)
         w.write(_encode(-1, 2, ""))  # auth rejected
         await w.drain()
         w.close()

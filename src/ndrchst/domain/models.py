@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 
 from ..platforms.base import Family
 
 
-class ServerStatus(str, Enum):
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+class ServerStatus(StrEnum):
     CREATED = "created"
     STARTING = "starting"
     RUNNING = "running"
@@ -29,4 +33,4 @@ class Server:
     status: ServerStatus = ServerStatus.CREATED
     container_id: str | None = None
     cross_play: bool = False  # Java + Geyser
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=_now)

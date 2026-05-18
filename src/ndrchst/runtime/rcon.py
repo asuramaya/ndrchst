@@ -13,6 +13,7 @@ Differences from the v2 port:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import struct
 from dataclasses import dataclass
 
@@ -106,10 +107,8 @@ class RCON:
     async def close(self) -> None:
         if self._writer is not None:
             self._writer.close()
-            try:
+            with contextlib.suppress(ConnectionError, OSError):
                 await self._writer.wait_closed()
-            except (ConnectionError, OSError):
-                pass
         self._reader = self._writer = None
 
     async def command(self, cmd: str) -> str:

@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 
 from ndrchst.mods.base import AssetKind
-from ndrchst.mods.modrinth import MODRINTH_API, Modrinth
+from ndrchst.mods.modrinth import Modrinth
 
 
 def _capture():

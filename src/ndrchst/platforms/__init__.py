@@ -29,10 +29,10 @@ def get(platform_id: str) -> Platform:
 
 
 __all__ = [
+    "REGISTRY",
     "Family",
     "InstallArtifact",
     "Platform",
-    "REGISTRY",
     "VersionInfo",
     "get",
 ]

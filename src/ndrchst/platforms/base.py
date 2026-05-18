@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 
-class Family(str, Enum):
+class Family(StrEnum):
     JAVA = "java"
     BEDROCK = "bedrock"
 

@@ -9,4 +9,4 @@ from .modrinth import Modrinth
 
 REGISTRY: dict[str, Source] = {s.id: s for s in (Modrinth(),)}
 
-__all__ = ["Asset", "AssetKind", "Modrinth", "REGISTRY", "Source"]
+__all__ = ["REGISTRY", "Asset", "AssetKind", "Modrinth", "Source"]

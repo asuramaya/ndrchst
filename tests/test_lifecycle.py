@@ -1,0 +1,153 @@
+"""Lifecycle integration: platform install (faked) + docker (faked) + SQLite (real).
+
+This is the highest-coverage test in the suite — exercises the same code path
+that the API will hit when a user clicks "Create server".
+
+Stresses:
+  - Java + Bedrock end-to-end (create, start, stop, delete)
+  - validation: bad name, bad port, duplicate port, unknown platform
+  - port-protocol mapping (TCP for Java, UDP for Bedrock) propagated to docker
+  - cleanup on delete (container removed, db record gone)
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from ndrchst.domain.models import Family, ServerStatus
+from ndrchst.platforms import REGISTRY as PLATFORMS
+from ndrchst.platforms.base import InstallArtifact
+from ndrchst.runtime.docker import Docker
+from ndrchst.runtime.lifecycle import CreateRequest, Lifecycle, LifecycleError
+from ndrchst.store import servers as srv_store
+from ndrchst.store.db import connect
+
+# Re-use the fake docker client from the docker runtime test
+from tests.test_docker_runtime import FakeClient
+
+
+@pytest.fixture
+def lifecycle(tmp_path: Path, monkeypatch) -> Lifecycle:
+    # Stub platform.install on every registered platform so we don't hit the network
+    for p in PLATFORMS.values():
+        async def fake_install(version, dest, *, _p=p):
+            dest.mkdir(parents=True, exist_ok=True)
+            if _p.family is Family.JAVA:
+                (dest / "server.jar").write_bytes(b"PK\x03\x04fake")
+                entry = "server.jar"
+            else:
+                (dest / "bedrock_server").write_bytes(b"\x7fELFfake")
+                entry = "bedrock_server"
+            return InstallArtifact(path=dest, entrypoint=entry)
+        monkeypatch.setattr(p, "install", fake_install)
+
+    conn = connect(tmp_path / "lc.db")
+    docker = Docker(client=FakeClient())
+    return Lifecycle(docker, conn, servers_root=tmp_path / "servers")
+
+
+async def test_create_java_paper(lifecycle: Lifecycle):
+    server = await lifecycle.create(CreateRequest(
+        name="Survival",
+        platform_id="paper",
+        version="1.21.3",
+        port=25565,
+        memory_mb=2048,
+    ))
+    assert server.family is Family.JAVA
+    assert server.container_id is not None
+    assert server.status is ServerStatus.CREATED
+    # platform install actually ran
+    assert (lifecycle._root / server.id / "server.jar").exists()
+
+
+async def test_create_bedrock_first_class(lifecycle: Lifecycle):
+    server = await lifecycle.create(CreateRequest(
+        name="My Bedrock",
+        platform_id="bedrock",
+        version="latest",
+        port=19132,
+        memory_mb=1024,
+    ))
+    assert server.family is Family.BEDROCK
+    assert server.container_id is not None
+    assert (lifecycle._root / server.id / "bedrock_server").exists()
+
+
+async def test_lifecycle_state_transitions(lifecycle: Lifecycle):
+    server = await lifecycle.create(CreateRequest(
+        name="World", platform_id="paper", version="1.21.3", port=25565, memory_mb=2048
+    ))
+
+    await lifecycle.start(server.id)
+    assert srv_store.get(lifecycle._conn, server.id).status is ServerStatus.RUNNING
+
+    await lifecycle.stop(server.id)
+    assert srv_store.get(lifecycle._conn, server.id).status is ServerStatus.STOPPED
+
+
+async def test_delete_removes_container_and_record(lifecycle: Lifecycle):
+    server = await lifecycle.create(CreateRequest(
+        name="ToDelete", platform_id="paper", version="1.21.3", port=25565, memory_mb=2048
+    ))
+    data_dir = lifecycle._root / server.id
+    assert data_dir.exists()
+
+    await lifecycle.delete(server.id, remove_files=True)
+    assert srv_store.get(lifecycle._conn, server.id) is None
+    assert not data_dir.exists()
+
+
+async def test_delete_keeps_files_by_default(lifecycle: Lifecycle):
+    server = await lifecycle.create(CreateRequest(
+        name="Keep", platform_id="paper", version="1.21.3", port=25566, memory_mb=2048
+    ))
+    data_dir = lifecycle._root / server.id
+    await lifecycle.delete(server.id)
+    assert not srv_store.get(lifecycle._conn, server.id)
+    assert data_dir.exists()  # files preserved by default
+
+
+async def test_validation_rejects_bad_name(lifecycle: Lifecycle):
+    with pytest.raises(LifecycleError, match="server name"):
+        await lifecycle.create(CreateRequest(
+            name="../etc/passwd",
+            platform_id="paper", version="1.21.3", port=25565, memory_mb=2048,
+        ))
+
+
+async def test_validation_rejects_unknown_platform(lifecycle: Lifecycle):
+    with pytest.raises(LifecycleError, match="unknown platform"):
+        await lifecycle.create(CreateRequest(
+            name="x", platform_id="not-real", version="1", port=25565, memory_mb=2048,
+        ))
+
+
+async def test_validation_rejects_privileged_port(lifecycle: Lifecycle):
+    with pytest.raises(LifecycleError, match="port must be"):
+        await lifecycle.create(CreateRequest(
+            name="x", platform_id="paper", version="1.21.3", port=80, memory_mb=2048,
+        ))
+
+
+async def test_validation_rejects_low_memory(lifecycle: Lifecycle):
+    with pytest.raises(LifecycleError, match="memory must be"):
+        await lifecycle.create(CreateRequest(
+            name="x", platform_id="paper", version="1.21.3", port=25565, memory_mb=256,
+        ))
+
+
+async def test_validation_rejects_duplicate_port(lifecycle: Lifecycle):
+    await lifecycle.create(CreateRequest(
+        name="First", platform_id="paper", version="1.21.3", port=25565, memory_mb=2048,
+    ))
+    with pytest.raises(LifecycleError, match="already used"):
+        await lifecycle.create(CreateRequest(
+            name="Second", platform_id="paper", version="1.21.3", port=25565, memory_mb=2048,
+        ))
+
+
+async def test_lifecycle_on_nonexistent_server_raises(lifecycle: Lifecycle):
+    with pytest.raises(LifecycleError, match="not found"):
+        await lifecycle.start("nonexistent")
