@@ -15,8 +15,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import docker
+import httpx
 from fastapi import FastAPI, HTTPException, Request, status
 
+from ..mods.modrinth import Modrinth
 from ..runtime.docker import Docker
 from ..runtime.lifecycle import SERVERS_ROOT_DEFAULT, Lifecycle
 from ..store.db import DEFAULT_DB_PATH, connect
@@ -30,6 +32,8 @@ class AppState:
     conn: sqlite3.Connection
     lifecycle: Lifecycle | None  # None when Docker is unreachable
     docker_error: str | None     # populated if lifecycle is None
+    http_client: httpx.AsyncClient | None = None  # shared client for installer + Modrinth
+    modrinth: Modrinth | None = None              # cached Modrinth source
 
 
 def make_lifespan(
@@ -51,10 +55,18 @@ def make_lifespan(
             docker_error = f"{type(e).__name__}: {e}"
             log.warning("Docker unreachable (%s); running in read-only mode", docker_error)
 
-        app.state.ndrchst = AppState(conn=conn, lifecycle=lifecycle, docker_error=docker_error)
+        http_client = httpx.AsyncClient(
+            timeout=120.0,
+            headers={"User-Agent": "ndrchst/0.0.1 (+github.com/asuramaya/ndrchst-alpha)"},
+        )
+        app.state.ndrchst = AppState(
+            conn=conn, lifecycle=lifecycle, docker_error=docker_error,
+            http_client=http_client, modrinth=Modrinth(client=http_client),
+        )
         try:
             yield
         finally:
+            await http_client.aclose()
             conn.close()
     return lifespan
 

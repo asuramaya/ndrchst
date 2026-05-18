@@ -233,6 +233,111 @@ code, pre, .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .overlay .panel header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
 .overlay .panel header h2 { margin: 0; font-size: 1.05rem; }
 
+/* ─── Tabs ──────────────────────────────────────────────────────────────── */
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1rem;
+  overflow-x: auto;
+}
+.tab {
+  padding: 0.55rem 0.9rem;
+  color: var(--text-secondary);
+  border-bottom: 2px solid transparent;
+  font-size: 0.92rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tab:hover { color: var(--text-primary); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ─── Console ───────────────────────────────────────────────────────────── */
+
+.console {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  height: 70vh;
+}
+.console .output {
+  flex: 1;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-secondary);
+}
+.console .input-row { display: flex; gap: 0.4rem; }
+.console .input-row input {
+  flex: 1;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  padding: 0.5rem 0.7rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.88rem;
+}
+
+/* ─── File browser ─────────────────────────────────────────────────────── */
+
+.file-list { display: grid; gap: 0.15rem; }
+.file-row {
+  display: grid;
+  grid-template-columns: 1.5rem 1fr auto auto;
+  gap: 0.6rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  align-items: center;
+}
+.file-row:hover { background: var(--bg-tertiary); }
+.file-row .icon { color: var(--text-muted); }
+.file-row .size { color: var(--text-muted); font-size: 0.8rem; font-family: 'JetBrains Mono', monospace; }
+.file-row a { color: var(--text-primary); }
+.file-row a:hover { color: var(--accent); }
+.crumbs { color: var(--text-muted); margin-bottom: 0.75rem; font-size: 0.9rem; }
+.crumbs a { color: var(--text-secondary); }
+.crumbs a:hover { color: var(--accent); }
+
+/* ─── Marketplace ───────────────────────────────────────────────────────── */
+
+.market-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.75rem;
+}
+.market-card { padding: 0.85rem; }
+.market-card .name { font-weight: 600; }
+.market-card .desc { color: var(--text-secondary); font-size: 0.85rem; margin: 0.3rem 0 0.5rem; }
+
+/* ─── Properties editor ────────────────────────────────────────────────── */
+
+.props-form { display: grid; gap: 0.5rem; max-width: 40rem; }
+.props-form .prop-row {
+  display: grid;
+  grid-template-columns: 14rem 1fr;
+  gap: 0.5rem;
+  align-items: center;
+}
+.props-form .prop-row label {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+}
+.props-form .prop-row input { font-size: 0.88rem; padding: 0.4rem 0.6rem;
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace; }
+
 /* htmx loading affordance */
 .htmx-indicator { opacity: 0; transition: opacity var(--transition-fast); }
 .htmx-request .htmx-indicator { opacity: 1; }

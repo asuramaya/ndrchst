@@ -16,12 +16,14 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from ..api.deps import state
+from .detail_routes import router as detail_router
 from .servers_routes import router as servers_router
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 
 router = APIRouter()
 router.include_router(servers_router)
+router.include_router(detail_router)
 
 
 def is_htmx(request: Request) -> bool:

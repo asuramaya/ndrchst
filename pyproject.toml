@@ -55,6 +55,8 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "integration: hits real upstream APIs (PaperMC, Modrinth, Mojang); run with `pytest -m integration`",
+    "live: spawns a real uvicorn process; run with `pytest -m live`",
+    "docker: needs a real Docker daemon (none of our CI fakes); run with `pytest -m docker`",
 ]
-# Skip integration tests by default
-addopts = "-m 'not integration'"
+# Skip slow/external tests by default
+addopts = "-m 'not integration and not live and not docker'"

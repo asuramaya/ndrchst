@@ -16,7 +16,9 @@ from ..domain.models import Family, Server, ServerStatus
 from ..platforms import REGISTRY as PLATFORMS
 from ..store import servers as srv_store
 from .docker import BEDROCK_IMAGE, ContainerSpec, Docker, java_image_for
+from .eula import accept_eula
 from .geyser import install_cross_play
+from .ports import is_port_free
 
 SERVERS_ROOT_DEFAULT = Path.home() / ".ndrchst" / "servers"
 
@@ -78,7 +80,7 @@ def _build_spec(server: Server, data_dir: Path) -> ContainerSpec:
     )
 
 
-def _validate(req: CreateRequest, conn: sqlite3.Connection) -> None:
+def _validate(req: CreateRequest, conn: sqlite3.Connection, *, check_host_port: bool = True) -> None:
     if not _NAME_OK.match(req.name):
         raise LifecycleError(
             f"server name must be 1-64 chars of [A-Za-z0-9 _-], got: {req.name!r}"
@@ -91,6 +93,13 @@ def _validate(req: CreateRequest, conn: sqlite3.Connection) -> None:
         raise LifecycleError(f"memory must be >= 512 MB, got {req.memory_mb}")
     if srv_store.port_in_use(conn, req.port):
         raise LifecycleError(f"port {req.port} already used by another server")
+    if check_host_port:
+        family = PLATFORMS[req.platform_id].family
+        if not is_port_free(req.port, family):
+            proto = "UDP" if family.value == "bedrock" else "TCP"
+            raise LifecycleError(
+                f"port {req.port}/{proto} is already bound by another process on the host"
+            )
 
 
 class Lifecycle:
@@ -117,6 +126,12 @@ class Lifecycle:
         # Install the platform binary to the data dir. This is the only
         # step that touches upstream APIs and disk before we record state.
         await platform.install(req.version, data_dir)
+
+        # Accept EULA on the user's behalf. Using ndrchst to create a Minecraft
+        # server is treated as agreement (per project policy); we cannot present
+        # an interactive EULA prompt in a UI workflow, and refusing to write
+        # the file just means the first start fails.
+        accept_eula(platform.family, data_dir)
 
         # Cross-play is Java-only. Bedrock servers ARE bedrock.
         if req.cross_play:

@@ -19,7 +19,8 @@ def run(
 @app.command()
 def doctor() -> None:
     """Sanity-check the environment (Docker, ports, disk)."""
-    typer.echo("doctor: not yet implemented")
+    from . import doctor as doctor_mod
+    raise typer.Exit(doctor_mod.run())
 
 
 if __name__ == "__main__":
