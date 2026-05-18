@@ -1,0 +1,35 @@
+<div id="files-shell">
+  <div class="crumbs">
+    <a href="#" hx-get="/servers/{{ server.id }}/files?path=" hx-target="#files-shell" hx-swap="outerHTML">/</a>
+    {% for part, accum in crumbs %}
+      / <a href="#" hx-get="/servers/{{ server.id }}/files?path={{ accum }}" hx-target="#files-shell" hx-swap="outerHTML">{{ part }}</a>
+    {% endfor %}
+  </div>
+  <div class="file-list">
+    {% if path %}
+      <div class="file-row">
+        <span class="icon">↑</span>
+        <a href="#" hx-get="/servers/{{ server.id }}/files?path={{ parent }}" hx-target="#files-shell" hx-swap="outerHTML">..</a>
+        <span class="size"></span>
+        <span></span>
+      </div>
+    {% endif %}
+    {% for entry in entries %}
+      <div class="file-row">
+        <span class="icon">{{ '📁' if entry.is_dir else '📄' }}</span>
+        {% if entry.is_dir %}
+          <a href="#" hx-get="/servers/{{ server.id }}/files?path={{ entry.path }}" hx-target="#files-shell" hx-swap="outerHTML">{{ entry.name }}</a>
+        {% elif entry.editable %}
+          <a href="#" hx-get="/servers/{{ server.id }}/files/edit?path={{ entry.path }}" hx-target="#files-shell" hx-swap="outerHTML">{{ entry.name }}</a>
+        {% else %}
+          <span>{{ entry.name }}</span>
+        {% endif %}
+        <span class="size">{{ entry.size_human }}</span>
+        <span></span>
+      </div>
+    {% endfor %}
+    {% if not entries and not path %}
+      <div class="empty" style="margin-top: 1rem;">Server data directory is empty.</div>
+    {% endif %}
+  </div>
+</div>

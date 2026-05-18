@@ -1,0 +1,17 @@
+<div class="card" style="margin-bottom: 1rem;">
+  <strong>Search Modrinth</strong>
+  <form style="display: flex; gap: 0.4rem; margin-top: 0.5rem;"
+        hx-get="/servers/{{ server.id }}/mods/search"
+        hx-target="#market-results" hx-swap="innerHTML">
+    <input type="text" name="q" placeholder="search mods, plugins, packs…"
+           style="flex: 1; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.4rem 0.6rem; color: var(--text-primary);" required>
+    <button type="submit" class="btn">Search</button>
+  </form>
+</div>
+
+<div id="market-results"></div>
+
+<h3 style="margin-top: 1.5rem;">Installed</h3>
+<div id="installed-list">
+  {% include "servers/tabs/_mods_installed.html" %}
+</div>

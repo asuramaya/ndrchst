@@ -1,0 +1,15 @@
+<div id="players-list">
+  {% if not players %}
+    <div style="color: var(--text-muted); font-size: 0.9rem;">Nobody online.</div>
+  {% else %}
+    {% for p in players %}
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.3rem 0;">
+        <span class="mono">{{ p }}</span>
+        <button class="btn btn-danger"
+                hx-post="/servers/{{ server.id }}/players/kick"
+                hx-vals='{"player": "{{ p }}"}'
+                hx-target="#players-list" hx-swap="outerHTML">Kick</button>
+      </div>
+    {% endfor %}
+  {% endif %}
+</div>

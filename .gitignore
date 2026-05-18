@@ -11,14 +11,15 @@ venv/
 build/
 dist/
 
-# Local state
+# Local state. NOTE: runtime data lives at ~/.ndrchst/* by default
+# (absolute paths, outside the repo). Do NOT add a bare `servers/` here
+# — it would silently swallow src/ndrchst/web/templates/servers/.
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
-data/
-servers/
-logs/
+/data/
+/logs/
 
 # Editor / OS
 .DS_Store

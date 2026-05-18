@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Servers — ndrchst{% endblock %}
+{% block header %}Servers{% endblock %}
+{% block header_actions %}
+  <button class="btn btn-primary"
+          hx-get="/servers/new"
+          hx-target="#overlay-slot"
+          hx-swap="innerHTML"
+          {% if not docker_available %}disabled title="Docker unavailable"{% endif %}>
+    + New server
+  </button>
+{% endblock %}
+{% block content %}
+  <div id="server-list"
+       hx-trigger="ndrchst:servers-changed from:body"
+       hx-get="/servers/list"
+       hx-swap="innerHTML">
+    {% include "servers/_grid.html" %}
+  </div>
+{% endblock %}

@@ -1,0 +1,12 @@
+{% if servers %}
+  <div class="server-grid">
+    {% for server in servers %}
+      {% include "servers/_card.html" %}
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="empty">
+    <p>No servers yet.</p>
+    <p class="mono">Click <strong>+ New server</strong> to create one.</p>
+  </div>
+{% endif %}

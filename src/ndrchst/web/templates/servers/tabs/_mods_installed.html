@@ -1,0 +1,17 @@
+{% if not installed %}
+  <div style="color: var(--text-muted); font-size: 0.9rem;">No mods installed yet.</div>
+{% else %}
+  <div class="file-list">
+    {% for asset in installed %}
+      <div class="file-row">
+        <span class="icon">📦</span>
+        <span>{{ asset.asset_id }}</span>
+        <span class="size">{{ asset.kind }} · v{{ asset.version }}</span>
+        <button class="btn btn-danger"
+                hx-delete="/servers/{{ server.id }}/mods/{{ asset.source_id }}/{{ asset.asset_id }}"
+                hx-target="#installed-list" hx-swap="innerHTML"
+                hx-confirm="Uninstall {{ asset.asset_id }}?">Remove</button>
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}

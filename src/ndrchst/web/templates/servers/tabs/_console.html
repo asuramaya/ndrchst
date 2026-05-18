@@ -1,0 +1,16 @@
+{# Console tab: log tail + RCON input over WebSocket. #}
+<div class="console" id="console-shell"
+     hx-ext="ws"
+     ws-connect="/servers/{{ server.id }}/console-ws"
+     hx-on:wsAfterMessage="this.querySelector('.output').scrollTop = this.querySelector('.output').scrollHeight">
+  <div class="output" id="console-output"></div>
+  <form class="input-row" ws-send>
+    <input type="text" name="command" autocomplete="off"
+           placeholder="{{ 'rcon command (e.g. /list, /say hi)' if server.family.value == 'java' else 'BDS stdin command' }}">
+    <button type="submit" class="btn btn-primary">Send</button>
+  </form>
+</div>
+
+{# htmx-ws extension. The output container appends each message; the form
+   sends each submission as a WS message. #}
+<script src="https://unpkg.com/htmx-ext-ws@2.0.1/ws.js" defer></script>

@@ -1,0 +1,25 @@
+<div id="backups-list">
+  {% if not backups %}
+    <div class="empty">No backups yet.</div>
+  {% else %}
+    <div class="file-list">
+      {% for b in backups %}
+        <div class="file-row">
+          <span class="icon">🗄</span>
+          <span class="mono">{{ b.name }}</span>
+          <span class="size">{{ b.size_human }}</span>
+          <div style="display: flex; gap: 0.4rem;">
+            <button class="btn"
+                    hx-post="/servers/{{ server.id }}/backups/{{ b.name }}/restore"
+                    hx-confirm="Restore {{ b.name }}? Existing data will be replaced."
+                    hx-target="#backups-list" hx-swap="outerHTML">Restore</button>
+            <button class="btn btn-danger"
+                    hx-delete="/servers/{{ server.id }}/backups/{{ b.name }}"
+                    hx-confirm="Delete {{ b.name }}?"
+                    hx-target="#backups-list" hx-swap="outerHTML">Delete</button>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>

@@ -1,0 +1,42 @@
+{% if server.family.value == 'bedrock' %}
+  <div class="empty">
+    Player management for Bedrock servers uses the Console tab — RCON isn't supported by BDS.
+  </div>
+{% else %}
+  <div class="card" style="margin-bottom: 1rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <strong>Online ({{ players|length }})</strong>
+      <button class="btn btn-ghost"
+              hx-get="/servers/{{ server.id }}/players/refresh"
+              hx-target="#players-list"
+              hx-swap="outerHTML">Refresh</button>
+    </div>
+    <div id="players-list" style="margin-top: 0.5rem;">
+      {% include "servers/tabs/_players_list.html" %}
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom: 1rem;">
+    <strong>Whitelist</strong>
+    <form style="display: flex; gap: 0.4rem; margin-top: 0.5rem;"
+          hx-post="/servers/{{ server.id }}/players/whitelist"
+          hx-target="#whitelist-result" hx-swap="innerHTML">
+      <input type="text" name="player" placeholder="Player name" required
+             style="flex: 1; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.4rem 0.6rem; color: var(--text-primary);">
+      <button type="submit" class="btn">Add</button>
+    </form>
+    <div id="whitelist-result" style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--text-muted);"></div>
+  </div>
+
+  <div class="card">
+    <strong>Op</strong>
+    <form style="display: flex; gap: 0.4rem; margin-top: 0.5rem;"
+          hx-post="/servers/{{ server.id }}/players/op"
+          hx-target="#op-result" hx-swap="innerHTML">
+      <input type="text" name="player" placeholder="Player name" required
+             style="flex: 1; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.4rem 0.6rem; color: var(--text-primary);">
+      <button type="submit" class="btn">Grant op</button>
+    </form>
+    <div id="op-result" style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--text-muted);"></div>
+  </div>
+{% endif %}

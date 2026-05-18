@@ -1,0 +1,10 @@
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+  <strong>Backups</strong>
+  <button class="btn btn-primary"
+          hx-post="/servers/{{ server.id }}/backups"
+          hx-target="#backups-list" hx-swap="outerHTML">Create backup</button>
+</div>
+
+<div id="backups-list">
+  {% include "servers/tabs/_backups_list.html" %}
+</div>

@@ -1,0 +1,61 @@
+<div class="overlay" hx-on:click="if (event.target === this) this.remove()">
+  <div class="panel">
+    <header>
+      <h2>New server</h2>
+      <button class="btn btn-ghost" hx-on:click="document.querySelector('.overlay').remove()">×</button>
+    </header>
+
+    <form class="form"
+          hx-post="/servers"
+          hx-target="this"
+          hx-swap="outerHTML">
+      <div class="field">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required minlength="1" maxlength="64"
+               placeholder="Survival" autocomplete="off">
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="platform_id">Platform</label>
+          <select id="platform_id" name="platform_id" required>
+            {% for p in platforms %}
+              <option value="{{ p.id }}">{{ p.display_name }} ({{ p.family.value }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="version">Version</label>
+          <input type="text" id="version" name="version" required
+                 value="1.21.3" placeholder="latest">
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="port">Port</label>
+          <input type="number" id="port" name="port" required min="1024" max="65535" value="25565">
+        </div>
+        <div class="field">
+          <label for="memory_mb">Memory (MB)</label>
+          <input type="number" id="memory_mb" name="memory_mb" required min="512" max="65536" value="2048">
+        </div>
+      </div>
+
+      <div class="field">
+        <label>
+          <input type="checkbox" name="cross_play" value="true">
+          Enable Bedrock cross-play (Geyser+Floodgate, Java only)
+        </label>
+      </div>
+
+      {% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+      <div class="actions">
+        <button type="submit" class="btn btn-primary">Create</button>
+        <button type="button" class="btn btn-ghost"
+                hx-on:click="document.querySelector('.overlay').remove()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>

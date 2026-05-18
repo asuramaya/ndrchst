@@ -1,0 +1,49 @@
+{% if server.family.value == 'bedrock' %}
+  <div class="empty">
+    Bedrock world editing uses different storage (LevelDB) and isn't supported in v0.
+    Use the Console tab to run <code>setblock</code>, <code>gamerule</code>, etc.
+  </div>
+{% elif not world %}
+  <div class="empty">
+    No world data yet. Start the server once to generate <code>level.dat</code>.
+  </div>
+{% else %}
+  <div class="card" style="margin-bottom: 1rem;">
+    <div style="display: grid; grid-template-columns: 10rem 1fr; gap: 0.5rem 1rem; font-size: 0.92rem;">
+      <span style="color: var(--text-muted);">Name</span><span>{{ world.name }}</span>
+      <span style="color: var(--text-muted);">Seed</span><span class="mono">{{ world.seed }}</span>
+      <span style="color: var(--text-muted);">Spawn</span>
+      <span class="mono">x={{ world.spawn[0] }} y={{ world.spawn[1] }} z={{ world.spawn[2] }}</span>
+      <span style="color: var(--text-muted);">Time</span>
+      <span class="mono">{{ world.day_time }} / 24000 (day {{ world.time // 24000 }})</span>
+      <span style="color: var(--text-muted);">Weather</span>
+      <span>
+        {% if world.thundering %}⚡ thunderstorm
+        {% elif world.raining %}🌧 raining
+        {% else %}☀ clear{% endif %}
+      </span>
+      <span style="color: var(--text-muted);">NBT version</span><span class="mono">{{ world.version }}</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <strong>Game rules</strong>
+    <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0.3rem 0 0.75rem;">
+      Edits apply on next server start. Boolean rules accept <code>true</code>/<code>false</code>; integer rules accept any integer.
+    </p>
+    <form class="props-form"
+          hx-post="/servers/{{ server.id }}/worlds/gamerules"
+          hx-target="#world-result" hx-swap="innerHTML">
+      {% for key, value in world.game_rules.items() %}
+        <div class="prop-row">
+          <label for="gr-{{ key }}">{{ key }}</label>
+          <input id="gr-{{ key }}" name="{{ key }}" value="{{ value }}">
+        </div>
+      {% endfor %}
+      <div style="margin-top: 0.75rem; display: flex; gap: 0.5rem; align-items: center;">
+        <button type="submit" class="btn btn-primary">Save game rules</button>
+        <div id="world-result" style="color: var(--text-muted); font-size: 0.85rem;"></div>
+      </div>
+    </form>
+  </div>
+{% endif %}

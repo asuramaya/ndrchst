@@ -1,0 +1,16 @@
+{% if not results %}
+  <div style="color: var(--text-muted); font-size: 0.9rem;">No matches.</div>
+{% else %}
+  <div class="market-grid">
+    {% for r in results %}
+      <div class="card market-card">
+        <div class="name">{{ r.name }}</div>
+        <div class="desc">{{ r.summary }}</div>
+        <button class="btn btn-primary"
+                hx-post="/servers/{{ server.id }}/mods/install"
+                hx-vals='{"source_id": "{{ r.source_id }}", "asset_id": "{{ r.id }}"}'
+                hx-target="#installed-list" hx-swap="innerHTML">Install</button>
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}

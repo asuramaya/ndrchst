@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ server.name }} — ndrchst{% endblock %}
+{% block header %}
+  <a href="/" hx-get="/" hx-target="body" hx-push-url="true" class="btn btn-ghost">&larr; Back</a>
+  {{ server.name }}
+  <span class="status {{ server.status.value }}" style="margin-left: 0.5rem;">{{ server.status.value }}</span>
+{% endblock %}
+{% block header_actions %}
+  <div style="display: flex; gap: 0.4rem;">
+    {% if server.status.value == 'running' %}
+      <button class="btn"
+              hx-post="/servers/{{ server.id }}/stop"
+              hx-target="#server-{{ server.id }}-shell" hx-swap="none"
+              hx-on::after-request="location.reload()">Stop</button>
+    {% else %}
+      <button class="btn btn-primary"
+              hx-post="/servers/{{ server.id }}/start"
+              hx-target="#server-{{ server.id }}-shell" hx-swap="none"
+              hx-on::after-request="location.reload()">Start</button>
+    {% endif %}
+  </div>
+{% endblock %}
+{% block content %}
+  <div id="server-{{ server.id }}-shell"></div>
+
+  <nav class="tabs" id="detail-tabs">
+    {% set tabs = [
+      ('console', 'Console'),
+      ('properties', 'Properties'),
+      ('players', 'Players'),
+      ('worlds', 'World'),
+      ('files', 'Files'),
+      ('mods', 'Marketplace'),
+      ('backups', 'Backups'),
+    ] %}
+    {% for slug, label in tabs %}
+      <a class="tab {% if tab == slug %}active{% endif %}"
+         href="/servers/{{ server.id }}/{{ slug }}"
+         hx-get="/servers/{{ server.id }}/{{ slug }}"
+         hx-target="#tab-content"
+         hx-push-url="true">
+        {{ label }}
+      </a>
+    {% endfor %}
+  </nav>
+
+  <div id="tab-content">
+    {% include "servers/tabs/_" + tab + ".html" %}
+  </div>
+{% endblock %}
