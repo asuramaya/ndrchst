@@ -18,6 +18,7 @@ import docker
 import httpx
 from fastapi import FastAPI, HTTPException, Request, status
 
+from ..logging_setup import configure as configure_logging
 from ..mods.modrinth import Modrinth
 from ..runtime.docker import Docker
 from ..runtime.lifecycle import SERVERS_ROOT_DEFAULT, Lifecycle
@@ -43,6 +44,7 @@ def make_lifespan(
 ):
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        configure_logging()
         conn = connect(db_path)
         lifecycle: Lifecycle | None = None
         docker_error: str | None = None

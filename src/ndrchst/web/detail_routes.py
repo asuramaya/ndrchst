@@ -345,8 +345,14 @@ async def mods_install(
         loader in ("paper", "spigot", "bukkit", "purpur") for loader in versions[0].loaders
     ):
         kind = AssetKind.PLUGIN
+    # Auto-snapshot before mutating the data dir. Mod installs can replace
+    # existing files; failed installs would otherwise leave no recovery path.
+    data_dir = _data_dir(request, server_id)
+    backup_mod.create_safety(
+        server_id=server_id, data_dir=data_dir, reason="pre_install",
+    )
     result = await install_asset(
-        data_dir=_data_dir(request, server_id),
+        data_dir=data_dir,
         family=server.family, kind=kind, version=versions[0],
         client=state(request).http_client,
     )
@@ -402,8 +408,14 @@ async def backups_restore(
     # Stop the container first if running
     if server.status.value == "running":
         await lifecycle.stop(server_id)
+    # Pre-restore snapshot: restore wipes data_dir, so if the chosen backup
+    # turns out broken or wrong, this is the only path back to current state.
+    data_dir = _data_dir(request, server_id)
+    backup_mod.create_safety(
+        server_id=server_id, data_dir=data_dir, reason="pre_restore",
+    )
     backup_mod.restore(
-        server_id=server_id, name=name, data_dir=_data_dir(request, server_id),
+        server_id=server_id, name=name, data_dir=data_dir,
     )
     return TEMPLATES.TemplateResponse(
         request, "servers/tabs/_backups_list.html",

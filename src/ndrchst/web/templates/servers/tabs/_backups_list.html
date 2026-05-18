@@ -5,8 +5,11 @@
     <div class="file-list">
       {% for b in backups %}
         <div class="file-row">
-          <span class="icon">🗄</span>
+          <span class="icon">{% if b.is_safety %}🛡{% else %}🗄{% endif %}</span>
           <span class="mono">{{ b.name }}</span>
+          {% if b.is_safety %}
+            <span class="badge" title="Auto-snapshot taken before a destructive operation">auto · {{ b.safety_reason }}</span>
+          {% endif %}
           <span class="size">{{ b.size_human }}</span>
           <div style="display: flex; gap: 0.4rem;">
             <button class="btn"

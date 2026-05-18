@@ -16,7 +16,10 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
+from .domain.models import Family
 from .runtime.lifecycle import SERVERS_ROOT_DEFAULT
+from .runtime.ports import is_port_free
+from .store.db import DEFAULT_DB_PATH
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +97,51 @@ def check_port_free(port: int = 8080) -> CheckResult:
         s.close()
 
 
+def check_registered_server_ports() -> list[CheckResult]:
+    """For each server in the DB, probe its bound port with the right protocol.
+
+    Bedrock servers need UDP; Java needs TCP. Doctor used to only verify the
+    web-UI TCP port — silent UDP collisions caused first-boot failures users
+    blamed on Mojang.
+    """
+    if not DEFAULT_DB_PATH.exists():
+        return [CheckResult("MC ports for registered servers", True, "no DB yet — skipped")]
+
+    import sqlite3
+    try:
+        conn = sqlite3.connect(DEFAULT_DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT name, family, port FROM servers ORDER BY port"
+        ).fetchall()
+        conn.close()
+    except sqlite3.Error as e:
+        return [CheckResult("MC ports for registered servers", False, f"DB read failed: {e}")]
+
+    if not rows:
+        return [CheckResult("MC ports for registered servers", True, "no servers registered")]
+
+    results: list[CheckResult] = []
+    for r in rows:
+        try:
+            fam = Family(r["family"])
+        except ValueError:
+            results.append(CheckResult(
+                f"Port {r['port']} for '{r['name']}'", False,
+                f"unknown family {r['family']!r} in DB",
+            ))
+            continue
+        proto = "UDP" if fam is Family.BEDROCK else "TCP"
+        free = is_port_free(r["port"], fam)
+        # "free" is what we want when the server is stopped; doctor doesn't
+        # know whether each server should be running, so we report status
+        # informationally rather than as a hard fail.
+        ok = True
+        detail = f"{proto} {r['port']} ({fam.value}): {'free' if free else 'in use (server may be running)'}"
+        results.append(CheckResult(f"Port for '{r['name']}'", ok, detail))
+    return results
+
+
 CHECKS = [
     check_python,
     check_docker_module,
@@ -114,6 +162,12 @@ def run() -> int:
     fails = 0
     for check in CHECKS:
         r = check()
+        status = "[green]✓ pass[/]" if r.ok else "[red]✗ fail[/]"
+        table.add_row(r.name, status, r.detail)
+        if not r.ok:
+            fails += 1
+
+    for r in check_registered_server_ports():
         status = "[green]✓ pass[/]" if r.ok else "[red]✗ fail[/]"
         table.add_row(r.name, status, r.detail)
         if not r.ok:

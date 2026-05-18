@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Installed assets — ndrchst{% endblock %}
+{% block header %}Installed assets{% endblock %}
+{% block header_actions %}
+  <span class="mono" style="color: var(--text-muted)">
+    {{ total }} asset{{ '' if total == 1 else 's' }} across {{ grouped|length }} server{{ '' if grouped|length == 1 else 's' }}
+  </span>
+{% endblock %}
+{% block content %}
+  {% if not grouped %}
+    <div class="empty">No servers yet. Create one to see installed assets here.</div>
+  {% else %}
+    {% for g in grouped %}
+      <section style="margin-bottom: 1.5rem;">
+        <header style="display: flex; align-items: baseline; gap: 0.6rem; margin-bottom: 0.5rem;">
+          <a href="/servers/{{ g.server_id }}/mods" style="font-weight: 600;">{{ g.name }}</a>
+          <span class="badge">{{ g.family }}</span>
+          <span class="mono" style="color: var(--text-muted); font-size: 0.8rem;">{{ g.assets|length }} installed</span>
+        </header>
+        {% if not g.assets %}
+          <div class="empty" style="padding: 0.6rem 0;">No mods, plugins, or packs installed.</div>
+        {% else %}
+          <div class="file-list">
+            {% for a in g.assets %}
+              <div class="file-row">
+                <span class="icon">📦</span>
+                <span class="mono">{{ a.asset_id }}</span>
+                <span class="badge">{{ a.kind }}</span>
+                {% if a.version %}<span class="mono" style="color: var(--text-muted); font-size: 0.8rem;">{{ a.version }}</span>{% endif %}
+                <span class="size">{{ a.source_id }} · {{ a.installed_at }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </section>
+    {% endfor %}
+  {% endif %}
+{% endblock %}

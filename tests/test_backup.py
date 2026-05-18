@@ -65,3 +65,92 @@ def test_restore_missing_raises(tmp_path: Path):
 def test_size_human():
     bk = b.Backup(server_id="x", name="t.tar.gz", path=Path("/"), size=1536)
     assert bk.size_human == "1.5K"
+
+
+def test_create_safety_writes_prefixed_snapshot(tmp_path: Path):
+    data = tmp_path / "data"
+    backups = tmp_path / "backups"
+    data.mkdir()
+    _seed(data)
+
+    snap = b.create_safety(
+        server_id="abc", data_dir=data, reason="pre_install", root=backups,
+    )
+    assert snap is not None
+    assert snap.name.startswith(b.SAFETY_PREFIX)
+    assert "pre_install" in snap.name
+    assert snap.is_safety
+    assert snap.safety_reason == "pre_install"
+
+
+def test_create_safety_returns_none_for_missing_dir(tmp_path: Path):
+    backups = tmp_path / "backups"
+    snap = b.create_safety(
+        server_id="abc", data_dir=tmp_path / "does-not-exist",
+        reason="pre_install", root=backups,
+    )
+    assert snap is None
+
+
+def test_safety_snapshots_appear_in_list_alongside_user_backups(tmp_path: Path):
+    data = tmp_path / "data"
+    backups = tmp_path / "backups"
+    data.mkdir()
+    _seed(data)
+
+    user_b = b.create(server_id="abc", data_dir=data, root=backups)
+    safety = b.create_safety(
+        server_id="abc", data_dir=data, reason="pre_install", root=backups,
+    )
+
+    names = {b.name for b in b.list_for("abc", root=backups)}
+    assert user_b.name in names
+    assert safety.name in names
+
+
+def test_safety_rotation_trims_oldest_keeping_user_backups(tmp_path: Path, monkeypatch):
+    """Rotation must never delete user-created backups, even old ones."""
+    data = tmp_path / "data"
+    backups = tmp_path / "backups"
+    data.mkdir()
+    _seed(data)
+
+    # One real user backup first — should survive any number of safety snapshots
+    user = b.create(server_id="abc", data_dir=data, root=backups)
+
+    # Patch the timestamp granularity so successive snapshots get unique names
+    import datetime as dt
+    counter = {"n": 0}
+    real_now = dt.datetime.now
+    class FakeDT(dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            counter["n"] += 1
+            return real_now(tz) + dt.timedelta(seconds=counter["n"])
+    monkeypatch.setattr(b, "datetime", FakeDT)
+
+    for _ in range(8):
+        b.create_safety(
+            server_id="abc", data_dir=data, reason="pre_install",
+            root=backups, keep=3,
+        )
+
+    listed = b.list_for("abc", root=backups)
+    safeties = [x for x in listed if x.is_safety]
+    user_backups = [x for x in listed if not x.is_safety]
+    assert len(safeties) == 3, f"expected 3 safeties after trim, got {[s.name for s in safeties]}"
+    assert any(x.name == user.name for x in user_backups), "user backup must survive rotation"
+
+
+def test_safety_reason_special_chars_sanitized(tmp_path: Path):
+    data = tmp_path / "data"
+    backups = tmp_path / "backups"
+    data.mkdir()
+    _seed(data)
+    snap = b.create_safety(
+        server_id="abc", data_dir=data, reason="pre install/restore",
+        root=backups,
+    )
+    assert snap is not None
+    # No path separator should leak into the filename
+    assert "/" not in snap.name

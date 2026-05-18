@@ -21,6 +21,10 @@
              hx-get="/" hx-target="body" hx-push-url="true">
             <span class="icon">🖥️</span><span>Servers</span>
           </a>
+          <a href="/assets" class="{% if active == 'assets' %}active{% endif %}"
+             hx-get="/assets" hx-target="body" hx-push-url="true">
+            <span class="icon">📦</span><span>Assets</span>
+          </a>
           <a href="/system" class="{% if active == 'system' %}active{% endif %}"
              hx-get="/system" hx-target="body" hx-push-url="true">
             <span class="icon">⚙️</span><span>System</span>

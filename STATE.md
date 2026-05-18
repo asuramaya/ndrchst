@@ -1,6 +1,6 @@
 # ndrchst-alpha — state of the project
 
-Authoritative current-state doc, written 2026-05-18 after v0 close + worlds work.
+Authoritative current-state doc, written 2026-05-18 after v0 close + worlds work, updated same day for the v0.1 sweep (doctor UDP, auto-snapshot, global assets view, JSON logging).
 
 ## What this is
 
@@ -10,7 +10,7 @@ Predecessors:
 - `~/code/ndrchst/ndrchst/` — Python v2.3.0 (working but bloated, ~38k LOC)
 - `~/code/ndrchst/ndrchst_3/` — abandoned Rust SaaS pivot (do not resurrect)
 
-ndrchst-alpha v0 = ~6.7k LOC, 138 tests, 8 commits.
+ndrchst-alpha v0.1 = ~7.0k LOC, 162 tests across 4 markers, 10 commits.
 
 ## Layout
 
@@ -25,7 +25,8 @@ ndrchst-alpha/
 ├── src/ndrchst/
 │   ├── __init__.py             __version__
 │   ├── cli.py                  typer: `ndrchst run`, `ndrchst doctor`
-│   ├── doctor.py               env preflight: Python, docker-py, daemon, group, disk, port
+│   ├── logging_setup.py        idempotent JSON logger + optional rotating file (env-driven)
+│   ├── doctor.py               env preflight: Python, docker-py, daemon, group, disk, port + per-server UDP/TCP
 │   ├── platforms/              install + version resolution per platform
 │   │   ├── base.py             Platform protocol + Family enum + InstallArtifact dataclass
 │   │   ├── paper.py            PaperMC v2 API + SHA256 verify
@@ -45,7 +46,7 @@ ndrchst-alpha/
 │   │   ├── eula.py             auto-write EULA + bookkeeping (per user policy)
 │   │   ├── geyser.py           Geyser+Floodgate auto-install for cross-play
 │   │   ├── installer.py        Modrinth mod/plugin/pack install + DB record
-│   │   ├── backup.py           tar.gz create/list/restore/delete
+│   │   ├── backup.py           tar.gz create/list/restore/delete + auto-snapshot before destructive ops
 │   │   └── ports.py            host-level bind probe (TCP/UDP per family)
 │   ├── domain/                 platform-agnostic features
 │   │   ├── models.py           Server dataclass, ServerStatus enum
@@ -64,7 +65,7 @@ ndrchst-alpha/
 │   │   ├── platforms.py        /api/platforms JSON
 │   │   └── mods.py             /api/mods/sources JSON
 │   └── web/                    htmx-driven UI
-│       ├── routes.py           HTML routes + placeholders for system/settings
+│       ├── routes.py           HTML routes + /assets (global view) + placeholders for system/settings
 │       ├── servers_routes.py   /servers list/create/start/stop/delete
 │       ├── detail_routes.py    /servers/{id}/{tab} + per-tab handlers + WS console
 │       ├── static/app.css      design tokens (from v2) + fresh components
@@ -72,6 +73,7 @@ ndrchst-alpha/
 │           ├── base.html       sidebar + header + main shell
 │           ├── index.html      (legacy; unused)
 │           ├── placeholder.html
+│           ├── assets.html     global installed-assets view
 │           └── servers/        all server UI; ⚠ MUST be tracked in git
 │               ├── list.html / detail.html
 │               ├── _card.html / _grid.html / _create_form.html
@@ -145,6 +147,10 @@ ndrchst-alpha/
 | Players RCON dispatch + /list parser | `test_players.py` | ✅ |
 | Backup tar.gz create/list/restore/delete | `test_backup.py` | ✅ |
 | WebSocket console (log backfill works; command dispatch stubbed — see v1) | manual + `test_web_detail.py` | 🟡 |
+| Auto-snapshot before destructive ops (mod install, restore) | `test_backup.py` + `test_web_detail.py` | ✅ |
+| Global installed-assets view (`/assets`) | `test_web_servers.py` | ✅ |
+| Doctor probes registered server ports with right protocol (UDP/TCP) | `test_doctor.py` | ✅ |
+| Structured JSON logging + rotating file (env-configurable) | `test_logging_setup.py` + live boot | ✅ |
 | Real container boot (Paper + Bedrock) | `-m docker` gated; no daemon on dev machine | ⏭ |
 
 ## Test markers
@@ -159,13 +165,13 @@ markers = [
 ]
 ```
 
-Counts as of 2026-05-18:
-- default: 122 unit tests
+Counts as of 2026-05-18 (post v0.1 sweep):
+- default: 148 unit tests (+26: doctor UDP, safety snapshot, global assets, JSON logging)
 - `-m live`: 9 (real uvicorn + curl every route + HTML structure assertions)
 - `-m integration`: 5 (live upstream APIs)
 - `-m docker`: 2 (skipped here, no daemon)
 
-Total: **138 tests**, all passing. Lint clean.
+Total: **162 tests**, all passing. Lint clean.
 
 ## Defaults + on-disk state
 
@@ -188,16 +194,18 @@ CLI: `ndrchst run` (uvicorn on `:8080`, localhost), `ndrchst doctor`.
 
 ## v1 deferred items
 
-Tracked in detail at `~/.claude/projects/-home-asuramaya-code-ndrchst/memory/project_v1_deferred.md`. Summary:
+Tracked in detail at `~/.claude/projects/-home-asuramaya-code-ndrchst/memory/project_v1_deferred.md`. Summary of what remains after the v0.1 sweep:
 
 1. WebSocket console RCON/stdin live-container dispatch (currently stubbed; needs real container to test)
 2. Real Docker boot smoke (write/run on a Docker-enabled host)
-3. Auto-snapshot before destructive operations
-4. Global installed-assets view
-5. UDP port probe for Bedrock in `ndrchst doctor`
-6. Async-uniform routes (currently mixed sync/async, works but fragile)
-7. Structured JSON logging + rotation
-8. Bedrock LevelDB world support (significant effort, low v0 value)
+3. Async-uniform routes (currently mixed sync/async, works but fragile)
+4. Bedrock LevelDB world support (significant effort, low v0 value)
+
+Completed in v0.1 (2026-05-18, this sweep):
+- Doctor probes registered server ports with right protocol (UDP for Bedrock, TCP for Java)
+- Auto-snapshot before mod install + backup restore (rotation keeps 5; user backups never trimmed)
+- Global `/assets` view groups installed mods/plugins/packs by server
+- Structured JSON logging via `logging_setup.configure()`, env-driven (`NDRCHST_LOG_*`), idempotent
 
 ## Out of scope (explicit cuts, not gaps)
 

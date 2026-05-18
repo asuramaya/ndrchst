@@ -226,6 +226,55 @@ def test_backups_create_list_restore_delete(detail_client, monkeypatch, tmp_path
     assert ".tar.gz" in r.text
 
 
+def test_mod_install_takes_pre_install_safety_snapshot(
+    detail_client, monkeypatch, tmp_path,
+):
+    """Installing a mod should auto-snapshot the data dir first."""
+    from ndrchst.runtime import backup as bm
+    monkeypatch.setattr(bm, "BACKUPS_ROOT_DEFAULT", tmp_path / "bk")
+
+    client, sid, _ = detail_client
+
+    # Install — handler should auto-snapshot before mutating
+    r = client.post(f"/servers/{sid}/mods/install",
+                    data={"source_id": "modrinth", "asset_id": "fabric-api"})
+    assert r.status_code == 200
+
+    safeties = [b for b in bm.list_for(sid, root=tmp_path / "bk") if b.is_safety]
+    assert len(safeties) == 1
+    assert safeties[0].safety_reason == "pre_install"
+
+    # The safety snapshot also surfaces in the backups list UI
+    r = client.get(f"/servers/{sid}/backups", headers={"HX-Request": "true"})
+    assert r.status_code == 200
+    assert "auto-pre_install" in r.text
+    assert "auto · pre_install" in r.text
+
+
+def test_backup_restore_takes_pre_restore_safety_snapshot(
+    detail_client, monkeypatch, tmp_path,
+):
+    from ndrchst.runtime import backup as bm
+    monkeypatch.setattr(bm, "BACKUPS_ROOT_DEFAULT", tmp_path / "bk")
+
+    client, sid, _ = detail_client
+
+    # Make a user backup to restore from
+    r = client.post(f"/servers/{sid}/backups")
+    assert r.status_code == 200
+    user_backups = [b for b in bm.list_for(sid, root=tmp_path / "bk") if not b.is_safety]
+    assert len(user_backups) == 1
+    name = user_backups[0].name
+
+    # Restore — handler should auto-snapshot before wiping
+    r = client.post(f"/servers/{sid}/backups/{name}/restore")
+    assert r.status_code == 200
+
+    safeties = [b for b in bm.list_for(sid, root=tmp_path / "bk") if b.is_safety]
+    assert len(safeties) == 1
+    assert safeties[0].safety_reason == "pre_restore"
+
+
 def test_players_tab_bedrock_shows_placeholder(detail_client):
     client, _, _ = detail_client
     # Create a Bedrock server to test the family branch

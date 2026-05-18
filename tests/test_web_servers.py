@@ -183,6 +183,88 @@ def test_html_create_round_trip(app_with_docker):
         assert ":19132" in r.text
 
 
+def test_assets_page_empty_when_no_servers(app_no_docker):
+    with TestClient(app_no_docker) as client:
+        r = client.get("/assets")
+        assert r.status_code == 200
+        assert "Installed assets" in r.text
+        assert "No servers yet" in r.text
+
+
+def test_assets_page_lists_zero_assets_for_servers_with_none(app_with_docker):
+    with TestClient(app_with_docker) as client:
+        st: AppState = app_with_docker.state.ndrchst
+        import tempfile
+        root = Path(tempfile.mkdtemp())
+        st.lifecycle = Lifecycle(Docker(client=FakeClient()), st.conn, servers_root=root)
+
+        client.post("/servers", data={
+            "name": "Empty", "platform_id": "paper", "version": "1.21.3",
+            "port": "25700", "memory_mb": "2048",
+        }, headers={"HX-Request": "true"})
+
+        r = client.get("/assets")
+        assert r.status_code == 200
+        assert "Empty" in r.text
+        assert "No mods, plugins, or packs installed" in r.text
+        assert "0 assets across 1 server" in r.text
+
+
+def test_assets_page_groups_by_server_and_lists_assets(app_with_docker):
+    """When installed_assets rows exist, the global view groups them by server."""
+    with TestClient(app_with_docker) as client:
+        st: AppState = app_with_docker.state.ndrchst
+        import tempfile
+        root = Path(tempfile.mkdtemp())
+        st.lifecycle = Lifecycle(Docker(client=FakeClient()), st.conn, servers_root=root)
+
+        # Two servers, two assets on the first
+        r = client.post("/servers", data={
+            "name": "Survival", "platform_id": "paper", "version": "1.21.3",
+            "port": "25571", "memory_mb": "2048",
+        }, headers={"HX-Request": "true"})
+        assert r.status_code == 200
+        r = client.post("/servers", data={
+            "name": "Bdrk", "platform_id": "bedrock", "version": "latest",
+            "port": "19132", "memory_mb": "1024",
+        }, headers={"HX-Request": "true"})
+        assert r.status_code == 200
+
+        ids = {s["name"]: s["id"] for s in client.get("/api/servers").json()}
+
+        # Insert assets straight into the DB — the installer is exercised
+        # elsewhere; here we just verify the view reads + groups correctly.
+        st.conn.execute(
+            "INSERT INTO installed_assets (server_id, source_id, asset_id, kind, version) "
+            "VALUES (?, 'modrinth', 'fabric-api', 'mod', '0.100.0')",
+            (ids["Survival"],),
+        )
+        st.conn.execute(
+            "INSERT INTO installed_assets (server_id, source_id, asset_id, kind, version) "
+            "VALUES (?, 'modrinth', 'lithium', 'mod', '0.12.0')",
+            (ids["Survival"],),
+        )
+
+        r = client.get("/assets")
+        assert r.status_code == 200
+        body = r.text
+        assert "Survival" in body
+        assert "Bdrk" in body  # listed even with no assets
+        assert "fabric-api" in body
+        assert "lithium" in body
+        assert "0.100.0" in body
+        assert "modrinth" in body
+        assert "2 assets across 2 servers" in body
+
+
+def test_assets_appears_in_sidebar(app_no_docker):
+    with TestClient(app_no_docker) as client:
+        r = client.get("/")
+        assert r.status_code == 200
+        assert 'href="/assets"' in r.text
+        assert ">Assets<" in r.text
+
+
 def test_html_create_invalid_renders_inline_error(app_with_docker):
     with TestClient(app_with_docker) as client:
         st: AppState = app_with_docker.state.ndrchst

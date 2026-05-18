@@ -3,6 +3,8 @@ from __future__ import annotations
 import typer
 import uvicorn
 
+from .logging_setup import configure as configure_logging
+
 app = typer.Typer(no_args_is_help=True, help="ndrchst — Minecraft server control plane")
 
 
@@ -13,6 +15,7 @@ def run(
     reload: bool = typer.Option(False, help="Auto-reload on code changes (dev)"),
 ) -> None:
     """Boot the ndrchst web UI + API."""
+    configure_logging()
     uvicorn.run("ndrchst.api.main:app", host=host, port=port, reload=reload)
 
 
