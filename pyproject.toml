@@ -49,3 +49,8 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "integration: hits real upstream APIs (PaperMC, Modrinth, Mojang); run with `pytest -m integration`",
+]
+# Skip integration tests by default
+addopts = "-m 'not integration'"
