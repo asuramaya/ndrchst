@@ -14,7 +14,15 @@ _SCHEMA = Path(__file__).with_name("schema.sql").read_text()
 
 def connect(path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, isolation_level=None)  # autocommit; we use BEGIN/COMMIT explicitly
+    # check_same_thread=False: FastAPI dispatches sync routes to a thread pool,
+    # so the connection created at lifespan-time must be usable from any worker
+    # thread. SQLite itself is thread-safe at the C level (SERIALIZED mode);
+    # the Python wrapper just gates it by default.
+    conn = sqlite3.connect(
+        path,
+        isolation_level=None,  # autocommit; explicit BEGIN/COMMIT where we need txns
+        check_same_thread=False,
+    )
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")

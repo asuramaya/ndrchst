@@ -4,11 +4,51 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}ndrchst{% endblock %}</title>
-    <script src="https://unpkg.com/htmx.org@2.0.3" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/static/app.css" />
+    <script src="https://unpkg.com/htmx.org@2.0.3" defer></script>
   </head>
   <body>
-    <header><a href="/">ndrchst</a></header>
-    <main>{% block content %}{% endblock %}</main>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="logo">ndrchst</div>
+        <nav class="nav" id="sidebar-nav">
+          <a href="/" class="{% if active == 'servers' %}active{% endif %}"
+             hx-get="/" hx-target="body" hx-push-url="true">
+            <span class="icon">🖥️</span><span>Servers</span>
+          </a>
+          <a href="/system" class="{% if active == 'system' %}active{% endif %}"
+             hx-get="/system" hx-target="body" hx-push-url="true">
+            <span class="icon">⚙️</span><span>System</span>
+          </a>
+          <a href="/settings" class="{% if active == 'settings' %}active{% endif %}"
+             hx-get="/settings" hx-target="body" hx-push-url="true">
+            <span class="icon">🔧</span><span>Settings</span>
+          </a>
+        </nav>
+      </aside>
+
+      <section class="main">
+        <header class="header">
+          <h1>{% block header %}{% endblock %}</h1>
+          <div>{% block header_actions %}{% endblock %}</div>
+        </header>
+        <div class="content">
+          {% if docker_error %}
+            <div class="banner">
+              Docker is not available — running in read-only mode.
+              <span class="mono">{{ docker_error }}</span>
+            </div>
+          {% endif %}
+          {% block content %}{% endblock %}
+        </div>
+      </section>
+    </div>
+
+    <div id="overlay-slot"></div>
   </body>
 </html>
