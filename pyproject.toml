@@ -17,6 +17,7 @@ dependencies = [
     "typer>=0.13",
     "docker>=7.1",
     "rich>=13.9",
+    "nbtlib>=2.0",
 ]
 
 [project.optional-dependencies]

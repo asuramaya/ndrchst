@@ -17,6 +17,7 @@ from ..api.deps import db, require_lifecycle, state
 from ..domain import files as files_mod
 from ..domain import players as players_mod
 from ..domain import properties as props_mod
+from ..domain import worlds as worlds_mod
 from ..domain.models import Family, Server
 from ..mods.base import AssetKind
 from ..mods.modrinth import Modrinth
@@ -39,7 +40,7 @@ TEMPLATES = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "tem
 
 router = APIRouter()
 
-_VALID_TABS = ("console", "properties", "players", "files", "mods", "backups")
+_VALID_TABS = ("console", "properties", "players", "worlds", "files", "mods", "backups")
 
 
 def _get_server(conn: sqlite3.Connection, server_id: str) -> Server:
@@ -114,6 +115,8 @@ async def _tab_context(
         return {"properties": props_mod.read(_data_dir(request, server.id))}
     if tab == "players":
         return {"players": []}  # filled live; initial render is empty
+    if tab == "worlds":
+        return _worlds_ctx(request, server)
     if tab == "files":
         return _files_ctx(request, server.id, "")
     if tab == "mods":
@@ -121,6 +124,37 @@ async def _tab_context(
     if tab == "backups":
         return {"backups": backup_mod.list_for(server.id)}
     return {}
+
+
+# ─── Worlds ─────────────────────────────────────────────────────────────────
+
+
+def _worlds_ctx(request: Request, server: Server) -> dict:
+    if server.family is Family.BEDROCK:
+        return {"world": None}
+    data_dir = _data_dir(request, server.id)
+    try:
+        return {"world": worlds_mod.read(data_dir)}
+    except worlds_mod.WorldError:
+        return {"world": None}
+
+
+@router.post("/servers/{server_id}/worlds/gamerules", response_class=HTMLResponse)
+async def worlds_save_gamerules(
+    request: Request,
+    server_id: str,
+    conn: sqlite3.Connection = Depends(db),
+) -> HTMLResponse:
+    server = _get_server(conn, server_id)
+    if server.family is Family.BEDROCK:
+        raise HTTPException(status_code=400, detail="Bedrock world editing not supported")
+    form = await request.form()
+    updates = {k: str(v) for k, v in form.items()}
+    try:
+        worlds_mod.write_game_rules(_data_dir(request, server_id), updates)
+    except worlds_mod.WorldError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return HTMLResponse(content="Saved. Restart the server to apply.")
 
 
 # ─── Properties ─────────────────────────────────────────────────────────────
