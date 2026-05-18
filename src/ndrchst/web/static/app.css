@@ -1,0 +1,4 @@
+:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+body { max-width: 64rem; margin: 0 auto; padding: 1.5rem; line-height: 1.5; }
+header a { font-weight: 600; text-decoration: none; }
+main { margin-top: 1.5rem; }
