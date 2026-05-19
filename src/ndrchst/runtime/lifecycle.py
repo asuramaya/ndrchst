@@ -392,6 +392,79 @@ class Lifecycle:
             raise LifecycleError(f"server {server_id} has no container")
         await self._docker.restart(server.container_id, timeout=timeout)
 
+    async def build_mods_index(self, server_id: str) -> int:
+        """Build a cached `mods-index.json` in the server's data dir. Each
+        mod gets {filename, size, sha1, url}. The URL points at CurseForge's
+        CDN (edge.forgecdn.net) when the staged client manifest resolves the
+        file, and at our own /pilot/<sid>/mods/<file> endpoint otherwise
+        (substitutions like the cc-tweaked version bump).
+
+        This is what makes the pilot scale to hundreds of users: the heavy
+        ~1.25 GB of mod jars streams from CF's global CDN, not through the
+        operator's residential uplink (which caps the tunnel at ~200 KB/s).
+        Returns the number of mods indexed."""
+        import hashlib
+        import json
+        import urllib.parse
+
+        import httpx
+
+        from . import curseforge as cf
+        from .pilot import PILOTS_ROOT_DEFAULT
+
+        self._must_get(server_id)
+        mods_dir = self._root / server_id / "mods"
+        if not mods_dir.exists():
+            raise LifecycleError(f"server {server_id} has no mods/ dir")
+
+        # Resolve CF CDN URLs from the staged client manifest, if present.
+        filename_to_url: dict[str, str] = {}
+        modpack_zip = PILOTS_ROOT_DEFAULT / server_id / "modpack.zip"
+        if modpack_zip.exists():
+            try:
+                manifest = cf.read_manifest(modpack_zip)
+                async with httpx.AsyncClient(
+                    timeout=60.0, follow_redirects=True,
+                    headers={"User-Agent": "Mozilla/5.0 (ndrchst)"},
+                ) as client:
+                    filename_to_url = await cf.resolve_manifest_urls(
+                        client, manifest.files,
+                    )
+            except cf.CurseForgeError:
+                # No manifest / not a CF pack — everything served from origin.
+                pass
+
+        edge = self._edge_url.rstrip("/")
+        entries = []
+        for p in sorted(mods_dir.iterdir()):
+            if not p.is_file() or not p.name.endswith(".jar"):
+                continue
+            h = hashlib.sha1()
+            with p.open("rb") as f:
+                for chunk in iter(lambda: f.read(64 * 1024), b""):
+                    h.update(chunk)
+            url = filename_to_url.get(p.name)
+            origin_url = (
+                f"{edge}/pilot/{server_id}/mods/{urllib.parse.quote(p.name, safe='')}"
+                if edge else None
+            )
+            entries.append({
+                "filename": p.name,
+                "size": p.stat().st_size,
+                "sha1": h.hexdigest(),
+                # CF CDN if resolvable, else our origin (small substitution set).
+                "url": url or origin_url,
+                # Always provide the origin fallback so the pilot can retry
+                # if a CDN URL 403s (third-party-downloads-disabled mods).
+                "origin_url": origin_url,
+                "from_cdn": url is not None,
+            })
+        index = {"server_id": server_id, "mods": entries}
+        out = self._root / server_id / "mods-index.json"
+        out.write_text(json.dumps(index, indent=2))
+        cdn_count = sum(1 for e in entries if e["from_cdn"])
+        return len(entries), cdn_count
+
     async def update_config(
         self,
         server_id: str,

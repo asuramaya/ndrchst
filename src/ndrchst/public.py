@@ -145,20 +145,28 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
 
     @app.get("/pilot/{server_id}/mods/index.json")
     def pilot_mods_index(server_id: str) -> JSONResponse:
-        """List every .jar in the server's data_dir/mods/ with its size +
-        SHA1. The pilot uses this to sync its local mods/ to whatever the
-        server currently has — operator's substitutions (e.g. CC: Tweaked
-        version bumps when upstream manifest rots) propagate automatically.
-        Disabled jars (*.jar.disabled) are excluded."""
+        """The mod set the pilot should mirror. Prefers the cached
+        mods-index.json built by the admin (carries per-mod CDN download
+        URLs so clients pull from CurseForge's global CDN, not the
+        operator's uplink). Falls back to a live filename+sha1 listing
+        with origin-only URLs if the index hasn't been built yet."""
         import hashlib
+        import json
+        import urllib.parse
 
         from .runtime.lifecycle import SERVERS_ROOT_DEFAULT
         server = srv_store.get(_conn(), server_id)
         if server is None:
             raise HTTPException(status_code=404, detail="server not found")
+
+        cached = SERVERS_ROOT_DEFAULT / server_id / "mods-index.json"
+        if cached.exists():
+            return JSONResponse(json.loads(cached.read_text()), headers=_NO_STORE)
+
+        # Fallback: live listing, all served from origin (no CDN URLs).
         mods_dir = SERVERS_ROOT_DEFAULT / server_id / "mods"
         if not mods_dir.exists():
-            return JSONResponse({"mods": []}, headers=_NO_STORE)
+            return JSONResponse({"server_id": server_id, "mods": []}, headers=_NO_STORE)
         out = []
         for p in sorted(mods_dir.iterdir()):
             if not p.is_file() or not p.name.endswith(".jar"):
@@ -167,10 +175,14 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             with p.open("rb") as f:
                 for chunk in iter(lambda: f.read(64 * 1024), b""):
                     h.update(chunk)
+            origin = f"/pilot/{server_id}/mods/{urllib.parse.quote(p.name, safe='')}"
             out.append({
                 "filename": p.name,
                 "size": p.stat().st_size,
                 "sha1": h.hexdigest(),
+                "url": origin,
+                "origin_url": origin,
+                "from_cdn": False,
             })
         return JSONResponse({"server_id": server_id, "mods": out}, headers=_NO_STORE)
 

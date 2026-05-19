@@ -409,6 +409,45 @@ async def resolve_to_server_pack(
     )
 
 
+async def resolve_manifest_urls(
+    client: httpx.AsyncClient,
+    entries: list[CFEntry] | tuple[CFEntry, ...],
+    *,
+    parallel: int = DEFAULT_PARALLEL,
+    on_progress=None,
+) -> dict[str, str]:
+    """Resolve a manifest's entries to {filename: cdn_url} WITHOUT
+    downloading the jars. Used to build a per-mod download index so the
+    pilot pulls bytes from CurseForge's CDN (global, fast, free
+    bandwidth) instead of through the operator's tunnel.
+
+    Entries whose file CF no longer knows are silently skipped — those
+    mods get served from the operator's server instead (substitutions).
+    """
+    sem = asyncio.Semaphore(parallel)
+    total = len(entries)
+    done = 0
+    lock = asyncio.Lock()
+    out: dict[str, str] = {}
+
+    async def one(entry: CFEntry):
+        nonlocal done
+        async with sem:
+            try:
+                filename = await fetch_filename(client, entry.project_id, entry.file_id)
+                out[filename] = _cdn_url(entry.file_id, filename)
+            except CurseForgeError:
+                pass  # dead file → no CDN URL → served from origin
+            async with lock:
+                done += 1
+                if on_progress is not None:
+                    with contextlib.suppress(Exception):
+                        on_progress(done, total)
+
+    await asyncio.gather(*(one(e) for e in entries))
+    return out
+
+
 async def download_all_mods(
     client: httpx.AsyncClient,
     entries: list[CFEntry] | tuple[CFEntry, ...],

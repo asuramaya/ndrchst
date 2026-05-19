@@ -200,6 +200,26 @@ async def restart(
     return _render_card(request, conn, server_id)
 
 
+@router.post("/servers/{server_id}/mods/build-index", response_class=HTMLResponse)
+async def build_mods_index(
+    request: Request,
+    server_id: str,
+    lifecycle: Lifecycle = Depends(require_lifecycle),
+) -> HTMLResponse:
+    """(Re)build the cached mods-index.json: resolves each mod to a
+    CurseForge CDN URL (or our origin for substitutions) so pilots pull
+    bytes from CF's global CDN instead of through the operator's uplink.
+    Run after the mod set changes (install, substitution, version bump)."""
+    try:
+        total, cdn = await lifecycle.build_mods_index(server_id)
+    except LifecycleError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return HTMLResponse(
+        f"Built mods index: {total} mods ({cdn} from CDN, "
+        f"{total - cdn} from origin)",
+    )
+
+
 @router.post("/servers/{server_id}/container/recreate", response_class=HTMLResponse)
 async def container_recreate(
     request: Request,

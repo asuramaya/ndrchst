@@ -101,7 +101,7 @@ def sync_mods_from_server(
         payload = _http_get_json(index_url)
     except SyncError as e:
         raise SyncError(f"failed to read server mod index: {e}") from e
-    server_mods = {m["filename"]: m["sha1"] for m in payload.get("mods", [])}
+    server_mods = {m["filename"]: m for m in payload.get("mods", [])}
     on_log(f"Server has {len(server_mods)} mods")
 
     local_files = {
@@ -113,9 +113,9 @@ def sync_mods_from_server(
     to_remove = [n for n in local_files if n not in server_mods]
     to_fetch = []
     kept = 0
-    for name, sha in server_mods.items():
+    for name, meta in server_mods.items():
         path = mods_dir / name
-        if path.exists() and _sha1_file(path) == sha:
+        if path.exists() and _sha1_file(path) == meta["sha1"]:
             kept += 1
         else:
             to_fetch.append(name)
@@ -129,41 +129,59 @@ def sync_mods_from_server(
         on_log(f"  removing {name} (not on server)")
         local_files[name].unlink()
 
-    # Bulk-fetch via one zip. Faster + far more reliable than N requests
-    # through the tunnel.
+    # Download each mod from its URL. The index gives a CDN URL
+    # (edge.forgecdn.net) for most mods — global, fast, doesn't touch the
+    # operator's uplink — and an origin fallback (our server) for the
+    # handful of substitutions or CDN failures. This is what scales to
+    # hundreds of users.
+    import urllib.parse as _up
+    cdn_base = "https://edge.forgecdn.net"
+    # Origin for resolving relative URLs (the live-fallback index uses
+    # paths like "/pilot/<sid>/mods/<file>").
+    parsed = _up.urlsplit(sync_base_url)
+    site_origin = f"{parsed.scheme}://{parsed.netloc}"
+
+    def _abs(u: str) -> str:
+        return u if u.startswith("http") else _up.urljoin(site_origin, u)
+
     added = replaced = 0
-    if to_fetch:
-        on_log(f"Downloading {len(to_fetch)} mods as one bundle…")
-        bundle = mods_dir.parent / "_mods-bundle.zip"
+    cdn_hits = origin_hits = 0
+    progress_every = max(len(to_fetch) // 10, 25)
+    last_logged = 0
+    for i, name in enumerate(to_fetch, start=1):
+        meta = server_mods[name]
+        target = mods_dir / name
+        existed = target.exists()
+        url = _abs(meta.get("url") or _origin_url(sync_base_url, name))
+        origin = _abs(meta.get("origin_url") or _origin_url(sync_base_url, name))
         try:
-            _http_download(f"{sync_base_url}/mods.zip", bundle)
-        except (urllib.error.URLError, OSError) as e:
-            raise SyncError(f"failed to download mods bundle: {e}") from e
-        import zipfile
-        want = set(to_fetch)
-        try:
-            with zipfile.ZipFile(bundle) as zf:
-                names = set(zf.namelist())
-                missing = want - names
-                if missing:
-                    raise SyncError(
-                        f"server mods.zip is missing {len(missing)} expected "
-                        f"jars (e.g. {sorted(missing)[:3]})"
-                    )
-                for name in to_fetch:
-                    target = mods_dir / name
-                    replaced += 1 if target.exists() else 0
-                    added += 0 if target.exists() else 1
-                    with zf.open(name) as src, target.open("wb") as out:
-                        while True:
-                            chunk = src.read(256 * 1024)
-                            if not chunk:
-                                break
-                            out.write(chunk)
-        finally:
-            bundle.unlink(missing_ok=True)
-        on_log(f"  extracted {len(to_fetch)} mods")
+            _http_download(url, target)
+            if url.startswith(cdn_base):
+                cdn_hits += 1
+            else:
+                origin_hits += 1
+        except (urllib.error.URLError, OSError):
+            # CDN URL failed (e.g. 403 third-party-disabled) — fall back
+            # to the operator's origin copy.
+            if url != origin:
+                _http_download(origin, target)
+                origin_hits += 1
+            else:
+                raise SyncError(f"failed to download {name} from {url}")
+        replaced += 1 if existed else 0
+        added += 0 if existed else 1
+        if i - last_logged >= progress_every or i == len(to_fetch):
+            on_log(
+                f"  {i}/{len(to_fetch)} fetched "
+                f"({cdn_hits} from CDN, {origin_hits} from origin)"
+            )
+            last_logged = i
 
     return SyncResult(
         added=added, replaced=replaced, removed=len(to_remove), kept=kept,
     )
+
+
+def _origin_url(sync_base_url: str, filename: str) -> str:
+    import urllib.parse
+    return f"{sync_base_url}/mods/{urllib.parse.quote(filename, safe='')}"
