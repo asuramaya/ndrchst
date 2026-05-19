@@ -1,0 +1,41 @@
+{# Plugin list table. Hot-swappable: toggle + delete swap this template. #}
+<div id="plugins-list">
+  {% if not plugins %}
+    <div class="empty" style="padding: 0.5rem 0;">
+      No plugins yet. Drop a .jar via the upload form below, or install via the Marketplace tab.
+    </div>
+  {% else %}
+    <div class="file-list">
+      {% for p in plugins %}
+        <div class="file-row" style="opacity: {{ '0.55' if p.disabled else '1' }};">
+          <span class="icon">{{ '💤' if p.disabled else '🧩' }}</span>
+          <div style="display: grid; gap: 0.1rem;">
+            <span class="mono" style="font-weight: 600;">{{ p.display_name }}</span>
+            <span style="font-size: 0.78rem; color: var(--text-muted);">
+              {% if p.version %}v{{ p.version }}{% endif %}
+              {% if p.author %} · by {{ p.author }}{% endif %}
+              {% if p.api_version %} · api {{ p.api_version }}{% endif %}
+              {% if p.disabled %} · <em>disabled</em>{% endif %}
+            </span>
+            <span class="mono" style="font-size: 0.72rem; color: var(--text-muted);">
+              {{ p.filename }}
+            </span>
+          </div>
+          <div style="display: flex; gap: 0.3rem;">
+            <button class="btn btn-ghost"
+                    hx-post="/servers/{{ server.id }}/plugins/{{ p.filename }}/toggle"
+                    hx-target="#plugins-list" hx-swap="outerHTML">
+              {{ 'Enable' if p.disabled else 'Disable' }}
+            </button>
+            <button class="btn btn-danger"
+                    hx-delete="/servers/{{ server.id }}/plugins/{{ p.filename }}"
+                    hx-confirm="Delete {{ p.display_name }}? The .jar file will be removed."
+                    hx-target="#plugins-list" hx-swap="outerHTML">
+              Delete
+            </button>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>

@@ -1,0 +1,57 @@
+{% if server.family.value != 'java' %}
+  <div class="empty">
+    Packs (datapacks + server resource pack) are Java-only. Bedrock uses
+    behavior_packs/ and resource_packs/ via the Files tab.
+  </div>
+{% else %}
+  <div class="card" style="margin-bottom: 1rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <strong>Datapacks · {{ world_name }}/datapacks ({{ datapacks|length }})</strong>
+      <small style="color: var(--text-muted);">Run <span class="mono">/reload</span> in the console after add/remove.</small>
+    </div>
+    <div style="margin-top: 0.5rem;">
+      {% if not datapacks %}
+        <div class="empty" style="padding: 0.5rem 0;">No datapacks installed.</div>
+      {% else %}
+        <div class="file-list">
+          {% for d in datapacks %}
+            <div class="file-row">
+              <span class="icon">📦</span>
+              <span class="mono">{{ d.name }}</span>
+              <span class="size">{{ d.size if d.size else 'dir' }}</span>
+              <button class="btn btn-danger"
+                      hx-delete="/servers/{{ server.id }}/packs/datapack/{{ d.name }}"
+                      hx-confirm="Remove datapack {{ d.name }}?"
+                      hx-target="#packs-tab" hx-swap="outerHTML">Remove</button>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+    <form style="display: flex; gap: 0.5rem; align-items: center; margin-top: 0.75rem;"
+          hx-post="/servers/{{ server.id }}/packs/datapack/upload"
+          hx-target="#packs-tab" hx-swap="outerHTML"
+          hx-encoding="multipart/form-data">
+      <input type="file" name="file" accept=".zip" required style="flex: 1;">
+      <button type="submit" class="btn btn-primary">Upload datapack</button>
+    </form>
+  </div>
+
+  <div class="card" id="packs-tab">
+    <strong>Server resource pack</strong>
+    <small style="color: var(--text-muted); display: block; margin: 0.3rem 0 0.5rem;">
+      URL pushed to clients on join. Leave blank to disable. SHA-1 is optional but recommended for caching.
+    </small>
+    <form hx-post="/servers/{{ server.id }}/packs/resource-pack"
+          hx-target="#packs-tab" hx-swap="outerHTML"
+          style="display: grid; gap: 0.5rem;">
+      <input type="url" name="url" placeholder="https://example.com/pack.zip"
+             value="{{ resource_pack_url }}"
+             style="background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.4rem 0.6rem; color: var(--text-primary);">
+      <input type="text" name="sha1" placeholder="SHA-1 (40 hex chars, optional)"
+             value="{{ resource_pack_sha1 }}" pattern="[0-9a-fA-F]{40}|"
+             class="mono" style="background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.4rem 0.6rem; color: var(--text-primary);">
+      <button type="submit" class="btn btn-primary" style="justify-self: start;">Save</button>
+    </form>
+  </div>
+{% endif %}
