@@ -57,6 +57,15 @@ class PilotBundle:
     sha256: str
 
 
+def _looks_like_mc_version(s: str) -> bool:
+    """Heuristic: does this look like a vanilla MC version (e.g. 1.21.1)
+    vs a URL or arbitrary version string used by modpack-type servers?"""
+    if not s or "/" in s or ":" in s:
+        return False
+    parts = s.split(".")
+    return all(p.isdigit() for p in parts) and 2 <= len(parts) <= 4
+
+
 def _public_host(server: Server, *, public_host: str) -> str:
     """Pick the host the pilot should connect to. Defaults to `public_host`
     (set per-deployment via env or AppState). Falls back to a sentinel that
@@ -71,6 +80,9 @@ def build_bundle(
     edge_url: str = "",
     pilots_root: Path | None = None,
     source_dir: Path | None = None,
+    tunnel_hostname: str = "",
+    modpack_url: str = "",
+    neoforge_version: str = "",
 ) -> PilotBundle:
     """Generate and persist a pilot zip for this server. Idempotent — running
     twice overwrites with a fresh build.
@@ -96,14 +108,25 @@ def build_bundle(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     host = _public_host(server, public_host=public_host)
+    # MC clients need a real semver MC version, not a URL (which is what
+    # modpack-platform servers store). Resolve modded servers to the MC
+    # version that the modpack targets — passed in via neoforge_version /
+    # mc_version if known; otherwise fall back to 1.21.1 (current ATM10
+    # generation) as a sane default until we plumb pack-specific data.
+    mc_version = server.version
+    if not _looks_like_mc_version(mc_version):
+        mc_version = "1.21.1"
     config = {
         "app_name": f"ndrchst Pilot — {server.name}",
         "server_host": host,
         "server_port": server.port,
-        "mc_version": server.version,
+        "mc_version": mc_version,
         "default_username": "Player",
         "server_id": server.id,
         "edge_url": edge_url or "",
+        "tunnel_hostname": tunnel_hostname or None,
+        "modpack_url": modpack_url or None,
+        "neoforge_version": neoforge_version or None,
     }
 
     zip_buf = io.BytesIO()
@@ -186,6 +209,9 @@ def _render_config_py(cfg: dict) -> str:
         f"SERVER_HOST = {cfg['server_host']!r}\n"
         f"SERVER_PORT = {cfg['server_port']!r}\n"
         f"MC_VERSION = {cfg['mc_version']!r}\n"
+        f"NEOFORGE_VERSION = {cfg.get('neoforge_version')!r}\n"
+        f"MODPACK_URL = {cfg.get('modpack_url')!r}\n"
+        f"TUNNEL_HOSTNAME = {cfg.get('tunnel_hostname')!r}\n"
         f"DEFAULT_USERNAME = {cfg['default_username']!r}\n"
         f"SERVER_ID = {cfg['server_id']!r}\n"
     )

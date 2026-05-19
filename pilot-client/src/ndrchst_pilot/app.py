@@ -58,6 +58,9 @@ def run() -> None:
                     server_host=config.SERVER_HOST,
                     server_port=config.SERVER_PORT,
                     on_log=emit_from_worker,
+                    neoforge_version=getattr(config, "NEOFORGE_VERSION", None),
+                    modpack_url=getattr(config, "MODPACK_URL", None),
+                    tunnel_hostname=getattr(config, "TUNNEL_HOSTNAME", None),
                 )
                 emit_from_worker("Minecraft exited.")
             except Exception as exc:

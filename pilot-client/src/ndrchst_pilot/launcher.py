@@ -1,8 +1,26 @@
+"""Pilot launch glue — vanilla MC or NeoForge + modpack, dialled
+through a Cloudflare tunnel if configured.
+
+Three operating modes, picked from config flags:
+
+  - vanilla: portablemc installs the given MC version, joins the
+    configured server.
+  - modded (no modpack): installs NeoForge for the given MC version.
+  - modded + modpack: installs NeoForge, then fetches a CurseForge
+    client pack URL → resolves all mods → applies overrides.
+
+When TUNNEL_HOSTNAME is set, a cloudflared sidecar is started before
+the MC client launches and MC dials the local cloudflared port instead
+of SERVER_HOST:SERVER_PORT. Origin IP stays hidden behind CF edge.
+"""
+from __future__ import annotations
+
 import time
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 from uuid import uuid4
 
+from portablemc.forge import _NeoForgeVersion
 from portablemc.standard import (
     AssetsResolveEvent,
     Context,
@@ -72,6 +90,16 @@ class _GuiWatcher(Watcher):
                 self._emit("Downloads complete")
 
 
+def _make_version(
+    ctx: Context, mc_version: str, neoforge_version: Optional[str],
+):
+    """Pick the right portablemc Version subclass: NeoForge if a
+    neoforge version is pinned, otherwise vanilla."""
+    if neoforge_version:
+        return _NeoForgeVersion(neoforge_version, context=ctx)
+    return Version(mc_version, context=ctx)
+
+
 def launch(
     *,
     app_slug: str,
@@ -80,20 +108,66 @@ def launch(
     server_host: str,
     server_port: int,
     on_log: Callable[[str], None],
+    neoforge_version: Optional[str] = None,
+    modpack_url: Optional[str] = None,
+    tunnel_hostname: Optional[str] = None,
 ) -> int:
-    """Install + run MC in offline mode, auto-connecting to the given server.
+    """Install + run MC in offline mode, auto-connecting to the server.
 
     Blocks until MC exits. Returns 0 on clean exit.
     """
     data_dir = _data_dir(app_slug)
     ctx = Context(main_dir=data_dir)
-    version = Version(mc_version, context=ctx)
-    version.auth_session = OfflineAuthSession(username, uuid4().hex)
-    version.quick_play = QuickPlayMultiplayer(server_host, server_port)
 
-    on_log(f"Installing {mc_version} into {data_dir} …")
+    version = _make_version(ctx, mc_version, neoforge_version)
+    if neoforge_version:
+        on_log(f"Installing NeoForge {neoforge_version} (MC {mc_version})…")
+    else:
+        on_log(f"Installing Minecraft {mc_version}…")
+
+    # Modpack install runs BEFORE portablemc install because the
+    # modpack drops mods into data_dir/mods/ which NeoForge then loads
+    # at launch time. Order matters only for failure surfacing — if the
+    # modpack install fails, we want to bail before downloading
+    # gigabytes of MC assets.
+    if modpack_url:
+        on_log(f"Installing modpack from {modpack_url}…")
+        from .modpack import install_client_pack
+        try:
+            n_ok, n_fail = install_client_pack(
+                url=modpack_url, profile_dir=data_dir, on_log=on_log,
+            )
+            on_log(f"Modpack ready: {n_ok} mods installed, {n_fail} missing")
+        except Exception as e:
+            on_log(f"Modpack install failed: {e}")
+            raise
+
+    # Tunnel sidecar. If configured, MC dials the local cloudflared
+    # listener instead of the raw server host.
+    dial_host = server_host
+    dial_port = server_port
+    tunnel = None
+    if tunnel_hostname:
+        from .tunnel import Tunnel, ensure_cloudflared
+        cfd_path = ensure_cloudflared(data_dir, on_log=on_log)
+        tunnel = Tunnel(tunnel_hostname, cfd_path, on_log=on_log)
+        tunnel.start()
+        dial_host = "127.0.0.1"
+        dial_port = tunnel.port
+
+    version.auth_session = OfflineAuthSession(username, uuid4().hex)
+    version.quick_play = QuickPlayMultiplayer(dial_host, dial_port)
     env = version.install(watcher=_GuiWatcher(on_log))
 
-    on_log(f"Starting Minecraft as {username}, connecting to {server_host}:{server_port}…")
-    env.run()
-    return 0
+    on_log(
+        f"Starting Minecraft as {username}, connecting to "
+        f"{dial_host}:{dial_port}"
+        + (f" (via {tunnel_hostname})" if tunnel_hostname else "")
+        + "…",
+    )
+    try:
+        env.run()
+        return 0
+    finally:
+        if tunnel is not None:
+            tunnel.stop()

@@ -56,6 +56,7 @@ def make_lifespan(
         import os
         public_host = os.environ.get("NDRCHST_PUBLIC_HOST", "")
         edge_url = os.environ.get("NDRCHST_EDGE_URL", "")
+        tunnel_hostname = os.environ.get("NDRCHST_TUNNEL_HOSTNAME", "")
         try:
             client = docker.from_env()
             client.ping()
@@ -63,11 +64,14 @@ def make_lifespan(
                 Docker(client=client), conn,
                 servers_root=servers_root,
                 public_host=public_host, edge_url=edge_url,
+                tunnel_hostname=tunnel_hostname,
             )
             log.info(
                 "Docker reachable; lifecycle active "
-                "(public_host=%s, edge_url=%s)",
-                public_host or "<unset>", edge_url or "<unset>",
+                "(public_host=%s, edge_url=%s, tunnel_hostname=%s)",
+                public_host or "<unset>",
+                edge_url or "<unset>",
+                tunnel_hostname or "<unset>",
             )
         except Exception as e:
             docker_error = f"{type(e).__name__}: {e}"

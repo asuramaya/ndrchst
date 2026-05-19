@@ -233,6 +233,7 @@ class Lifecycle:
         servers_root: Path = SERVERS_ROOT_DEFAULT,
         public_host: str | None = None,
         edge_url: str | None = None,
+        tunnel_hostname: str | None = None,
     ):
         self._docker = docker
         self._conn = conn
@@ -244,6 +245,10 @@ class Lifecycle:
         # bundle README so end-users know where to fetch fresh copies.
         # Set via `NDRCHST_EDGE_URL` (e.g. "https://play.ndrchst.com").
         self._edge_url = edge_url or ""
+        # Cloudflare Tunnel hostname for cloudflared access tcp — when set,
+        # the pilot dials this through CF edge instead of the raw
+        # public_host:port. Set via `NDRCHST_TUNNEL_HOSTNAME`.
+        self._tunnel_hostname = tunnel_hostname or ""
 
     async def create(self, req: CreateRequest) -> Server:
         _validate(req, self._conn)
@@ -353,6 +358,7 @@ class Lifecycle:
                     server,
                     public_host=self._public_host,
                     edge_url=self._edge_url,
+                    tunnel_hostname=self._tunnel_hostname,
                 )
             except PilotBuildError:
                 # Pilot is best-effort — log but don't fail server create
@@ -478,10 +484,21 @@ class Lifecycle:
         server.status = ServerStatus.STOPPED
         return server
 
-    def regenerate_pilot(self, server_id: str):
+    def regenerate_pilot(
+        self,
+        server_id: str,
+        *,
+        modpack_url: str = "",
+        neoforge_version: str = "",
+    ):
         """Rebuild the pilot bundle from the current server record + lifespan
         env. Cheap (no compile step) — exists so the user can pick up a new
-        public_host / edge_url without recreating the server."""
+        public_host / edge_url / tunnel without recreating the server.
+
+        ``modpack_url`` and ``neoforge_version`` let callers pin a
+        client-side modpack and modloader version for the pilot that may
+        not be derivable from the server record alone (server holds the
+        server-pack URL; client wants the client-pack URL)."""
         server = self._must_get(server_id)
         if server.family is not Family.JAVA:
             raise LifecycleError("pilot bundles are Java-only")
@@ -489,6 +506,9 @@ class Lifecycle:
             server,
             public_host=self._public_host,
             edge_url=self._edge_url,
+            tunnel_hostname=self._tunnel_hostname,
+            modpack_url=modpack_url,
+            neoforge_version=neoforge_version,
         )
 
     async def stats(self, server_id: str):
