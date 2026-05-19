@@ -1,0 +1,61 @@
+name: build-pilot
+
+# Cross-platform single-file pilot launcher builds. PyInstaller can't
+# cross-compile, so we run it on each OS runner and upload the artifact.
+# Players download the binary for their OS — no Python required on their
+# machine.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "pilot-v*"
+    paths:
+      - "pilot-client/**"
+      - ".github/workflows/build-pilot.yml"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: ndrchst-pilot-linux-x86_64
+            bin: ndrchst-pilot
+          - os: windows-latest
+            artifact: ndrchst-pilot-windows-x86_64
+            bin: ndrchst-pilot.exe
+          - os: macos-latest
+            artifact: ndrchst-pilot-macos-arm64
+            bin: ndrchst-pilot
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: pilot-client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller portablemc httpx
+
+      - name: Build
+        run: pyinstaller ndrchst-pilot.spec
+
+      - name: Rename binary
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "dist/${{ matrix.bin }}" "out/${{ matrix.artifact }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: pilot-client/out/${{ matrix.artifact }}
+          if-no-files-found: error
