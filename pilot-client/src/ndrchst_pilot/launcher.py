@@ -159,6 +159,7 @@ def launch(
         from .tunnel import Tunnel, ensure_cloudflared
         cfd_path = ensure_cloudflared(data_dir, on_log=on_log)
         tunnel = Tunnel(tunnel_hostname, cfd_path, on_log=on_log)
+        tunnel.log_path = data_dir / "cloudflared.log"
         tunnel.start()
         dial_host = "127.0.0.1"
         dial_port = tunnel.port

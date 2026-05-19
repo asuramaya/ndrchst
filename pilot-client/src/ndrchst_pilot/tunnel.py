@@ -140,6 +140,8 @@ class Tunnel:
             raise TunnelError("tunnel not yet started")
         return self._port
 
+    log_path: Path | None = None
+
     def start(self, *, wait_seconds: float = 8.0) -> None:
         self._port = _pick_free_port()
         cmd = [
@@ -151,11 +153,18 @@ class Tunnel:
         self._on_log(
             f"Starting cloudflared sidecar: {self.hostname} → 127.0.0.1:{self._port}"
         )
-        # Pipe stderr+stdout so we can see errors if it crashes early.
+        # Log sidecar output to a file for diagnostics (connection resets,
+        # edge errors). Falls back to DEVNULL if no log path is set.
+        if self.log_path is not None:
+            cmd[3:3] = ["--loglevel", "debug"]
+            log_f = open(self.log_path, "w")
+            out = err = log_f
+        else:
+            out = err = subprocess.DEVNULL
         self._proc = subprocess.Popen(
             cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=out,
+            stderr=err,
             stdin=subprocess.DEVNULL,
         )
 
