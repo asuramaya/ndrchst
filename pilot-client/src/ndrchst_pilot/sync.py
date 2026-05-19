@@ -16,12 +16,13 @@ its next sync.
 from __future__ import annotations
 
 import hashlib
-import urllib.request
+import json
 import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
-import json
 
 
 class SyncError(RuntimeError):
@@ -126,7 +127,10 @@ def sync_mods_from_server(
         else:
             added += 1
         if need:
-            url = f"{sync_base_url}/mods/{name}"
+            # Mod filenames can contain spaces and other URL-unsafe chars
+            # (e.g. "Explorify v1.6.5.mod.jar"); percent-encode the path
+            # segment. quote() leaves "/" alone by default so pass safe="".
+            url = f"{sync_base_url}/mods/{urllib.parse.quote(name, safe='')}"
             try:
                 _http_download(url, target)
             except (urllib.error.URLError, OSError) as e:
