@@ -165,13 +165,13 @@ markers = [
 ]
 ```
 
-Counts as of 2026-05-18 (post v0.1 sweep):
-- default: 148 unit tests (+26: doctor UDP, safety snapshot, global assets, JSON logging)
+Counts as of 2026-05-19 (post v0.1 sweep + real-Docker bring-up on ndrchst-01):
+- default: 150 unit tests (+28: doctor UDP, safety snapshot, global assets, JSON logging, image auto-pull, no-Docker determinism)
 - `-m live`: 9 (real uvicorn + curl every route + HTML structure assertions)
 - `-m integration`: 5 (live upstream APIs)
-- `-m docker`: 2 (skipped here, no daemon)
+- `-m docker`: 2 (Paper + Bedrock real container boot — passes on ndrchst-01, gated on dev machine)
 
-Total: **162 tests**, all passing. Lint clean.
+Total: **166 tests**, all passing. Lint clean.
 
 ## Defaults + on-disk state
 
@@ -187,19 +187,22 @@ CLI: `ndrchst run` (uvicorn on `:8080`, localhost), `ndrchst doctor`.
 
 1. **`.gitignore` must not contain bare `servers/`.** Would silently swallow `src/ndrchst/web/templates/servers/` and break the UI on fresh clone. Already bitten once; comment in `.gitignore` warns explicitly.
 2. **Mojang BDS feed URL is unofficial.** `net-secondary.web.minecraft-services.net/api/v1.0/download/links` is what the launcher uses. Watch for drift; `-m integration` will catch it.
-3. **Mojang feed gates on User-Agent.** Default httpx UA returns 403; we set a Mozilla-shaped UA in `platforms/bedrock.py`.
+3. **Mojang feed gates on User-Agent, AND Akamai blocks UAs containing `+URL` references.** The default httpx UA gets a 403 from the feed. We set a Mozilla-shaped UA in `platforms/bedrock.py`. But: do NOT include a `+https://github.com/...` reference URL in the UA — Akamai's bot detection on the BDS zip CDN treats that pattern as a bot and resets the HTTP/2 stream with INTERNAL_ERROR, which surfaces as a 300s httpx ReadTimeout. Keep the UA minimal: `Mozilla/5.0 (ndrchst)`.
 4. **No host UDP port probe is reliable cross-OS.** Our `runtime/ports.py` probe uses `SO_REUSEADDR` which on Linux may let a probe succeed even when a real listener is bound. TCP is the common case; UDP detection is best-effort.
 5. **Catch-all detail route order matters.** `/servers/{id}/{tab}` is registered last in `web/detail_routes.py` so specific routes (`/files`, `/properties`, etc.) match first. Don't move it.
 6. **Java 17 vs 21 cutover at Minecraft 1.20.5.** Hardcoded in `runtime/docker.py:java_image_for()`. If Mojang requires Java 22+ in some future MC release, this needs updating.
+7. **BDS 1.21+ links against libcurl4 which is not in ubuntu:24.04 by default.** The Bedrock cmd in `runtime/lifecycle.py:_build_spec` wraps `./bedrock_server` in `sh -c 'command -v curl >/dev/null || apt install -y libcurl4 && exec ./bedrock_server'`. If we ever switch BEDROCK_IMAGE off ubuntu:24.04, verify libcurl is present in the replacement.
+8. **`Docker.create_container` pulls on ImageNotFound.** docker-py's `containers.create()` doesn't pull on miss — the wrapper does. First container for any new image will pause for the pull.
 
 ## v1 deferred items
 
-Tracked in detail at `~/.claude/projects/-home-asuramaya-code-ndrchst/memory/project_v1_deferred.md`. Summary of what remains after the v0.1 sweep:
+Tracked in detail at `~/.claude/projects/-home-asuramaya-code-ndrchst/memory/project_v1_deferred.md`. Summary of what remains after the v0.1 sweep + ndrchst-01 bring-up:
 
-1. WebSocket console RCON/stdin live-container dispatch (currently stubbed; needs real container to test)
-2. Real Docker boot smoke (write/run on a Docker-enabled host)
-3. Async-uniform routes (currently mixed sync/async, works but fragile)
-4. Bedrock LevelDB world support (significant effort, low v0 value)
+1. WebSocket console RCON/stdin live-container dispatch (currently stubbed; ndrchst-01 now has real Docker — could be wired now)
+2. Async-uniform routes (currently mixed sync/async, works but fragile)
+3. Bedrock LevelDB world support (significant effort, low v0 value)
+
+Real Docker boot is now ✅ on ndrchst-01 (Ubuntu 26.04, Docker 29.5.1, kernel 7.0). Paper + Bedrock both verified end-to-end via `-m docker`.
 
 Completed in v0.1 (2026-05-18, this sweep):
 - Doctor probes registered server ports with right protocol (UDP for Bedrock, TCP for Java)
