@@ -50,8 +50,13 @@ def fetch_modpack_zip(
     dest_zip.parent.mkdir(parents=True, exist_ok=True)
     on_log(f"Downloading modpack from {url}…")
     tmp = dest_zip.with_suffix(dest_zip.suffix + ".part")
+    # CF's CDN rejects Python's default urllib UA with 403; spoof a
+    # browser-ish UA the way every other modpack launcher does.
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "Mozilla/5.0 (ndrchst-pilot)"},
+    )
     try:
-        with urllib.request.urlopen(url) as resp, tmp.open("wb") as f:
+        with urllib.request.urlopen(req) as resp, tmp.open("wb") as f:
             total = 0
             while True:
                 chunk = resp.read(1024 * 1024)

@@ -122,6 +122,22 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         import json
         return JSONResponse(json.loads(mp.read_text()), headers=_NO_STORE)
 
+    @app.get("/pilot/{server_id}/modpack.zip")
+    def pilot_modpack(server_id: str) -> FileResponse:
+        """Per-server modpack zip companion to pilot.zip — staged when
+        the operator wants the pilot to install a CF client pack that CF's
+        own CDN won't serve directly (which is most client packs)."""
+        from .runtime.pilot import PILOTS_ROOT_DEFAULT
+        path = PILOTS_ROOT_DEFAULT / server_id / "modpack.zip"
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="modpack not staged for this server")
+        return FileResponse(
+            path,
+            media_type="application/zip",
+            filename="modpack.zip",
+            headers=_NO_STORE,
+        )
+
     return app
 
 
