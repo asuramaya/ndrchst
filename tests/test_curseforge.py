@@ -277,6 +277,121 @@ async def test_download_all_mods_parallel_success(tmp_path: Path):
     await client.aclose()
 
 
+# ─── URL parsing + server-pack resolution ───────────────────────────────────
+
+
+def test_file_id_from_cdn_url():
+    assert cf.file_id_from_url(
+        "https://edge.forgecdn.net/files/8091/114/All-the-Mods-10-7.0.zip"
+    ) == 8091114
+    # mediafilez.forgecdn.net (where edge redirects) is also valid
+    assert cf.file_id_from_url(
+        "https://mediafilez.forgecdn.net/files/7471/280/kotlin.jar"
+    ) == 7471280
+    # leading-zero remainder needs to round-trip: 8094/893 → 8094893
+    assert cf.file_id_from_url(
+        "https://edge.forgecdn.net/files/8094/893/ServerFiles-7.0.zip"
+    ) == 8094893
+
+
+def test_file_id_from_page_url():
+    assert cf.file_id_from_url(
+        "https://www.curseforge.com/minecraft/modpacks/all-the-mods-10/files/8091114"
+    ) == 8091114
+    # also works without www.
+    assert cf.file_id_from_url(
+        "https://curseforge.com/minecraft/modpacks/atm10/files/8091114/download"
+    ) == 8091114
+
+
+def test_file_id_from_url_returns_none_for_garbage():
+    assert cf.file_id_from_url("https://example.com/foo.zip") is None
+    assert cf.file_id_from_url("not even a url") is None
+    assert cf.file_id_from_url("") is None
+
+
+def _resolver_handler(*, project_id, file_id, server_pack_id=None, server_pack_filename=None):
+    """Mock the unofficial CF v1 endpoints used by the resolver."""
+    def h(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        # /api/v1/mods/files/<fid> — reverse-lookup file → project
+        if url.endswith(f"/api/v1/mods/files/{file_id}"):
+            return httpx.Response(200, json={
+                "data": {"id": file_id, "modId": project_id, "projectId": project_id},
+            })
+        # /api/v1/mods/<pid>/files/<fid> — file metadata
+        if url.endswith(f"/api/v1/mods/{project_id}/files/{file_id}"):
+            return httpx.Response(200, json={
+                "data": {
+                    "id": file_id, "projectId": project_id,
+                    "fileName": "client-pack.zip",
+                    "hasServerPack": server_pack_id is not None,
+                    "additionalFilesCount": 1 if server_pack_id else 0,
+                },
+            })
+        # /api/v1/mods/<pid>/files/<fid>/additional-files — server pack zip
+        if url.endswith(f"/files/{file_id}/additional-files"):
+            data = []
+            if server_pack_id:
+                data.append({"id": server_pack_id, "fileName": server_pack_filename})
+            return httpx.Response(200, json={"data": data})
+        return httpx.Response(404)
+    return h
+
+
+async def test_resolve_to_server_pack_upgrades_client_pack_url():
+    """User pastes the CDN URL of the client pack; we upgrade to the
+    server-pack CDN URL because hasServerPack=True."""
+    h = _resolver_handler(
+        project_id=925200, file_id=8091114,
+        server_pack_id=8094893, server_pack_filename="ServerFiles-7.0.zip",
+    )
+    client = httpx.AsyncClient(transport=httpx.MockTransport(h))
+    new_url, note = await cf.resolve_to_server_pack(
+        client, "https://edge.forgecdn.net/files/8091/114/Client.zip",
+    )
+    assert new_url == (
+        "https://edge.forgecdn.net/files/8094/893/ServerFiles-7.0.zip"
+    )
+    assert note and "server pack" in note.lower()
+    await client.aclose()
+
+
+async def test_resolve_to_server_pack_passthrough_when_no_server_pack():
+    """If hasServerPack=False, we return the original URL unchanged."""
+    h = _resolver_handler(project_id=100, file_id=999)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(h))
+    original = "https://edge.forgecdn.net/files/0/999/foo.zip"
+    new_url, note = await cf.resolve_to_server_pack(client, original)
+    assert new_url == original
+    assert note is None
+    await client.aclose()
+
+
+async def test_resolve_to_server_pack_passthrough_for_non_cf_url():
+    """Not a CF URL at all → no lookup attempted, original URL returned."""
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(500)))
+    original = "https://example.com/some-other-modpack.zip"
+    new_url, note = await cf.resolve_to_server_pack(client, original)
+    assert new_url == original
+    assert note is None
+    await client.aclose()
+
+
+async def test_resolve_to_server_pack_swallows_lookup_failures():
+    """If CF returns garbage / 5xx for the lookup, we fall back to the
+    original URL rather than failing the whole install. The operator
+    still gets a usable (if non-curated) zip."""
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(500)),
+    )
+    original = "https://edge.forgecdn.net/files/8091/114/Client.zip"
+    new_url, note = await cf.resolve_to_server_pack(client, original)
+    assert new_url == original
+    assert note is None
+    await client.aclose()
+
+
 async def test_download_all_mods_partial_failure(tmp_path: Path):
     """One mod 403s, others succeed — the run completes with a failure list,
     not an exception. The Modpack platform decides what to do with that."""

@@ -33,6 +33,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import shutil
 import zipfile
 from dataclasses import dataclass
@@ -44,6 +45,14 @@ log = logging.getLogger("ndrchst.curseforge")
 
 CF_WEBSITE_API = "https://www.curseforge.com/api/v1/mods"
 CF_CDN_BASE = "https://edge.forgecdn.net/files"
+
+# Patterns we know how to extract a CurseForge fileId from.
+_CDN_RE = re.compile(
+    r"^https?://(?:edge|mediafilez?)\.forgecdn\.net/files/(\d+)/(\d+)/"
+)
+_PAGE_RE = re.compile(
+    r"^https?://(?:www\.)?curseforge\.com/[^/]+/[^/]+/[^/]+/files/(\d+)"
+)
 
 # Default concurrency for the parallel mod-download phase. A typical
 # kitchen-sink modpack has 400-600 mods at a few hundred KB to a few MB
@@ -246,6 +255,125 @@ async def download_mod(
             f"download failed for {filename}: {e}"
         ) from e
     return target
+
+
+def file_id_from_url(url: str) -> int | None:
+    """If `url` is a recognisable CurseForge link (CDN or curseforge.com
+    page), pull out the integer fileId. Otherwise return None.
+
+    CDN: ``https://edge.forgecdn.net/files/8091/114/All-the-Mods-10-7.0.zip``
+         → 8091114 (the path split rejoins).
+    Page: ``https://www.curseforge.com/minecraft/modpacks/all-the-mods-10/files/8091114``
+          → 8091114.
+    """
+    m = _CDN_RE.match(url)
+    if m:
+        return int(m.group(1) + f"{int(m.group(2)):03d}")
+    m = _PAGE_RE.match(url)
+    if m:
+        return int(m.group(1))
+    return None
+
+
+async def fetch_file_metadata(
+    client: httpx.AsyncClient, project_id: int, file_id: int,
+) -> dict:
+    """Like fetch_filename but returns the full ``data`` payload. Raises
+    CurseForgeError on 404 / null / blocked."""
+    url = f"{CF_WEBSITE_API}/{project_id}/files/{file_id}"
+    r = await client.get(url)
+    if r.status_code == 404:
+        raise CurseForgeError(f"CF 404 for {project_id}/{file_id}")
+    r.raise_for_status()
+    payload = r.json().get("data")
+    if not payload:
+        raise CurseForgeError(f"CF returned null data for {project_id}/{file_id}")
+    return payload
+
+
+async def find_project_id_for_file(
+    client: httpx.AsyncClient, file_id: int,
+) -> int:
+    """Given just a file_id, work out the projectId it belongs to. The
+    CF v1 endpoint is keyed by both — we use the unofficial v1 search
+    ``/api/v1/mods/files/<fid>`` which returns the file with its
+    projectId attached."""
+    url = f"{CF_WEBSITE_API}/files/{file_id}"
+    r = await client.get(url)
+    if r.status_code == 404:
+        raise CurseForgeError(f"CF doesn't know file {file_id}")
+    r.raise_for_status()
+    payload = r.json().get("data") or {}
+    pid = payload.get("modId") or payload.get("projectId")
+    if not pid:
+        raise CurseForgeError(
+            f"CF v1 file-lookup returned no projectId for {file_id}: {payload!r}"
+        )
+    return int(pid)
+
+
+async def find_server_pack_url(
+    client: httpx.AsyncClient, file_id: int, *, project_id: int | None = None,
+) -> str | None:
+    """If the given CF file has a published server-pack companion,
+    return the CDN URL for that pack. Returns None if no server pack
+    exists, or if the lookup fails for any reason (we never raise —
+    callers fall back to using the original URL).
+
+    Modpacks on CurseForge often publish two zips per release: the
+    "main" file (client pack with manifest.json) plus an additional
+    "ServerFiles-X.Y.zip" linked via the ``additionalFilesCount`` /
+    ``hasServerPack`` flags. The additional-files endpoint returns the
+    server-pack file record.
+    """
+    try:
+        if project_id is None:
+            project_id = await find_project_id_for_file(client, file_id)
+        meta = await fetch_file_metadata(client, project_id, file_id)
+        if not meta.get("hasServerPack"):
+            return None
+        # The additional-files endpoint lists the server pack(s).
+        url = f"{CF_WEBSITE_API}/{project_id}/files/{file_id}/additional-files"
+        r = await client.get(url)
+        r.raise_for_status()
+        extras = r.json().get("data") or []
+        # CF tags server packs in the gameVersions list as e.g. "Server" or
+        # just by being on the additional-files list when hasServerPack=True.
+        # We take the first additional file as the server pack — it's the
+        # documented convention.
+        if not extras:
+            return None
+        srv = extras[0]
+        srv_fid = int(srv["id"])
+        srv_filename = srv["fileName"]
+        return _cdn_url(srv_fid, srv_filename)
+    except (CurseForgeError, httpx.HTTPError, KeyError, ValueError) as e:
+        log.warning("server-pack lookup failed for file %s: %s", file_id, e)
+        return None
+
+
+async def resolve_to_server_pack(
+    client: httpx.AsyncClient, url: str,
+) -> tuple[str, str | None]:
+    """Best-effort upgrade of a CurseForge URL to its server-pack zip.
+
+    Returns ``(resolved_url, note)`` where ``note`` is a short human
+    message describing what happened (or None if no swap). The caller
+    uses ``resolved_url`` to actually download; ``note`` is surfaced to
+    the operator so they understand the swap.
+
+    Non-CF URLs (or CF URLs without a server pack) pass through
+    unchanged, so this is safe to wrap around every modpack install.
+    """
+    file_id = file_id_from_url(url)
+    if file_id is None:
+        return url, None
+    server_pack_url = await find_server_pack_url(client, file_id)
+    if server_pack_url is None:
+        return url, None
+    return server_pack_url, (
+        f"auto-upgraded to CurseForge server pack for file {file_id}"
+    )
 
 
 async def download_all_mods(

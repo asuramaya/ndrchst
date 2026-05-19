@@ -89,6 +89,15 @@ class Modpack(Platform):
 
         # Stream the download with a size cap.
         client = await self._http()
+
+        # If the URL looks like a CurseForge modpack file with a published
+        # server pack, swap it out before downloading — the server pack
+        # is what the user actually wants, and it skips the whole
+        # client-manifest resolve dance.
+        resolved_url, swap_note = await cf_mod.resolve_to_server_pack(client, url)
+        if swap_note:
+            log.info("modpack URL %s -> %s (%s)", url, resolved_url, swap_note)
+            url = resolved_url
         total = 0
         async with client.stream("GET", url) as resp:
             resp.raise_for_status()
