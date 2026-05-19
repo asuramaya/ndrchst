@@ -10,6 +10,7 @@ failure. Synchronous to keep the implementation small; callers wrap in
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 import docker
@@ -50,12 +51,19 @@ def run_jdk_jar(
         cli.images.pull(image)
 
     cmd = ["java", *args]
+    # Run the installer container as the host user so any files it creates
+    # (libraries/, run.sh, user_jvm_args.txt) are owned by us — otherwise
+    # they end up root-owned and the admin process can't manipulate them
+    # afterwards. eclipse-temurin runs as root by default; passing user=
+    # makes docker drop privileges before exec.
+    user_spec = f"{os.getuid()}:{os.getgid()}"
     try:
         raw = cli.containers.run(
             image=image,
             command=cmd,
             working_dir="/work",
             volumes={str(workdir.resolve()): {"bind": "/work", "mode": "rw"}},
+            user=user_spec,
             remove=True,
             stdout=True,
             stderr=True,
