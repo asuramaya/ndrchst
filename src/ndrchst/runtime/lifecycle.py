@@ -7,10 +7,13 @@ else stays oblivious.
 from __future__ import annotations
 
 import re
+import shutil
 import sqlite3
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+
+import httpx
 
 from ..domain.models import Family, Server, ServerStatus
 from ..platforms import REGISTRY as PLATFORMS
@@ -133,7 +136,29 @@ class Lifecycle:
 
         # Install the platform binary to the data dir. This is the only
         # step that touches upstream APIs and disk before we record state.
-        await platform.install(req.version, data_dir)
+        # Wrap upstream + stub errors in LifecycleError so the API/web
+        # layers can surface a clean 4xx instead of bubbling a 500.
+        try:
+            await platform.install(req.version, data_dir)
+        except NotImplementedError as e:
+            shutil.rmtree(data_dir, ignore_errors=True)
+            raise LifecycleError(
+                f"platform '{req.platform_id}' is not yet implemented; "
+                f"choose paper or bedrock"
+            ) from e
+        except httpx.HTTPStatusError as e:
+            shutil.rmtree(data_dir, ignore_errors=True)
+            if e.response.status_code == 404:
+                raise LifecycleError(
+                    f"version '{req.version}' not found for {req.platform_id}"
+                ) from e
+            raise LifecycleError(
+                f"{req.platform_id} upstream returned HTTP {e.response.status_code}: {e}"
+            ) from e
+        except (ValueError, RuntimeError) as e:
+            # ValueError: Paper "no builds for X"; RuntimeError: Bedrock schema drift / zip slip
+            shutil.rmtree(data_dir, ignore_errors=True)
+            raise LifecycleError(f"install failed: {e}") from e
 
         # Accept EULA on the user's behalf. Using ndrchst to create a Minecraft
         # server is treated as agreement (per project policy); we cannot present

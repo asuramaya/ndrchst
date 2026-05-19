@@ -11,6 +11,7 @@ class Purpur(Platform):
     id = "purpur"
     family = Family.JAVA
     display_name = "Purpur"
+    implemented = False
 
     async def versions(self) -> list[VersionInfo]:
         raise NotImplementedError

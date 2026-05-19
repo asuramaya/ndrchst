@@ -19,7 +19,7 @@
         <div class="field">
           <label for="platform_id">Platform</label>
           <select id="platform_id" name="platform_id" required>
-            {% for p in platforms %}
+            {% for p in platforms if p.implemented %}
               <option value="{{ p.id }}">{{ p.display_name }} ({{ p.family.value }})</option>
             {% endfor %}
           </select>

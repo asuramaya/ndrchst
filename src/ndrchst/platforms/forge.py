@@ -13,6 +13,7 @@ class Forge(Platform):
     id = "forge"
     family = Family.JAVA
     display_name = "Forge"
+    implemented = False
 
     async def versions(self) -> list[VersionInfo]:
         raise NotImplementedError

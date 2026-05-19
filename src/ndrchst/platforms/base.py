@@ -31,6 +31,9 @@ class Platform(Protocol):
     id: str
     family: Family
     display_name: str
+    # False for stub platforms whose install() raises NotImplementedError;
+    # the UI hides these from the create dropdown so users can't pick them.
+    implemented: bool
 
     async def versions(self) -> list[VersionInfo]: ...
 

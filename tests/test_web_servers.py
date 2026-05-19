@@ -94,9 +94,13 @@ def test_new_form_returns_overlay_partial(app_no_docker):
         assert r.status_code == 200
         html = r.text
         assert 'class="overlay"' in html
-        # All 7 platforms appear in the dropdown, Bedrock included
-        for pid in ("paper", "purpur", "vanilla", "fabric", "forge", "neoforge", "bedrock"):
+        # Only implemented platforms are offered; stubs (purpur/vanilla/fabric/
+        # forge/neoforge) would 4xx with NotImplementedError if selected, so
+        # we hide them. Bedrock must be present (first-class per project policy).
+        for pid in ("paper", "bedrock"):
             assert f'value="{pid}"' in html
+        for stub in ("purpur", "vanilla", "fabric", "forge", "neoforge"):
+            assert f'value="{stub}"' not in html
 
 
 def test_create_returns_503_without_docker(app_no_docker):

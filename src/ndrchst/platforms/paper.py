@@ -18,6 +18,7 @@ class Paper(Platform):
     id = "paper"
     family = Family.JAVA
     display_name = "Paper"
+    implemented = True
 
     def __init__(self, client: httpx.AsyncClient | None = None):
         self._client = client

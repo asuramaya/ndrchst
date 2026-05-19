@@ -151,3 +151,46 @@ async def test_validation_rejects_duplicate_port(lifecycle: Lifecycle):
 async def test_lifecycle_on_nonexistent_server_raises(lifecycle: Lifecycle):
     with pytest.raises(LifecycleError, match="not found"):
         await lifecycle.start("nonexistent")
+
+
+async def test_create_stub_platform_raises_clean_lifecycle_error(
+    tmp_path: Path, monkeypatch,
+):
+    """Stub platforms raise NotImplementedError from install(); lifecycle
+    must convert that to a LifecycleError so API/web surface clean 4xx
+    instead of a 500. Also: half-created data dir must be cleaned up."""
+    # Don't monkeypatch — let vanilla's real (stub) install() run
+    conn = connect(tmp_path / "lc.db")
+    lc = Lifecycle(Docker(client=FakeClient()), conn, servers_root=tmp_path / "servers")
+    with pytest.raises(LifecycleError, match="not yet implemented"):
+        await lc.create(CreateRequest(
+            name="StubAttempt", platform_id="vanilla",
+            version="1.21.3", port=25599, memory_mb=2048,
+        ))
+    # No half-created data dir left behind
+    assert not list((tmp_path / "servers").iterdir()) if (tmp_path / "servers").exists() else True
+
+
+async def test_create_paper_upstream_404_raises_clean_lifecycle_error(
+    tmp_path: Path, monkeypatch,
+):
+    """Paper API returns 404 for unknown versions; httpx raises HTTPStatusError.
+    Lifecycle must convert that to a 'version not found' LifecycleError."""
+    import httpx
+
+    from ndrchst.platforms import REGISTRY as PLATFORMS
+
+    async def install_404(version, dest):
+        # Simulate what Paper's real install does when version is bogus:
+        # r.raise_for_status() on a 404
+        resp = httpx.Response(404, request=httpx.Request("GET", "https://api.papermc.io/x"))
+        raise httpx.HTTPStatusError("404", request=resp.request, response=resp)
+    monkeypatch.setattr(PLATFORMS["paper"], "install", install_404)
+
+    conn = connect(tmp_path / "lc.db")
+    lc = Lifecycle(Docker(client=FakeClient()), conn, servers_root=tmp_path / "servers")
+    with pytest.raises(LifecycleError, match=r"version '99\.99\.99' not found"):
+        await lc.create(CreateRequest(
+            name="BadVer", platform_id="paper",
+            version="99.99.99", port=25598, memory_mb=2048,
+        ))

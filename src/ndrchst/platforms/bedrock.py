@@ -60,6 +60,7 @@ class Bedrock(Platform):
     id = "bedrock"
     family = Family.BEDROCK
     display_name = "Bedrock"
+    implemented = True
 
     def __init__(self, client: httpx.AsyncClient | None = None):
         self._client = client

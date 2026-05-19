@@ -11,6 +11,7 @@ class NeoForge(Platform):
     id = "neoforge"
     family = Family.JAVA
     display_name = "NeoForge"
+    implemented = False
 
     async def versions(self) -> list[VersionInfo]:
         raise NotImplementedError

@@ -11,6 +11,7 @@ class Fabric(Platform):
     id = "fabric"
     family = Family.JAVA
     display_name = "Fabric"
+    implemented = False
 
     async def versions(self) -> list[VersionInfo]:
         raise NotImplementedError
