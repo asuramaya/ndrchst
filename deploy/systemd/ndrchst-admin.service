@@ -1,0 +1,15 @@
+[Unit]
+Description=ndrchst admin (Tailscale-only management plane)
+After=network.target
+
+[Service]
+Type=exec
+WorkingDirectory=/home/ndrchst-01/ndrchst-alpha
+Environment=NDRCHST_PUBLIC_HOST=mc.ndrchst.com
+Environment=NDRCHST_EDGE_URL=https://play.ndrchst.com
+ExecStart=/home/ndrchst-01/ndrchst-alpha/.venv/bin/python -m uvicorn ndrchst.api.main:app --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=3s
+
+[Install]
+WantedBy=default.target

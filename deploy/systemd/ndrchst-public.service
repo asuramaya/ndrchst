@@ -1,0 +1,13 @@
+[Unit]
+Description=ndrchst public surface (Cloudflare-fronted pilot downloads)
+After=network.target
+
+[Service]
+Type=exec
+WorkingDirectory=/home/ndrchst-01/ndrchst-alpha
+ExecStart=/home/ndrchst-01/ndrchst-alpha/.venv/bin/python -m uvicorn ndrchst.public:app --host 0.0.0.0 --port 8081
+Restart=on-failure
+RestartSec=3s
+
+[Install]
+WantedBy=default.target
