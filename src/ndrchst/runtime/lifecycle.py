@@ -448,6 +448,18 @@ class Lifecycle:
             return ""
         return await self._docker.logs(server.container_id, lines=lines)
 
+    def follow_logs(self, server_id: str, *, tail: int = 200):
+        """Return an async iterator over live log chunks. Empty iterator if
+        the server has no container yet."""
+        server = self._must_get(server_id)
+        if server.container_id is None:
+            async def _empty():
+                if False:
+                    yield ""
+                return
+            return _empty()
+        return self._docker.follow_logs(server.container_id, tail=tail)
+
     def _must_get(self, server_id: str) -> Server:
         s = srv_store.get(self._conn, server_id)
         if s is None:

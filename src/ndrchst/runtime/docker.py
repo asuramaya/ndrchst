@@ -16,6 +16,9 @@ Bedrock image: ubuntu:24.04             (BDS is a native ELF; only needs glibc)
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import threading
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -170,6 +173,56 @@ class Docker:
             return self._container(container_id).logs(tail=lines)
         raw = await asyncio.to_thread(_get)
         return raw.decode("utf-8", errors="replace")
+
+    async def follow_logs(
+        self, container_id: str, *, tail: int = 200,
+    ) -> AsyncIterator[str]:
+        """Yield log chunks as they arrive (text-decoded).
+
+        Backs onto docker-py's blocking ``logs(stream=True, follow=True)``
+        generator by pumping it through a thread into an asyncio.Queue. When
+        the consuming coroutine is cancelled we close the underlying stream
+        so the thread unblocks instead of leaking until the container dies.
+        """
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        stream_holder: list = [None]  # mutable handle to the docker-py stream
+
+        def _pump() -> None:
+            try:
+                stream = self._container(container_id).logs(
+                    stream=True, follow=True, tail=tail,
+                )
+                stream_holder[0] = stream
+                try:
+                    for chunk in stream:
+                        loop.call_soon_threadsafe(queue.put_nowait, chunk)
+                finally:
+                    with contextlib.suppress(Exception):
+                        stream.close()
+            except Exception:
+                # Container vanished, connection died, etc. — close the
+                # consumer side with a sentinel and let the caller handle it.
+                pass
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+
+        thread = threading.Thread(target=_pump, daemon=True)
+        thread.start()
+        try:
+            while True:
+                chunk = await queue.get()
+                if chunk is None:
+                    return
+                yield chunk.decode("utf-8", errors="replace")
+        finally:
+            # Close the docker stream so the worker thread exits its
+            # blocking iteration. The thread joins on its own (we don't
+            # await it — that would re-block the loop).
+            stream = stream_holder[0]
+            if stream is not None:
+                with contextlib.suppress(Exception):
+                    stream.close()
 
     async def stats(self, container_id: str) -> ContainerStats:
         def _get() -> dict:

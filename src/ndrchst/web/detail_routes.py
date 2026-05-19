@@ -5,6 +5,7 @@ the tab partial (htmx swap). Mutation endpoints return updated partials.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import sqlite3
 from pathlib import Path
@@ -746,9 +747,10 @@ async def logs_download(server_id: str, request: Request, lines: int = 10000):
 
 @router.websocket("/servers/{server_id}/console-ws")
 async def console_ws(websocket: WebSocket, server_id: str) -> None:
-    """Streams Docker logs out; accepts commands in (RCON for Java, stdin for
+    """Streams Docker logs live; accepts commands in (RCON for Java, stdin for
     Bedrock). Lifecycle access reaches in via app.state — WebSocket doesn't
     use FastAPI Depends the same way HTTP routes do."""
+    import asyncio as _asyncio
     await websocket.accept()
     st = websocket.app.state.ndrchst
     conn = st.conn
@@ -762,15 +764,25 @@ async def console_ws(websocket: WebSocket, server_id: str) -> None:
         await websocket.close()
         return
 
-    try:
-        # Send the last 200 lines as a backfill
+    async def _tail_logs() -> None:
+        """Pump live container logs into the WS. The follow generator emits
+        chunks that may contain partial lines; we forward as-is and the
+        client just appends."""
         try:
-            recent = await st.lifecycle.logs(server_id, lines=200)
-            if recent:
-                await websocket.send_text(_log_to_html(recent))
+            async for chunk in st.lifecycle.follow_logs(server_id, tail=200):
+                if not chunk:
+                    continue
+                await websocket.send_text(_log_to_html(chunk))
+        except _asyncio.CancelledError:
+            raise
         except Exception as e:
-            await websocket.send_text(f"[ndrchst] log fetch failed: {e}")
+            with contextlib.suppress(Exception):
+                await websocket.send_text(_log_to_html(
+                    f"[ndrchst] log stream ended: {type(e).__name__}: {e}\n"
+                ))
 
+    tail_task = _asyncio.create_task(_tail_logs())
+    try:
         while True:
             msg = await websocket.receive_json()
             cmd = (msg.get("command") or "").strip()
@@ -804,7 +816,8 @@ async def console_ws(websocket: WebSocket, server_id: str) -> None:
                     if response.strip():
                         await websocket.send_text(_log_to_html(response.rstrip() + "\n"))
                 else:
-                    # Bedrock: pipe to BDS stdin
+                    # Bedrock: pipe to BDS stdin; output will surface via the
+                    # live log tail above.
                     try:
                         await st.lifecycle._docker.send_stdin(server.container_id, cmd)
                     except Exception as e:
@@ -812,13 +825,16 @@ async def console_ws(websocket: WebSocket, server_id: str) -> None:
                             f"[ndrchst] stdin error: {type(e).__name__}: {e}\n"
                         ))
                         continue
-                    # BDS stdout will surface in the log stream (when we add live tail)
             except Exception as e:
                 await websocket.send_text(_log_to_html(
                     f"[ndrchst] unexpected error: {type(e).__name__}: {e}\n"
                 ))
     except WebSocketDisconnect:
         return
+    finally:
+        tail_task.cancel()
+        with contextlib.suppress(_asyncio.CancelledError, Exception):
+            await tail_task
 
 
 def _log_to_html(text: str) -> str:

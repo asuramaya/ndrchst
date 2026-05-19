@@ -28,6 +28,25 @@ from ndrchst.runtime.docker import (
 # ─── Fakes ──────────────────────────────────────────────────────────────────
 
 
+class _FakeLogStream:
+    """Closeable iterator that mimics docker-py's streaming logs response."""
+
+    def __init__(self, source):
+        self._it = source
+        self._closed = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._closed:
+            raise StopIteration
+        return next(self._it)
+
+    def close(self):
+        self._closed = True
+
+
 @dataclass
 class FakeContainer:
     id: str
@@ -53,8 +72,18 @@ class FakeContainer:
     def remove(self, force: bool = False):
         self.removed = True
 
-    def logs(self, tail: int = 100):
-        return b"[12:00:00] [Server] Done!\n"
+    def logs(self, tail: int = 100, *, stream: bool = False, follow: bool = False):
+        if not stream:
+            return b"[12:00:00] [Server] Done!\n"
+        # Streaming + follow: real docker-py returns an iterable that blocks
+        # for new chunks. For tests, surface a pre-canned list and a .close()
+        # method so the follow_logs coroutine can shut us down cleanly.
+        # `_stream_chunks` may be an empty list (explicit "no output"), so
+        # check `is None` rather than truthiness.
+        chunks = self.__dict__.get("_stream_chunks")
+        if chunks is None:
+            chunks = [b"[12:00:00] [Server] Done!\n"]
+        return _FakeLogStream(iter(chunks))
 
 
 @dataclass
@@ -265,3 +294,31 @@ async def test_lifecycle_calls(spec: ContainerSpec):
 
     await d.remove(cid)
     assert c.removed
+
+
+async def test_follow_logs_streams_decoded_chunks(spec: ContainerSpec):
+    fake = FakeClient()
+    d = Docker(client=fake)
+    cid = await d.create_container(spec)
+    c = fake.containers.by_id[cid]
+    c._stream_chunks = [b"line 1\n", b"line 2\n", b"line 3\n"]
+
+    received = []
+    async for chunk in d.follow_logs(cid, tail=10):
+        received.append(chunk)
+    # All three lines pumped through, in order
+    assert received == ["line 1\n", "line 2\n", "line 3\n"]
+
+
+async def test_follow_logs_empty_when_container_emits_nothing(spec: ContainerSpec):
+    """Container with no output: generator completes cleanly, no hangs."""
+    fake = FakeClient()
+    d = Docker(client=fake)
+    cid = await d.create_container(spec)
+    c = fake.containers.by_id[cid]
+    c._stream_chunks = []  # empty stream
+
+    received = []
+    async for chunk in d.follow_logs(cid, tail=10):
+        received.append(chunk)
+    assert received == []
