@@ -23,14 +23,18 @@ on first boot.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import zipfile
 from pathlib import Path
 
 import httpx
 
+from ..runtime import curseforge as cf_mod
 from ..runtime.jvm_installer import JvmInstallError, run_jdk_jar
 from .base import Family, InstallArtifact, Platform, VersionInfo
+
+log = logging.getLogger("ndrchst.modpack")
 
 # Cap zip downloads at 4 GiB. Realistic NeoForge server packs are
 # 1-2 GiB; anything dramatically larger is a smell.
@@ -67,9 +71,10 @@ class Modpack(Platform):
 
     async def install(self, version: str, dest: Path) -> InstallArtifact:
         url = (version or "").strip()
-        if not url.startswith("https://"):
+        if not _accept_url(url):
             raise ModpackInstallError(
-                f"modpack version must be an https URL (got: {url!r})"
+                f"modpack version must be an https URL (or http://127.0.0.1 / "
+                f"http://localhost for an operator-side proxy), got: {url!r}"
             )
 
         dest.mkdir(parents=True, exist_ok=True)
@@ -98,45 +103,178 @@ class Modpack(Platform):
                 "(CurseForge sometimes returns an HTML interstitial)"
             )
 
-        # Unzip in-place. Reject paths that try to escape the data dir.
-        _safe_extract(zip_path, dest)
+        # Branch: is this a CurseForge client pack (manifest.json at the
+        # root) or a self-contained server pack?
+        with zipfile.ZipFile(zip_path) as zf:
+            top_names = zf.namelist()
+        is_cf_client_pack = "manifest.json" in top_names
+
+        if is_cf_client_pack:
+            await self._install_cf_client_pack(zip_path, dest, client)
+        else:
+            await self._install_server_pack(zip_path, dest)
+
         zip_path.unlink(missing_ok=True)
 
-        # Find a NeoForge installer jar to run, unless run.sh already exists
-        # (some packs ship a pre-baked install).
-        run_sh = dest / "run.sh"
-        if not run_sh.exists():
-            installer = _find_neoforge_installer(dest)
-            if installer is None:
-                contents = ", ".join(sorted(p.name for p in dest.iterdir())[:20])
-                raise ModpackInstallError(
-                    "no run.sh and no NeoForge installer.jar found inside the zip. "
-                    f"Top-level contents: {contents}"
-                )
-            try:
-                await asyncio.to_thread(
-                    run_jdk_jar,
-                    workdir=dest,
-                    args=["-jar", installer.name, "--installServer", "/work"],
-                )
-            except JvmInstallError as e:
-                raise ModpackInstallError(
-                    f"bundled NeoForge installer failed: {e}"
-                ) from e
-            if not run_sh.exists():
-                raise ModpackInstallError(
-                    "NeoForge installer ran but didn't produce run.sh"
-                )
-
         # Same memory-args neutering as the plain NeoForge install path.
-        user_jvm = dest / "user_jvm_args.txt"
-        if user_jvm.exists():
-            user_jvm.write_text(
-                "# Memory is set by ndrchst at container boot via JAVA_TOOL_OPTIONS.\n"
-                "# Add server-specific JVM args via the Config tab.\n"
-            )
+        _neuter_user_jvm_args(dest)
 
         return InstallArtifact(path=dest, entrypoint="run.sh")
+
+    async def _install_server_pack(self, zip_path: Path, dest: Path) -> None:
+        """Self-contained server pack flow: unzip, find a NeoForge
+        installer (or trust an existing run.sh), and we're done."""
+        _safe_extract(zip_path, dest)
+
+        run_sh = dest / "run.sh"
+        if run_sh.exists():
+            return  # pre-baked, done
+
+        installer = _find_neoforge_installer(dest)
+        if installer is None:
+            contents = ", ".join(sorted(p.name for p in dest.iterdir())[:20])
+            raise ModpackInstallError(
+                "no run.sh and no NeoForge installer.jar found inside the zip. "
+                f"Top-level contents: {contents}"
+            )
+        try:
+            await asyncio.to_thread(
+                run_jdk_jar,
+                workdir=dest,
+                args=["-jar", installer.name, "--installServer", "/work"],
+            )
+        except JvmInstallError as e:
+            raise ModpackInstallError(
+                f"bundled NeoForge installer failed: {e}"
+            ) from e
+        if not run_sh.exists():
+            raise ModpackInstallError(
+                "NeoForge installer ran but didn't produce run.sh"
+            )
+
+    async def _install_cf_client_pack(
+        self, zip_path: Path, dest: Path, http_client: httpx.AsyncClient,
+    ) -> None:
+        """CurseForge client pack flow:
+          1. Read manifest.json to learn the NeoForge version + mod list.
+          2. Download the NeoForge installer for that version and run it
+             (produces run.sh, libraries/, etc.).
+          3. Resolve every {projectID, fileID} in manifest.files via the
+             public CF v1 endpoint + edge.forgecdn.net CDN, dropping the
+             jars in mods/.
+          4. Extract overrides/* over the data dir (configs, kubejs scripts,
+             pack-specific tuning).
+        """
+        manifest = cf_mod.read_manifest(zip_path)
+        log.info(
+            "Installing CF client pack %s v%s (MC %s, %s, %d mods)",
+            manifest.name, manifest.version, manifest.mc_version,
+            manifest.loader_id, len(manifest.files),
+        )
+
+        # NeoForge install matching the version the pack pins.
+        nf_installer_name = f"neoforge-{manifest.loader_version}-installer.jar"
+        nf_installer_path = dest / nf_installer_name
+        nf_url = (
+            "https://maven.neoforged.net/releases/net/neoforged/neoforge/"
+            f"{manifest.loader_version}/{nf_installer_name}"
+        )
+        async with http_client.stream("GET", nf_url) as resp:
+            resp.raise_for_status()
+            with nf_installer_path.open("wb") as f:
+                async for chunk in resp.aiter_bytes(chunk_size=64 * 1024):
+                    f.write(chunk)
+        try:
+            await asyncio.to_thread(
+                run_jdk_jar,
+                workdir=dest,
+                args=["-jar", nf_installer_name, "--installServer", "/work"],
+            )
+        except JvmInstallError as e:
+            raise ModpackInstallError(
+                f"NeoForge {manifest.loader_version} installer failed: {e}"
+            ) from e
+        if not (dest / "run.sh").exists():
+            raise ModpackInstallError(
+                "NeoForge installer ran but didn't produce run.sh"
+            )
+
+        # Download every mod in parallel. Log progress every 25 completions
+        # so a long install isn't silent.
+        mods_dir = dest / "mods"
+        last_logged = 0
+
+        def progress(done: int, total: int) -> None:
+            nonlocal last_logged
+            if done == total or done - last_logged >= 25:
+                log.info("mod download %d/%d", done, total)
+                last_logged = done
+
+        successes, failures = await cf_mod.download_all_mods(
+            http_client, manifest.files, mods_dir, on_progress=progress,
+        )
+        if failures:
+            # Surface the full list — operator needs to know exactly which
+            # mods to download manually. Truncate to first 10 in the message,
+            # log the rest at WARNING level.
+            for entry, err in failures:
+                log.warning("mod download failed: %s/%s: %s",
+                            entry.project_id, entry.file_id, err)
+            joined = "\n".join(
+                f"  - project {e.project_id} file {e.file_id}: {err}"
+                for e, err in failures[:10]
+            )
+            extra = f"\n  ...and {len(failures) - 10} more" if len(failures) > 10 else ""
+            raise ModpackInstallError(
+                f"{len(failures)} of {len(manifest.files)} mods failed to download:\n"
+                f"{joined}{extra}"
+            )
+        log.info("downloaded %d mods to %s", len(successes), mods_dir)
+
+        # Apply overrides/ on top of the data dir last so pack-specific
+        # configs win over any defaults.
+        try:
+            n = cf_mod.apply_overrides(zip_path, dest, manifest.overrides_dir)
+            log.info("applied %d override files", n)
+        except cf_mod.CurseForgeError as e:
+            raise ModpackInstallError(f"override extraction failed: {e}") from e
+
+        _neuter_user_jvm_args(dest)
+
+
+def _accept_url(url: str) -> bool:
+    """https:// is the normal case. We also allow http://127.0.0.1 and
+    http://localhost so the operator can spin up a local http.server to
+    serve a zip they already have on the box — saves piping a 200 MB
+    file through multipart upload. Plaintext http to other hosts stays
+    rejected (credentials leak risk in prod)."""
+    if url.startswith("https://"):
+        return True
+    return url.startswith(("http://127.0.0.1", "http://localhost"))
+
+
+def _neuter_user_jvm_args(dest: Path) -> None:
+    """Strip the installer's (and any pack's) -Xmx/-Xms from user_jvm_args.txt
+    so the value we set via JAVA_TOOL_OPTIONS at boot is the only one in
+    play. Other JVM flags inside the file (G1GC settings, etc.) are kept
+    — modpacks often ship recommended GC tuning that's worth respecting."""
+    user_jvm = dest / "user_jvm_args.txt"
+    if not user_jvm.exists():
+        return
+    keep: list[str] = []
+    for raw in user_jvm.read_text().splitlines():
+        stripped = raw.strip()
+        if stripped.startswith(("-Xmx", "-Xms")):
+            continue
+        keep.append(raw)
+    body = "\n".join(keep).rstrip()
+    if body:
+        body += "\n\n"
+    user_jvm.write_text(
+        body
+        + "# Memory is set by ndrchst at container boot via JAVA_TOOL_OPTIONS.\n"
+        + "# Add server-specific JVM args via the Config tab.\n"
+    )
 
 
 def _find_neoforge_installer(root: Path) -> Path | None:
