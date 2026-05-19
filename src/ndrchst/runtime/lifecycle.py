@@ -472,6 +472,11 @@ class Lifecycle:
         for filename, cdn_url in filename_to_url.items():
             if filename in server_filenames:
                 continue
+            # Only .jar belongs in mods/. Manifests also list shaderpack /
+            # resourcepack .zips — those load from other dirs and would just
+            # litter mods/ (NeoForge ignores them at best). Skip non-jars.
+            if not filename.endswith(".jar"):
+                continue
             entries.append({
                 "filename": filename,
                 "size": None,
