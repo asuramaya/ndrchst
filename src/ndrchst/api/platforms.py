@@ -21,6 +21,7 @@ def list_platforms(include_hidden: bool = False) -> list[dict]:
             "name": p.display_name,
             "implemented": p.implemented,
             "default_visible": getattr(p, "default_visible", True),
+            "default_memory_mb": getattr(p, "default_memory_mb", 2048),
         }
         for p in REGISTRY.values()
         if include_hidden or getattr(p, "default_visible", True)

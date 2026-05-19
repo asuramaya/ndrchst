@@ -40,6 +40,11 @@ class Platform(Protocol):
     # importable so the code can be open-sourced or re-enabled later; only
     # the create-form and API listing filter it out.
     default_visible: bool = True
+    # Default value for the "Memory (MB)" field on the create form.
+    # Vanilla / Paper run fine on 2 GB; NeoForge and modpacks need a lot
+    # more (ATM10-class kitchen-sink packs want 8-12 GB minimum). The
+    # number is just the *default* — users can still override.
+    default_memory_mb: int = 2048
 
     async def versions(self) -> list[VersionInfo]: ...
 

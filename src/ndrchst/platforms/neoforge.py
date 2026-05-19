@@ -65,6 +65,11 @@ class NeoForge(Platform):
     display_name = "NeoForge"
     implemented = True
     default_visible = True
+    # Modloaders sit on top of vanilla MC and load hundreds of mods worth
+    # of state. 4 GB is the practical floor; ATM10-class packs need 8+.
+    # Default to 8192 so the create form lands on a number that works for
+    # most packs without manual override.
+    default_memory_mb = 8192
 
     def __init__(self, client: httpx.AsyncClient | None = None):
         self._client = client

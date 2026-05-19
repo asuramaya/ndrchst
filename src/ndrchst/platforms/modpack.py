@@ -47,6 +47,8 @@ class Modpack(Platform):
     display_name = "Modpack (server-pack URL)"
     implemented = True
     default_visible = True
+    # Modpacks are NeoForge-flavoured by default; same RAM floor reasoning.
+    default_memory_mb = 8192
 
     def __init__(self, client: httpx.AsyncClient | None = None):
         self._client = client

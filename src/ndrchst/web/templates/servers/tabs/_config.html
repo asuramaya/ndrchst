@@ -20,6 +20,8 @@
       <span><strong>Memory (MB)</strong></span>
       <small style="color: var(--text-muted);">
         Sets <span class="mono">-Xmx</span>. <span class="mono">-Xms</span> is auto-derived (half of Xmx, min 512). Container <span class="mono">mem_limit</span> is bumped to match.
+        <br>
+        Practical floors: vanilla / Paper ~2 GB; NeoForge ~4 GB; kitchen-sink modpacks (ATM10-class) ~8-12 GB.
       </small>
       <input type="number" name="memory_mb" min="512" required
              value="{{ server.memory_mb }}"

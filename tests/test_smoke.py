@@ -48,3 +48,14 @@ def test_platforms_include_hidden_flag_surfaces_bedrock(client: TestClient):
     # Paper is still visible by default
     paper = next(p for p in payload if p["id"] == "paper")
     assert paper["default_visible"] is True
+
+
+def test_platforms_surface_default_memory(client: TestClient):
+    """Modded platforms need a higher RAM default than Paper. The API
+    surfaces this so the create form can pre-fill the right number."""
+    r = client.get("/api/platforms")
+    payload = r.json()
+    by_id = {p["id"]: p for p in payload}
+    assert by_id["paper"]["default_memory_mb"] == 2048
+    assert by_id["neoforge"]["default_memory_mb"] == 8192
+    assert by_id["modpack"]["default_memory_mb"] == 8192

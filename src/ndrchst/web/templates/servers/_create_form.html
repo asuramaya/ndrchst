@@ -25,7 +25,10 @@
                   hx-include="this"
                   onchange="ndrchstUpdateVersionHint()">
             {% for p in platforms if p.implemented and p.default_visible %}
-              <option value="{{ p.id }}">{{ p.display_name }} ({{ p.family.value }})</option>
+              <option value="{{ p.id }}"
+                      data-default-memory-mb="{{ p.default_memory_mb }}">
+                {{ p.display_name }} ({{ p.family.value }})
+              </option>
             {% endfor %}
           </select>
         </div>
@@ -47,6 +50,7 @@
           const input = document.getElementById('version');
           const label = document.getElementById('version-label');
           const hint = document.getElementById('version-hint');
+          const mem = document.getElementById('memory_mb');
           if (sel.value === 'modpack') {
             label.textContent = 'Server-pack URL';
             input.value = '';
@@ -59,6 +63,14 @@
             }
             input.placeholder = 'latest or e.g. 1.21.3';
             hint.style.display = 'none';
+          }
+          // Bump memory default to whatever the platform expects. Only set
+          // it if the user hasn't already typed something meaningful — we
+          // don't want to clobber a deliberate override.
+          const opt = sel.options[sel.selectedIndex];
+          const def = parseInt(opt.dataset.defaultMemoryMb, 10);
+          if (!isNaN(def) && (mem.value === '' || mem.value === '2048' || mem.value === '8192')) {
+            mem.value = def;
           }
         }
       </script>
