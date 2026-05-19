@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Protocol
 
 import docker
-from docker.errors import NotFound
+from docker.errors import ImageNotFound, NotFound
 
 from ..domain.models import Family, ServerStatus
 
@@ -90,8 +90,14 @@ class Docker:
         return await asyncio.to_thread(self._client.ping)
 
     async def create_container(self, spec: ContainerSpec) -> str:
-        """Idempotent: removes any existing container with the same name first."""
+        """Idempotent: removes any existing container with the same name first.
+
+        Pulls the image if it is not present locally. docker-py's
+        ``containers.create()`` does not pull on miss — without this, the very
+        first container for any image fails with ImageNotFound.
+        """
         await self._remove_if_exists(spec.name)
+        await self._ensure_image(spec.image)
 
         def _create() -> str:
             c = self._client.containers.create(
@@ -121,6 +127,14 @@ class Docker:
             return c.id
 
         return await asyncio.to_thread(_create)
+
+    async def _ensure_image(self, image: str) -> None:
+        def _check_and_pull() -> None:
+            try:
+                self._client.images.get(image)
+            except ImageNotFound:
+                self._client.images.pull(image)
+        await asyncio.to_thread(_check_and_pull)
 
     async def start(self, container_id: str) -> None:
         await asyncio.to_thread(self._container(container_id).start)

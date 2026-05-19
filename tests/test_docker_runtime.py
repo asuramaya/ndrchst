@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
-from docker.errors import NotFound
+from docker.errors import ImageNotFound, NotFound
 
 from ndrchst.domain.models import Family, ServerStatus
 from ndrchst.runtime.docker import (
@@ -87,9 +87,35 @@ class FakeContainers:
         return list(self.by_id.values())
 
 
+@dataclass
+class FakeImages:
+    """Mirrors the surface of ``client.images`` we touch.
+
+    ``always_present`` makes ``get()`` succeed for any name; tests that want
+    to exercise the auto-pull path construct with ``always_present=False``.
+    """
+    present: set = field(default_factory=set)
+    pulled: list = field(default_factory=list)
+    always_present: bool = True
+
+    def get(self, name: str):
+        if self.always_present or name in self.present:
+            return {"name": name}  # docker-py returns an Image; shape doesn't matter
+        raise ImageNotFound(f"image {name!r} not present locally")
+
+    def pull(self, name: str):
+        self.pulled.append(name)
+        self.present.add(name)
+        return {"name": name}
+
+
 class FakeClient:
-    def __init__(self):
+    def __init__(self, *, images_present: set | None = None):
         self.containers = FakeContainers()
+        if images_present is None:
+            self.images = FakeImages(always_present=True)
+        else:
+            self.images = FakeImages(present=set(images_present), always_present=False)
 
     def ping(self) -> bool:
         return True
@@ -204,6 +230,22 @@ async def test_status_returns_stopped_for_missing_container():
     d = Docker(client=fake)
     s = await d.status("does-not-exist")
     assert s == ServerStatus.STOPPED
+
+
+async def test_create_pulls_image_when_missing(spec: ContainerSpec):
+    """ImageNotFound should trigger an automatic pull, then create succeeds."""
+    fake = FakeClient(images_present=set())  # nothing local
+    d = Docker(client=fake)
+    cid = await d.create_container(spec)
+    assert cid
+    assert fake.images.pulled == [spec.image]
+
+
+async def test_create_skips_pull_when_image_present(spec: ContainerSpec):
+    fake = FakeClient(images_present={spec.image})
+    d = Docker(client=fake)
+    await d.create_container(spec)
+    assert fake.images.pulled == []
 
 
 async def test_lifecycle_calls(spec: ContainerSpec):

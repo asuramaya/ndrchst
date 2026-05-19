@@ -27,8 +27,16 @@ from tests.test_docker_runtime import FakeClient
 
 
 @pytest.fixture
-def app_no_docker(tmp_path: Path):
-    """App built with the real lifespan; Docker unreachable (no daemon)."""
+def app_no_docker(tmp_path: Path, monkeypatch):
+    """App built with the real lifespan; Docker forced unreachable.
+
+    Stubs ``docker.from_env`` so the test outcome is deterministic on hosts
+    that have Docker available too (e.g. CI, the staging VM).
+    """
+    import docker as docker_mod
+    def _raise(*a, **kw):
+        raise docker_mod.errors.DockerException("forced unavailable for test")
+    monkeypatch.setattr(docker_mod, "from_env", _raise)
     return create_app(
         db_path=tmp_path / "t.db",
         servers_root=tmp_path / "servers",

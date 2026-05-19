@@ -61,8 +61,11 @@ class Bedrock(Platform):
 
     async def _http(self) -> httpx.AsyncClient:
         if self._client is None:
+            # 300s read timeout: the zip is ~80 MB and we stream it; a slow
+            # link or temporary CDN hiccup shouldn't fail the install.
             self._client = httpx.AsyncClient(
-                timeout=60.0, headers={"User-Agent": _UA}
+                timeout=httpx.Timeout(connect=15.0, read=300.0, write=60.0, pool=15.0),
+                headers={"User-Agent": _UA},
             )
         return self._client
 
