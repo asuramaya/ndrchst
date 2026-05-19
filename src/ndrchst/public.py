@@ -176,7 +176,9 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
 
     @app.get("/pilot/{server_id}/mods/{filename}")
     def pilot_mod_file(server_id: str, filename: str) -> FileResponse:
-        """Stream a single mod jar from the server's mods directory."""
+        """Stream a single mod jar — used for incremental sync (a handful
+        of changed mods). For first install, prefer mods.zip (one request
+        instead of ~450, which the tunnel serves orders of magnitude faster)."""
         from .runtime.lifecycle import SERVERS_ROOT_DEFAULT
         # Path-traversal guard: filename must be a plain *.jar with no separators.
         if "/" in filename or "\\" in filename or filename.startswith("."):
@@ -190,6 +192,41 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             path,
             media_type="application/java-archive",
             filename=filename,
+            headers=_NO_STORE,
+        )
+
+    @app.get("/pilot/{server_id}/mods.zip")
+    def pilot_mods_bundle(server_id: str) -> FileResponse:
+        """Bundle the server's entire mods/ set into one zip. Bulk first-
+        install path: pulling ~450 jars as individual requests through the
+        tunnel is dominated by per-request overhead (~25s/file observed),
+        but one large stream runs at full bandwidth. The zip is rebuilt
+        only when the mods dir changes (mtime check) and cached next to
+        the data dir."""
+        import zipfile
+
+        from .runtime.lifecycle import SERVERS_ROOT_DEFAULT
+        server = srv_store.get(_conn(), server_id)
+        if server is None:
+            raise HTTPException(status_code=404, detail="server not found")
+        mods_dir = SERVERS_ROOT_DEFAULT / server_id / "mods"
+        if not mods_dir.exists():
+            raise HTTPException(status_code=404, detail="no mods for this server")
+        jars = sorted(p for p in mods_dir.iterdir()
+                      if p.is_file() and p.name.endswith(".jar"))
+        cache = mods_dir.parent / "mods-bundle.zip"
+        # Rebuild if the cache is missing or older than the newest jar.
+        newest = max((p.stat().st_mtime for p in jars), default=0)
+        if not cache.exists() or cache.stat().st_mtime < newest:
+            tmp = cache.with_suffix(".zip.building")
+            with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_STORED) as zf:
+                for p in jars:
+                    zf.write(p, arcname=p.name)
+            tmp.replace(cache)
+        return FileResponse(
+            cache,
+            media_type="application/zip",
+            filename="mods.zip",
             headers=_NO_STORE,
         )
 
