@@ -44,10 +44,19 @@ def fetch_modpack_zip(
     url: str, dest_zip: Path, *, on_log: Callable[[str], None],
 ) -> None:
     """Download a modpack zip (sync, urllib-based to avoid an async dep
-    just for one download). Validates the result is a zip — CurseForge
-    sometimes returns an HTML interstitial on certain URLs."""
+    just for one download). Skips the download if a valid zip is already
+    cached at `dest_zip` — install can be safely re-run after a crash."""
     import urllib.request
     dest_zip.parent.mkdir(parents=True, exist_ok=True)
+
+    # Cached? Skip download.
+    if dest_zip.exists() and zipfile.is_zipfile(dest_zip):
+        on_log(
+            f"Modpack zip already cached at {dest_zip} "
+            f"({dest_zip.stat().st_size / 1e6:.1f} MB) — skipping download"
+        )
+        return
+
     on_log(f"Downloading modpack from {url}…")
     tmp = dest_zip.with_suffix(dest_zip.suffix + ".part")
     # CF's CDN rejects Python's default urllib UA with 403; spoof a
@@ -57,13 +66,19 @@ def fetch_modpack_zip(
     )
     try:
         with urllib.request.urlopen(req) as resp, tmp.open("wb") as f:
+            total_len = int(resp.headers.get("content-length") or 0)
             total = 0
+            last_emit = 0
             while True:
                 chunk = resp.read(1024 * 1024)
                 if not chunk:
                     break
                 f.write(chunk)
                 total += len(chunk)
+                if total - last_emit >= 16 * 1024 * 1024:
+                    pct = (total / total_len * 100) if total_len else 0
+                    on_log(f"  {total/1e6:.0f} MB / {total_len/1e6:.0f} MB ({pct:.0f}%)")
+                    last_emit = total
         if not zipfile.is_zipfile(tmp):
             tmp.unlink(missing_ok=True)
             raise ModpackInstallError(
@@ -153,9 +168,8 @@ def install_client_pack(
     (mods_installed, mods_failed)."""
     pack_zip = profile_dir / "_modpack.zip"
     fetch_modpack_zip(url, pack_zip, on_log=on_log)
-    try:
-        return asyncio.run(_async_install(
-            pack_zip=pack_zip, profile_dir=profile_dir, on_log=on_log,
-        ))
-    finally:
-        pack_zip.unlink(missing_ok=True)
+    # Keep the zip around — fetch_modpack_zip's cache check will skip
+    # re-downloading on subsequent installs.
+    return asyncio.run(_async_install(
+        pack_zip=pack_zip, profile_dir=profile_dir, on_log=on_log,
+    ))
