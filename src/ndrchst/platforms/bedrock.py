@@ -61,6 +61,10 @@ class Bedrock(Platform):
     family = Family.BEDROCK
     display_name = "Bedrock"
     implemented = True
+    # Hidden from the create-form / API listing while the product focuses on
+    # modded Java. Code stays intact (cross-play, BDS install, doctor checks)
+    # so this can be flipped back on or open-sourced cleanly later.
+    default_visible = False
 
     def __init__(self, client: httpx.AsyncClient | None = None):
         self._client = client

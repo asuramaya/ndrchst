@@ -25,9 +25,26 @@ def test_healthz(client: TestClient):
     assert "version" in body
 
 
-def test_platforms_include_bedrock(client: TestClient):
+def test_platforms_default_hides_bedrock(client: TestClient):
+    """Bedrock stays registered (code intact for future OSS / re-enable)
+    but is hidden from the default API listing — the product is focused
+    on modded Java right now."""
     r = client.get("/api/platforms")
     assert r.status_code == 200
     ids = {p["id"] for p in r.json()}
-    assert "bedrock" in ids
     assert "paper" in ids
+    assert "bedrock" not in ids
+
+
+def test_platforms_include_hidden_flag_surfaces_bedrock(client: TestClient):
+    """The hidden platform shows up when explicitly opted in."""
+    r = client.get("/api/platforms?include_hidden=true")
+    assert r.status_code == 200
+    payload = r.json()
+    ids = {p["id"] for p in payload}
+    assert "bedrock" in ids
+    bedrock = next(p for p in payload if p["id"] == "bedrock")
+    assert bedrock["default_visible"] is False
+    # Paper is still visible by default
+    paper = next(p for p in payload if p["id"] == "paper")
+    assert paper["default_visible"] is True

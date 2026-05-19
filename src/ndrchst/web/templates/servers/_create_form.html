@@ -23,7 +23,7 @@
                   hx-target="#version-options"
                   hx-trigger="load, change"
                   hx-include="this">
-            {% for p in platforms if p.implemented %}
+            {% for p in platforms if p.implemented and p.default_visible %}
               <option value="{{ p.id }}">{{ p.display_name }} ({{ p.family.value }})</option>
             {% endfor %}
           </select>

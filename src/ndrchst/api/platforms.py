@@ -9,15 +9,21 @@ router = APIRouter()
 
 
 @router.get("")
-def list_platforms() -> list[dict]:
+def list_platforms(include_hidden: bool = False) -> list[dict]:
+    """List registered platforms. By default hides platforms marked
+    ``default_visible=False`` (e.g. Bedrock while the product is focused on
+    modded Java). Pass ``?include_hidden=true`` to see them anyway — useful
+    for debugging and for any future "advanced" surface."""
     return [
         {
             "id": p.id,
             "family": p.family.value,
             "name": p.display_name,
             "implemented": p.implemented,
+            "default_visible": getattr(p, "default_visible", True),
         }
         for p in REGISTRY.values()
+        if include_hidden or getattr(p, "default_visible", True)
     ]
 
 

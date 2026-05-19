@@ -34,6 +34,12 @@ class Platform(Protocol):
     # False for stub platforms whose install() raises NotImplementedError;
     # the UI hides these from the create dropdown so users can't pick them.
     implemented: bool
+    # False for platforms we don't want to surface in the UI right now even
+    # though the code path is fully implemented (e.g. Bedrock while the
+    # product is focused on modded Java). The platform stays registered and
+    # importable so the code can be open-sourced or re-enabled later; only
+    # the create-form and API listing filter it out.
+    default_visible: bool = True
 
     async def versions(self) -> list[VersionInfo]: ...
 

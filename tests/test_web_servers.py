@@ -98,13 +98,13 @@ def test_new_form_returns_overlay_partial(app_no_docker):
         assert r.status_code == 200
         html = r.text
         assert 'class="overlay"' in html
-        # Only implemented platforms are offered; stubs (purpur/vanilla/fabric/
-        # forge/neoforge) would 4xx with NotImplementedError if selected, so
-        # we hide them. Bedrock must be present (first-class per project policy).
-        for pid in ("paper", "bedrock"):
-            assert f'value="{pid}"' in html
-        for stub in ("purpur", "vanilla", "fabric", "forge", "neoforge"):
-            assert f'value="{stub}"' not in html
+        # Only platforms that are both implemented AND default_visible are
+        # offered. Bedrock is implemented but hidden (modded-Java focus);
+        # stubs (purpur/vanilla/fabric/forge/neoforge) are filtered for
+        # not-yet-implemented. Paper is the only thing the user can pick.
+        assert 'value="paper"' in html
+        for hidden_or_stub in ("bedrock", "purpur", "vanilla", "fabric", "forge", "neoforge"):
+            assert f'value="{hidden_or_stub}"' not in html
 
 
 def test_create_returns_503_without_docker(app_no_docker):

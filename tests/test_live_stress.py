@@ -99,10 +99,12 @@ def test_new_form_full_partial(server):
     r = httpx.get(f"{server}/servers/new", headers={"HX-Request": "true"})
     assert r.status_code == 200
     html = r.text
-    # Form only shows implemented platforms; stubs (vanilla, fabric, forge,
-    # neoforge, purpur) are filtered out by the template.
-    for pid in ("paper", "bedrock"):
-        assert f'value="{pid}"' in html
+    # Form only shows platforms that are both implemented AND default_visible.
+    # Bedrock is implemented but hidden right now (modded-Java focus); stubs
+    # (vanilla, fabric, forge, neoforge, purpur) are filtered for not-yet-
+    # implemented. Paper is the only thing the user can pick from the UI.
+    assert 'value="paper"' in html
+    assert 'value="bedrock"' not in html
     # htmx hooks
     assert 'hx-post="/servers"' in html
     assert "cross_play" in html
@@ -139,12 +141,18 @@ def test_api_servers_returns_json(server):
     assert r.json() == []
 
 
-def test_api_platforms_includes_bedrock(server):
+def test_api_platforms_default_excludes_bedrock(server):
+    """Default listing hides Bedrock (modded-Java focus). Code stays
+    registered — opt in with ?include_hidden=true to see it."""
     r = httpx.get(f"{server}/api/platforms")
     assert r.status_code == 200
     ids = {p["id"] for p in r.json()}
-    assert "bedrock" in ids
     assert "paper" in ids
+    assert "bedrock" not in ids
+
+    r = httpx.get(f"{server}/api/platforms?include_hidden=true")
+    ids = {p["id"] for p in r.json()}
+    assert "bedrock" in ids
 
 
 def test_static_css_served(server):
