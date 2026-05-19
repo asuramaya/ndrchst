@@ -53,8 +53,15 @@ def run() -> None:
     form.pack(fill=tk.X)
     ttk.Label(form, text="In-game name:").pack(side=tk.LEFT)
     name_var = tk.StringVar(value=cfg.default_username)
-    name_entry = ttk.Entry(form, textvariable=name_var, width=24)
+    name_entry = ttk.Entry(form, textvariable=name_var, width=20)
     name_entry.pack(side=tk.LEFT, padx=8)
+
+    ttk.Label(form, text="RAM (GB):").pack(side=tk.LEFT)
+    ram_var = tk.StringVar(value="8")
+    ram_spin = ttk.Spinbox(form, from_=2, to=32, increment=1, width=4,
+                           textvariable=ram_var)
+    ram_spin.pack(side=tk.LEFT, padx=8)
+
     launch_btn = ttk.Button(form, text="Play")
     launch_btn.pack(side=tk.LEFT, padx=8)
 
@@ -91,8 +98,13 @@ def run() -> None:
         if not username:
             append_log("Username cannot be empty.")
             return
+        try:
+            ram_gb = max(2, int(float(ram_var.get())))
+        except ValueError:
+            ram_gb = 8
         launch_btn.config(state=tk.DISABLED, text="Running…")
         name_entry.config(state=tk.DISABLED)
+        ram_spin.config(state=tk.DISABLED)
         phase_var.set("Starting…")
 
         def worker() -> None:
@@ -108,6 +120,7 @@ def run() -> None:
                     modpack_url=cfg.modpack_url,
                     mods_sync_url=cfg.mods_sync_url,
                     tunnel_hostname=cfg.tunnel_hostname,
+                    client_ram_mb=ram_gb * 1024,
                 )
                 emit_from_worker("Minecraft exited.")
                 root.after(0, lambda: phase_var.set("Minecraft exited"))
@@ -118,6 +131,7 @@ def run() -> None:
                 root.after(0, lambda: (
                     launch_btn.config(state=tk.NORMAL, text="Play"),
                     name_entry.config(state=tk.NORMAL),
+                    ram_spin.config(state=tk.NORMAL),
                 ))
 
         threading.Thread(target=worker, daemon=True).start()

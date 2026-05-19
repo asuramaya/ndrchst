@@ -112,6 +112,7 @@ def launch(
     modpack_url: Optional[str] = None,
     mods_sync_url: Optional[str] = None,
     tunnel_hostname: Optional[str] = None,
+    client_ram_mb: int = 8192,
 ) -> int:
     """Install + run MC in offline mode, auto-connecting to the server.
 
@@ -180,6 +181,26 @@ def launch(
     version.auth_session = OfflineAuthSession(username, uuid4().hex)
     version.quick_play = QuickPlayMultiplayer(dial_host, dial_port)
     env = version.install(watcher=_GuiWatcher(on_log))
+
+    # Client JVM tuning. portablemc launches with no -Xmx (JVM default)
+    # and SerialGC — fine for vanilla, fatal for a 400+ mod pack: it
+    # thrashes and dies during client-side world load. Allocate a real
+    # modded heap + G1GC.
+    ram_mb = max(client_ram_mb, 2048)
+    xms_mb = min(2048, ram_mb)
+    env.jvm_args[:0] = [
+        f"-Xmx{ram_mb}m",
+        f"-Xms{xms_mb}m",
+        "-XX:+UseG1GC",
+        "-XX:+ParallelRefProcEnabled",
+        "-XX:MaxGCPauseMillis=200",
+        "-XX:+UnlockExperimentalVMOptions",
+        "-XX:G1NewSizePercent=30",
+        "-XX:G1MaxNewSizePercent=40",
+        "-XX:G1HeapRegionSize=8M",
+        "-XX:G1ReservePercent=20",
+    ]
+    on_log(f"Client heap: -Xmx{ram_mb}m (G1GC)")
 
     on_log(
         f"Starting Minecraft as {username}, connecting to "
