@@ -292,15 +292,19 @@ async def test_install_cf_client_pack_full_flow(tmp_path: Path, monkeypatch):
     assert art.entrypoint == "run.sh"
 
 
-async def test_install_cf_client_pack_surfaces_failed_mod_downloads(
+async def test_install_cf_client_pack_tolerates_small_failure_ratio(
     tmp_path: Path, monkeypatch,
 ):
-    """If any mod 403s (third-party-disabled), the install should raise
-    with the offending mod identified — not silently boot half a pack."""
-    pack_zip = _cf_client_zip(files=[
-        {"required": True, "projectID": 100, "fileID": 7471280},
-        {"required": True, "projectID": 200, "fileID": 7574260},
-    ])
+    """Two mods out of 40 going 404 (~5%) is a rotted manifest, not a
+    fatal install problem. The pack still boots with those mods missing
+    — we log the failures and write a sidecar file so the operator can
+    see what's missing."""
+    # 40 entries; we'll make 2 fail (5%, right at the threshold).
+    entries = [
+        {"required": True, "projectID": 100 + i, "fileID": 7000000 + i}
+        for i in range(40)
+    ]
+    pack_zip = _cf_client_zip(files=entries)
 
     def fake_run(**_):
         (tmp_path / "data").mkdir(exist_ok=True)
@@ -319,18 +323,60 @@ async def test_install_cf_client_pack_surfaces_failed_mod_downloads(
             parts = url.rstrip("/").split("/")
             fid = int(parts[-1])
             pid = int(parts[-3])
+            # Manifest rot: two files return data:null (mimics CF deleting them).
+            if fid in (7000000, 7000001):
+                return httpx.Response(200, json={"data": None})
             return httpx.Response(200, json={
                 "data": {"id": fid, "projectId": pid, "fileName": f"mod-{fid}.jar"},
             })
         if "forgecdn.net" in url:
-            # The 7471280 / blocked one
-            if "mod-7471280.jar" in url:
-                return httpx.Response(403)
             return httpx.Response(200, content=b"x")
         return httpx.Response(404)
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     mp = Modpack(client=client)
-    with pytest.raises(ModpackInstallError, match="failed to download"):
+    art = await mp.install("https://example.com/pack.zip", tmp_path / "data")
+    await client.aclose()
+    # Sidecar file lists the missing mods
+    missing = (tmp_path / "data" / "ndrchst-missing-mods.txt").read_text()
+    assert "7000000" in missing
+    assert "7000001" in missing
+    # 38 of 40 mods landed
+    assert len(list((tmp_path / "data" / "mods").iterdir())) == 38
+    assert art.entrypoint == "run.sh"
+
+
+async def test_install_cf_client_pack_aborts_on_too_many_failures(
+    tmp_path: Path, monkeypatch,
+):
+    """If more than the tolerance ratio fail, hard-stop — the resulting
+    server is likely broken enough to be useless."""
+    # 10 entries, all fail. 100% failure rate → abort.
+    entries = [
+        {"required": True, "projectID": 100 + i, "fileID": 7000000 + i}
+        for i in range(10)
+    ]
+    pack_zip = _cf_client_zip(files=entries)
+
+    def fake_run(**_):
+        (tmp_path / "data").mkdir(exist_ok=True)
+        (tmp_path / "data" / "run.sh").write_text("#!/bin/bash\n")
+        return ""
+
+    monkeypatch.setattr("ndrchst.platforms.modpack.run_jdk_jar", fake_run)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url.endswith("/pack.zip"):
+            return httpx.Response(200, content=pack_zip)
+        if "maven.neoforged.net" in url:
+            return httpx.Response(200, content=b"x")
+        if "/api/v1/mods/" in url:
+            return httpx.Response(403)  # everything blocked
+        return httpx.Response(404)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    mp = Modpack(client=client)
+    with pytest.raises(ModpackInstallError, match=r"\d+% > \d+% threshold"):
         await mp.install("https://example.com/pack.zip", tmp_path / "data")
     await client.aclose()

@@ -40,6 +40,13 @@ log = logging.getLogger("ndrchst.modpack")
 # 1-2 GiB; anything dramatically larger is a smell.
 MAX_PACK_BYTES = 4 * 1024 * 1024 * 1024
 
+# Fraction of CurseForge manifest entries we'll let fail before aborting.
+# Modpack manifests rot: authors delete mods, file IDs vanish. A typical
+# kitchen-sink pack of 400-500 mods losing one or two is normal and the
+# resulting server still boots; losing 10% of them means the operator
+# should pick a different pack version.
+MODPACK_FAILURE_TOLERANCE = 0.05
+
 
 class ModpackInstallError(RuntimeError):
     pass
@@ -214,20 +221,43 @@ class Modpack(Platform):
             http_client, manifest.files, mods_dir, on_progress=progress,
         )
         if failures:
-            # Surface the full list — operator needs to know exactly which
-            # mods to download manually. Truncate to first 10 in the message,
-            # log the rest at WARNING level.
+            # Modpack manifests rot — author deletes a mod, fileIDs go 404.
+            # Tolerate up to MODPACK_FAILURE_TOLERANCE of the manifest going
+            # missing; anything more and we abort because the resulting
+            # server is likely broken enough to be useless.
             for entry, err in failures:
                 log.warning("mod download failed: %s/%s: %s",
                             entry.project_id, entry.file_id, err)
+            ratio = len(failures) / max(len(manifest.files), 1)
             joined = "\n".join(
                 f"  - project {e.project_id} file {e.file_id}: {err}"
                 for e, err in failures[:10]
             )
             extra = f"\n  ...and {len(failures) - 10} more" if len(failures) > 10 else ""
-            raise ModpackInstallError(
-                f"{len(failures)} of {len(manifest.files)} mods failed to download:\n"
-                f"{joined}{extra}"
+            if ratio > MODPACK_FAILURE_TOLERANCE:
+                raise ModpackInstallError(
+                    f"{len(failures)} of {len(manifest.files)} mods failed to "
+                    f"download ({ratio:.1%} > {MODPACK_FAILURE_TOLERANCE:.0%} "
+                    f"threshold):\n{joined}{extra}"
+                )
+            log.warning(
+                "modpack install continuing with %d of %d mods missing (%.1f%% "
+                "<= %.0f%% tolerance):\n%s%s",
+                len(failures), len(manifest.files), ratio * 100,
+                MODPACK_FAILURE_TOLERANCE * 100, joined, extra,
+            )
+            # Write a sidecar file so the operator can see what's missing
+            # after the install — surface this via the Mods or Files tab.
+            missing_path = dest / "ndrchst-missing-mods.txt"
+            missing_path.write_text(
+                f"# {len(failures)} mods from this modpack's manifest could not "
+                "be downloaded.\n"
+                "# Manifest entries (projectID/fileID) and the reason:\n\n"
+                + "\n".join(
+                    f"{e.project_id}/{e.file_id}\t{err}"
+                    for e, err in failures
+                )
+                + "\n",
             )
         log.info("downloaded %d mods to %s", len(successes), mods_dir)
 

@@ -176,18 +176,33 @@ async def fetch_filename(
 ) -> str:
     """Hit the unofficial v1 endpoint to get this fileId's filename."""
     url = f"{CF_WEBSITE_API}/{project_id}/files/{file_id}"
-    r = await client.get(url)
+    try:
+        r = await client.get(url)
+    except httpx.HTTPError as e:
+        raise CurseForgeError(
+            f"CF metadata request failed for {project_id}/{file_id}: {e}"
+        ) from e
     if r.status_code == 404:
         raise CurseForgeError(
             f"CF doesn't know file {file_id} for project {project_id} "
             f"(404 from {url}) — manifest is out of date or the mod was deleted"
         )
-    r.raise_for_status()
+    if r.status_code == 403:
+        raise CurseForgeError(
+            f"CF returned 403 for {project_id}/{file_id} — the project is "
+            f"unlisted or the endpoint is blocked for this client"
+        )
+    if r.status_code >= 400:
+        raise CurseForgeError(
+            f"CF returned HTTP {r.status_code} for {project_id}/{file_id}"
+        )
     payload = r.json().get("data") or {}
     name = payload.get("fileName")
     if not name:
         raise CurseForgeError(
-            f"CF returned no fileName for {project_id}/{file_id}: {payload!r}"
+            f"CF returned no fileName for {project_id}/{file_id} "
+            f"(file was likely deleted from the mod's project page; "
+            f"the modpack manifest is out of date)"
         )
     return name
 
