@@ -205,17 +205,19 @@ def launch(
     env.jvm_args[insert_at:insert_at] = flags
     on_log(f"Client heap: -Xmx{ram_mb}m (G1GC)")
 
-    # Hybrid-GPU laptops (Linux) default Minecraft to the integrated GPU,
-    # which can't keep up rendering a heavy modpack world (render thread
-    # hangs → "stuck loading terrain"). If a discrete NVIDIA GPU is
-    # present, request PRIME render-offload so MC runs on it. No-op /
-    # safe on machines without NVIDIA (we only set it when the device or
-    # nvidia-smi is present, so we never break Mesa-only setups).
+    # Both GPUs work for connecting + playing — the iGPU is just slower
+    # rendering a heavy modpack world. On hybrid laptops we leave the
+    # system default (usually iGPU) unless the user opts into the
+    # discrete NVIDIA GPU via NDRCHST_PREFER_DGPU=1 (PRIME offload). Opt-in
+    # so we never override someone's working iGPU setup or break a
+    # Mesa-only machine.
     import os as _os
     import platform as _pf
     import shutil as _sh
-    if _pf.system() == "Linux" and (
-        Path("/dev/nvidia0").exists() or _sh.which("nvidia-smi")
+    if (
+        _os.environ.get("NDRCHST_PREFER_DGPU") == "1"
+        and _pf.system() == "Linux"
+        and (Path("/dev/nvidia0").exists() or _sh.which("nvidia-smi"))
     ):
         _os.environ.setdefault("__NV_PRIME_RENDER_OFFLOAD", "1")
         _os.environ.setdefault("__GLX_VENDOR_LIBRARY_NAME", "nvidia")
