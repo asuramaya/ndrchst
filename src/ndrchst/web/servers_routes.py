@@ -211,12 +211,12 @@ async def build_mods_index(
     bytes from CF's global CDN instead of through the operator's uplink.
     Run after the mod set changes (install, substitution, version bump)."""
     try:
-        total, cdn = await lifecycle.build_mods_index(server_id)
+        total, cdn, client_only = await lifecycle.build_mods_index(server_id)
     except LifecycleError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return HTMLResponse(
         f"Built mods index: {total} mods ({cdn} from CDN, "
-        f"{total - cdn} from origin)",
+        f"{total - cdn} from origin, {client_only} client-only)",
     )
 
 

@@ -458,12 +458,36 @@ class Lifecycle:
                 # if a CDN URL 403s (third-party-downloads-disabled mods).
                 "origin_url": origin_url,
                 "from_cdn": url is not None,
+                "client_only": False,
             })
+
+        # Add the manifest's CLIENT-ONLY mods: entries the full client pack
+        # has that the server's mods/ doesn't (rendering, UI, minimaps, JEI
+        # addons). The dedicated server can't run these — they reference
+        # client classes — but the client needs them to render the world AND
+        # to match the modpack's expected mod count (Crash Assistant nags
+        # otherwise). They come straight from CF's CDN; we have no local copy
+        # to hash, so sha1 is null and the pilot trusts the CDN bytes.
+        server_filenames = {e["filename"] for e in entries}
+        for filename, cdn_url in filename_to_url.items():
+            if filename in server_filenames:
+                continue
+            entries.append({
+                "filename": filename,
+                "size": None,
+                "sha1": None,
+                "url": cdn_url,
+                "origin_url": None,
+                "from_cdn": True,
+                "client_only": True,
+            })
+
         index = {"server_id": server_id, "mods": entries}
         out = self._root / server_id / "mods-index.json"
         out.write_text(json.dumps(index, indent=2))
         cdn_count = sum(1 for e in entries if e["from_cdn"])
-        return len(entries), cdn_count
+        client_only = sum(1 for e in entries if e["client_only"])
+        return len(entries), cdn_count, client_only
 
     async def update_config(
         self,

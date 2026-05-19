@@ -115,10 +115,13 @@ def sync_mods_from_server(
     kept = 0
     for name, meta in server_mods.items():
         path = mods_dir / name
-        if path.exists() and _sha1_file(path) == meta["sha1"]:
-            kept += 1
-        else:
-            to_fetch.append(name)
+        if path.exists():
+            # Client-only mods carry no sha1 (no server-side copy to hash) —
+            # presence is enough. Server mods are sha1-verified.
+            if meta.get("sha1") is None or _sha1_file(path) == meta["sha1"]:
+                kept += 1
+                continue
+        to_fetch.append(name)
 
     if not to_fetch and not to_remove:
         on_log(f"Mods already in sync ({kept} unchanged)")
