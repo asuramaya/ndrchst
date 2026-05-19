@@ -16,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 from ..api.deps import db, require_lifecycle, state
 from ..domain import files as files_mod
 from ..domain import players as players_mod
+from ..domain import plugins as plugins_mod
 from ..domain import properties as props_mod
 from ..domain import worlds as worlds_mod
 from ..domain.models import Family, Server
@@ -40,7 +41,7 @@ TEMPLATES = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "tem
 
 router = APIRouter()
 
-_VALID_TABS = ("console", "properties", "players", "worlds", "files", "mods", "backups")
+_VALID_TABS = ("console", "properties", "players", "worlds", "files", "mods", "plugins", "packs", "backups")
 
 
 def _get_server(conn: sqlite3.Connection, server_id: str) -> Server:
@@ -121,6 +122,12 @@ async def _tab_context(
         return _files_ctx(request, server.id, "")
     if tab == "mods":
         return {"installed": list_installed(conn, server.id)}
+    if tab == "plugins":
+        data_dir = _data_dir(request, server.id)
+        return {"plugins": plugins_mod.list_plugins(data_dir)}
+    if tab == "packs":
+        data_dir = _data_dir(request, server.id)
+        return _packs_ctx(data_dir, server)
     if tab == "backups":
         return {"backups": backup_mod.list_for(server.id)}
     return {}
@@ -413,6 +420,179 @@ async def mods_remove(
     )
 
 
+# ─── Plugins (Bukkit/Spigot/Paper) ─────────────────────────────────────────
+
+
+def _plugins_ctx(data_dir: Path) -> dict:
+    return {"plugins": plugins_mod.list_plugins(data_dir)}
+
+
+@router.post("/servers/{server_id}/plugins/{filename}/toggle", response_class=HTMLResponse)
+async def plugins_toggle(
+    request: Request, server_id: str, filename: str,
+    conn: sqlite3.Connection = Depends(db),
+) -> HTMLResponse:
+    server = _get_server(conn, server_id)
+    if server.family is not Family.JAVA:
+        raise HTTPException(status_code=400, detail="plugins are Java-only")
+    data_dir = _data_dir(request, server_id)
+    try:
+        plugins_mod.toggle_plugin(data_dir, filename)
+    except plugins_mod.PluginError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return TEMPLATES.TemplateResponse(
+        request, "servers/tabs/_plugins_list.html",
+        {"server": server, **_plugins_ctx(data_dir)},
+    )
+
+
+@router.delete("/servers/{server_id}/plugins/{filename}", response_class=HTMLResponse)
+async def plugins_remove(
+    request: Request, server_id: str, filename: str,
+    conn: sqlite3.Connection = Depends(db),
+) -> HTMLResponse:
+    server = _get_server(conn, server_id)
+    if server.family is not Family.JAVA:
+        raise HTTPException(status_code=400, detail="plugins are Java-only")
+    data_dir = _data_dir(request, server_id)
+    try:
+        plugins_mod.remove_plugin(data_dir, filename)
+    except plugins_mod.PluginError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return TEMPLATES.TemplateResponse(
+        request, "servers/tabs/_plugins_list.html",
+        {"server": server, **_plugins_ctx(data_dir)},
+    )
+
+
+@router.post("/servers/{server_id}/plugins/upload", response_class=HTMLResponse)
+async def plugins_upload(
+    request: Request, server_id: str,
+    conn: sqlite3.Connection = Depends(db),
+) -> HTMLResponse:
+    from fastapi import UploadFile
+    server = _get_server(conn, server_id)
+    if server.family is not Family.JAVA:
+        raise HTTPException(status_code=400, detail="plugins are Java-only")
+    form = await request.form()
+    upload: UploadFile = form.get("file")  # type: ignore[assignment]
+    if upload is None:
+        raise HTTPException(status_code=400, detail="no file uploaded")
+    data_dir = _data_dir(request, server_id)
+    try:
+        plugins_mod.save_upload(data_dir, upload.filename or "uploaded.jar", upload.file)
+    except plugins_mod.PluginError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return TEMPLATES.TemplateResponse(
+        request, "servers/tabs/_plugins_list.html",
+        {"server": server, **_plugins_ctx(data_dir)},
+    )
+
+
+# ─── Packs (datapacks + resource pack URL) ──────────────────────────────────
+
+
+def _packs_ctx(data_dir: Path, server: Server) -> dict:
+    """Datapacks live at world/datapacks/; the server resource-pack is a URL
+    field in server.properties (resource-pack=...)."""
+    world_name = "world"
+    props = props_mod.read(data_dir)
+    if "level-name" in props:
+        world_name = props["level-name"]
+    dp_dir = data_dir / world_name / "datapacks"
+    datapacks = []
+    if dp_dir.exists():
+        for p in sorted(dp_dir.iterdir()):
+            if p.is_dir() or (p.is_file() and p.suffix.lower() == ".zip"):
+                datapacks.append({
+                    "name": p.name,
+                    "size": p.stat().st_size if p.is_file() else None,
+                })
+    return {
+        "datapacks": datapacks,
+        "world_name": world_name,
+        "resource_pack_url": props.get("resource-pack", ""),
+        "resource_pack_sha1": props.get("resource-pack-sha1", ""),
+    }
+
+
+@router.post("/servers/{server_id}/packs/datapack/upload", response_class=HTMLResponse)
+async def datapack_upload(
+    request: Request, server_id: str,
+    conn: sqlite3.Connection = Depends(db),
+) -> HTMLResponse:
+    from fastapi import UploadFile
+    server = _get_server(conn, server_id)
+    if server.family is not Family.JAVA:
+        raise HTTPException(status_code=400, detail="datapacks are Java-only")
+    form = await request.form()
+    upload: UploadFile = form.get("file")  # type: ignore[assignment]
+    if upload is None or not upload.filename:
+        raise HTTPException(status_code=400, detail="no file uploaded")
+    if not upload.filename.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="datapack must be a .zip")
+    safe = upload.filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    if "/" in safe or "\\" in safe or safe.startswith("."):
+        raise HTTPException(status_code=400, detail="unsafe filename")
+    data_dir = _data_dir(request, server_id)
+    props = props_mod.read(data_dir)
+    world_name = props.get("level-name", "world")
+    dp_dir = data_dir / world_name / "datapacks"
+    dp_dir.mkdir(parents=True, exist_ok=True)
+    target = dp_dir / safe
+    import shutil
+    with target.open("wb") as f:
+        shutil.copyfileobj(upload.file, f)
+    return TEMPLATES.TemplateResponse(
+        request, "servers/tabs/_packs.html",
+        {"server": server, **_packs_ctx(data_dir, server)},
+    )
+
+
+@router.delete("/servers/{server_id}/packs/datapack/{filename}", response_class=HTMLResponse)
+async def datapack_remove(
+    request: Request, server_id: str, filename: str,
+    conn: sqlite3.Connection = Depends(db),
+) -> HTMLResponse:
+    server = _get_server(conn, server_id)
+    data_dir = _data_dir(request, server_id)
+    props = props_mod.read(data_dir)
+    world_name = props.get("level-name", "world")
+    target = (data_dir / world_name / "datapacks" / filename).resolve()
+    safe_base = (data_dir / world_name / "datapacks").resolve()
+    if safe_base not in target.parents and target != safe_base:
+        raise HTTPException(status_code=400, detail="path escape")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="datapack not found")
+    if target.is_dir():
+        import shutil
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+    return TEMPLATES.TemplateResponse(
+        request, "servers/tabs/_packs.html",
+        {"server": server, **_packs_ctx(data_dir, server)},
+    )
+
+
+@router.post("/servers/{server_id}/packs/resource-pack", response_class=HTMLResponse)
+async def resource_pack_set(
+    request: Request, server_id: str,
+    url: str = Form(""),
+    sha1: str = Form(""),
+    conn: sqlite3.Connection = Depends(db),
+) -> HTMLResponse:
+    """Set or clear the server resource-pack URL in server.properties.
+    Empty url clears both keys."""
+    server = _get_server(conn, server_id)
+    data_dir = _data_dir(request, server_id)
+    props_mod.write(data_dir, {"resource-pack": url, "resource-pack-sha1": sha1})
+    return TEMPLATES.TemplateResponse(
+        request, "servers/tabs/_packs.html",
+        {"server": server, **_packs_ctx(data_dir, server)},
+    )
+
+
 # ─── Backups ────────────────────────────────────────────────────────────────
 
 
@@ -475,6 +655,28 @@ async def backups_delete(
 # ─── Console WebSocket ──────────────────────────────────────────────────────
 
 
+@router.get("/servers/{server_id}/logs/download")
+async def logs_download(server_id: str, request: Request, lines: int = 10000):
+    """Download the container's recent log as a plain-text file. ``lines``
+    bounds it (default 10k); use lines=0 for "everything we can get from
+    the docker engine". Docker keeps logs per its log-driver retention so
+    'full log' really means 'whatever docker still has on disk'."""
+    from fastapi.responses import PlainTextResponse
+    st = request.app.state.ndrchst
+    if st.lifecycle is None:
+        raise HTTPException(status_code=503, detail="Docker unavailable")
+    server = srv_store.get(st.conn, server_id)
+    if server is None:
+        raise HTTPException(status_code=404, detail="server not found")
+    # tail=0 in docker-py means "no tail"; we use a very large number for "all".
+    n = lines if lines and lines > 0 else 1_000_000
+    text = await st.lifecycle.logs(server_id, lines=n)
+    headers = {
+        "Content-Disposition": f'attachment; filename="{server.name.replace(" ", "_")}-{server_id}.log"',
+    }
+    return PlainTextResponse(text, headers=headers)
+
+
 @router.websocket("/servers/{server_id}/console-ws")
 async def console_ws(websocket: WebSocket, server_id: str) -> None:
     """Streams Docker logs out; accepts commands in (RCON for Java, stdin for
@@ -507,10 +709,47 @@ async def console_ws(websocket: WebSocket, server_id: str) -> None:
             cmd = (msg.get("command") or "").strip()
             if not cmd:
                 continue
-            if server.family is Family.JAVA:
-                await websocket.send_text(_log_to_html(f"> {cmd}\n[ndrchst] RCON not wired to live container in v0\n"))
-            else:
-                await websocket.send_text(_log_to_html(f"> {cmd}\n[ndrchst] BDS stdin not wired to live container in v0\n"))
+            # Trim leading slash — Bukkit doesn't want it in RCON, BDS doesn't either
+            if cmd.startswith("/"):
+                cmd = cmd[1:]
+            await websocket.send_text(_log_to_html(f"> {cmd}\n"))
+            try:
+                if server.family is Family.JAVA:
+                    if server.rcon_port is None or server.rcon_password is None:
+                        await websocket.send_text(_log_to_html(
+                            "[ndrchst] this server predates RCON support — recreate it to enable console commands\n"
+                        ))
+                        continue
+                    from ..runtime.rcon import RCON, AuthError, RCONError
+                    try:
+                        async with RCON("127.0.0.1", server.rcon_port, server.rcon_password, timeout=8.0) as r:
+                            response = await r.command(cmd)
+                    except AuthError:
+                        await websocket.send_text(_log_to_html(
+                            "[ndrchst] RCON auth rejected — password mismatch (server.properties drift?)\n"
+                        ))
+                        continue
+                    except (TimeoutError, RCONError, OSError) as e:
+                        await websocket.send_text(_log_to_html(
+                            f"[ndrchst] RCON error: {type(e).__name__}: {e}\n"
+                        ))
+                        continue
+                    if response.strip():
+                        await websocket.send_text(_log_to_html(response.rstrip() + "\n"))
+                else:
+                    # Bedrock: pipe to BDS stdin
+                    try:
+                        await st.lifecycle._docker.send_stdin(server.container_id, cmd)
+                    except Exception as e:
+                        await websocket.send_text(_log_to_html(
+                            f"[ndrchst] stdin error: {type(e).__name__}: {e}\n"
+                        ))
+                        continue
+                    # BDS stdout will surface in the log stream (when we add live tail)
+            except Exception as e:
+                await websocket.send_text(_log_to_html(
+                    f"[ndrchst] unexpected error: {type(e).__name__}: {e}\n"
+                ))
     except WebSocketDisconnect:
         return
 

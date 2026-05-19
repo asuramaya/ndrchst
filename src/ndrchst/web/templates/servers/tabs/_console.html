@@ -1,11 +1,33 @@
-{# Console tab: log tail + RCON input over WebSocket. #}
+{# Console tab: log tail + RCON/stdin input over WebSocket. #}
 <div class="console" id="console-shell"
      hx-ext="ws"
      ws-connect="/servers/{{ server.id }}/console-ws"
      hx-on:wsAfterMessage="this.querySelector('.output').scrollTop = this.querySelector('.output').scrollHeight">
+
+  {# Quick commands — sends predefined RCON commands without typing. #}
+  <div class="quick-cmds" style="display: flex; gap: 0.3rem; margin-bottom: 0.5rem; flex-wrap: wrap;">
+    {% if server.family.value == 'java' %}
+      {% set commands = [('list', 'List online'), ('save-all', 'Save world'), ('reload', 'Reload'), ('weather clear', 'Clear weather'), ('time set day', 'Set day'), ('difficulty peaceful', 'Peaceful'), ('whitelist on', 'Whitelist on'), ('whitelist off', 'Whitelist off')] %}
+    {% else %}
+      {% set commands = [('list', 'List online'), ('save hold', 'Save hold'), ('save query', 'Save query'), ('save resume', 'Save resume'), ('stop', 'Stop')] %}
+    {% endif %}
+    {% for cmd, label in commands %}
+      <button type="button" class="btn btn-ghost"
+              style="font-size: 0.78rem; padding: 0.25rem 0.55rem;"
+              onclick="document.querySelector('#console-input').value = {{ cmd|tojson }}; document.querySelector('#console-form').requestSubmit()">
+        {{ label }}
+      </button>
+    {% endfor %}
+    <a class="btn btn-ghost"
+       href="/servers/{{ server.id }}/logs/download"
+       style="font-size: 0.78rem; padding: 0.25rem 0.55rem; margin-left: auto;">
+      ⬇ Full log
+    </a>
+  </div>
+
   <div class="output" id="console-output"></div>
-  <form class="input-row" ws-send>
-    <input type="text" name="command" autocomplete="off"
+  <form class="input-row" id="console-form" ws-send>
+    <input type="text" id="console-input" name="command" autocomplete="off"
            placeholder="{{ 'rcon command (e.g. /list, /say hi)' if server.family.value == 'java' else 'BDS stdin command' }}">
     <button type="submit" class="btn btn-primary">Send</button>
   </form>

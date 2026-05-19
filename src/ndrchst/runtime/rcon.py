@@ -118,23 +118,27 @@ class RCON:
             raise RCONError("command exceeds 4094 bytes")
 
         cmd_id = self._next_id()
-        canary_id = self._next_id()
-
-        # Send the real command, then a canary the server will reject with
-        # "Unknown request <canary_id>" — its arrival marks the end of any
-        # fragmented response to the real command.
         self._writer.write(_encode(cmd_id, _EXECCOMMAND, cmd))
-        self._writer.write(_encode(canary_id, _CANARY_TYPE, ""))
         await self._writer.drain()
 
+        # Read packets until we get one with our cmd_id. Most responses fit
+        # in a single packet (<4096 bytes). For fragmented responses, Paper
+        # streams multiple cmd_id packets back-to-back; we collect until the
+        # read times out briefly, which means the server is done.
         chunks: list[str] = []
+        first_timeout = self._timeout
+        # After first chunk, use a tight timeout to detect end-of-stream.
+        idle_timeout = 0.3
+        timeout = first_timeout
         while True:
-            pkt = await asyncio.wait_for(_read_packet(self._reader), timeout=self._timeout)
-            if pkt.request_id == canary_id:
+            try:
+                pkt = await asyncio.wait_for(_read_packet(self._reader), timeout=timeout)
+            except (TimeoutError, asyncio.IncompleteReadError):
                 break
             if pkt.request_id == cmd_id:
                 chunks.append(pkt.payload)
-            # ignore stray packets
+                timeout = idle_timeout
+            # ignore stray packets (different request_id) but stay in the loop
         return "".join(chunks)
 
     def _next_id(self) -> int:

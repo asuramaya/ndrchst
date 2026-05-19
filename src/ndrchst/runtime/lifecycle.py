@@ -6,7 +6,9 @@ else stays oblivious.
 """
 from __future__ import annotations
 
+import random
 import re
+import secrets
 import shutil
 import sqlite3
 import uuid
@@ -37,6 +39,44 @@ class LifecycleError(Exception):
 
 
 DEFAULT_BEDROCK_BRIDGE_PORT = 19132
+RCON_PORT_RANGE = range(30000, 40000)
+
+
+def _ensure_rcon_in_properties(data_dir: Path, password: str) -> None:
+    """Force enable-rcon=true + rcon.password=<password> + rcon.port=25575
+    in server.properties. Creates a minimal file if Paper hasn't generated
+    one yet — Paper preserves existing values on first boot."""
+    props_path = data_dir / "server.properties"
+    required = {
+        "enable-rcon": "true",
+        "rcon.port": "25575",
+        "rcon.password": password,
+        "broadcast-rcon-to-ops": "false",
+    }
+    if props_path.exists():
+        lines = props_path.read_text().splitlines()
+        keys_seen: set[str] = set()
+        new_lines: list[str] = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                new_lines.append(line)
+                continue
+            key = stripped.split("=", 1)[0].strip()
+            if key in required:
+                new_lines.append(f"{key}={required[key]}")
+                keys_seen.add(key)
+            else:
+                new_lines.append(line)
+        for key, value in required.items():
+            if key not in keys_seen:
+                new_lines.append(f"{key}={value}")
+        props_path.write_text("\n".join(new_lines) + "\n")
+    else:
+        body = "# Pre-seeded by ndrchst for RCON.\n"
+        for k, v in required.items():
+            body += f"{k}={v}\n"
+        props_path.write_text(body)
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,11 +108,16 @@ def _build_spec(server: Server, data_dir: Path) -> ContainerSpec:
         xms = max(server.memory_mb // 2, 512)
         cmd = ["java", f"-Xms{xms}m", f"-Xmx{xmx}m", "-jar", "server.jar", "nogui"]
         env = {"EULA": "TRUE"}
-        ports: dict[str, int] = {"25565/tcp": server.port}
+        ports: dict[str, int | tuple[str, int]] = {"25565/tcp": server.port}
         # Cross-play servers also need Geyser's UDP listener exposed so
         # Bedrock clients can reach it from outside the container.
         if server.cross_play and server.bedrock_bridge_port is not None:
             ports["19132/udp"] = server.bedrock_bridge_port
+        # RCON: bind container:25575 → 127.0.0.1:rcon_port (localhost-only).
+        # The admin console is the only intended consumer, and there's no
+        # reason to expose RCON publicly even with a password.
+        if server.rcon_port is not None:
+            ports["25575/tcp"] = ("127.0.0.1", server.rcon_port)
     elif server.family is Family.BEDROCK:
         image = BEDROCK_IMAGE
         # BDS needs LD_LIBRARY_PATH because its libs live alongside the binary.
@@ -233,6 +278,17 @@ class Lifecycle:
         if req.cross_play:
             await install_cross_play(data_dir, java_port=25565)
 
+        # RCON setup for Java: pick a host port + password, write them into
+        # server.properties (which the platform install just produced or
+        # which Paper will generate on first boot). Localhost-only binding
+        # in _build_spec keeps RCON off the public surface.
+        rcon_port: int | None = None
+        rcon_password: str | None = None
+        if platform.family is Family.JAVA:
+            rcon_port = self._pick_rcon_port()
+            rcon_password = secrets.token_urlsafe(18)
+            _ensure_rcon_in_properties(data_dir, rcon_password)
+
         server = Server(
             id=server_id,
             name=req.name,
@@ -243,6 +299,8 @@ class Lifecycle:
             memory_mb=req.memory_mb,
             cross_play=req.cross_play,
             bedrock_bridge_port=req.bedrock_bridge_port if req.cross_play else None,
+            rcon_port=rcon_port,
+            rcon_password=rcon_password,
         )
 
         spec = _build_spec(server, data_dir)
@@ -301,6 +359,16 @@ class Lifecycle:
         # points at a dead address and serves no one.
         remove_pilot_bundle(server_id)
         srv_store.delete(self._conn, server_id)
+
+    def _pick_rcon_port(self) -> int:
+        """Pick a free RCON host port (not collision with any reserved
+        server port). Random in RCON_PORT_RANGE so multiple ndrchst
+        instances on the same box don't pick the same one deterministically."""
+        for _ in range(200):
+            candidate = random.choice(list(RCON_PORT_RANGE))
+            if not srv_store.port_in_use(self._conn, candidate) and is_port_free(candidate, Family.JAVA):
+                return candidate
+        raise LifecycleError("could not find a free RCON host port; range exhausted")
 
     async def stats(self, server_id: str):
         """Return Docker container stats for the server, or None if no

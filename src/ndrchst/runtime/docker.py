@@ -55,13 +55,17 @@ class ContainerSpec:
     ``ports`` keys carry the protocol explicitly (e.g. ``"25565/tcp"``,
     ``"19132/udp"``) — needed because cross-play Java servers expose both
     TCP (Paper) and UDP (Geyser) in the same container.
+
+    Port values are either:
+      * int  — bind to 0.0.0.0:<port> (public exposure)
+      * tuple(host_ip, host_port) — bind to <host_ip>:<host_port>
     """
     name: str           # docker container name, e.g. "ndrchst-srv-abc"
     image: str
     cmd: list[str]
     workdir: str
     data_dir: Path      # host path mounted at /data
-    ports: dict[str, int]   # "container_port/proto" -> host_port
+    ports: dict[str, int | tuple[str, int]]
     memory_mb: int
     server_id: str      # tagged into label
     family: Family

@@ -39,6 +39,8 @@ def _init_schema(conn: sqlite3.Connection) -> None:
 # "duplicate column name" if applied twice; we swallow that and keep going.
 _ADDITIVE_COLUMNS = (
     ("servers", "bedrock_bridge_port", "INTEGER"),
+    ("servers", "rcon_port", "INTEGER"),
+    ("servers", "rcon_password", "TEXT"),
 )
 
 

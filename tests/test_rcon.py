@@ -1,9 +1,10 @@
 """RCON tests using an in-process fake server.
 
 Stresses:
-  - happy path: auth + small command
+  - happy path: auth + small command (single-packet response)
   - auth failure: server returns request_id=-1
-  - fragmentation: response split across two packets, terminated by canary
+  - fragmentation: response split across two packets, terminated by server
+    closing the stream or going idle
 """
 from __future__ import annotations
 
@@ -57,13 +58,11 @@ async def test_happy_path():
         w.write(_encode(rid, 2, ""))  # auth ok
         await w.drain()
 
-        # command + canary
+        # single command, single response, then close (client treats that as
+        # end-of-stream).
         cmd_rid, _, cmd = await _read_packet(r)
-        canary_rid, _, _ = await _read_packet(r)
         w.write(_encode(cmd_rid, 0, f"echo:{cmd}"))
-        w.write(_encode(canary_rid, 0, "Unknown request"))
         await w.drain()
-
         w.close()
         await w.wait_closed()
 
@@ -108,11 +107,9 @@ async def test_fragmented_response_assembles():
         await w.drain()
 
         cmd_rid, _, _ = await _read_packet(r)
-        canary_rid, _, _ = await _read_packet(r)
-        # Two fragments under same cmd_rid, then canary completion
+        # Two fragments under same cmd_rid back-to-back, then close.
         w.write(_encode(cmd_rid, 0, big_part_1))
         w.write(_encode(cmd_rid, 0, big_part_2))
-        w.write(_encode(canary_rid, 0, "Unknown request"))
         await w.drain()
         w.close()
         await w.wait_closed()

@@ -35,4 +35,9 @@ class Server:
     cross_play: bool = False  # Java + Geyser
     # Host UDP port that Geyser exposes for Bedrock clients (cross-play only).
     bedrock_bridge_port: int | None = None
+    # Host TCP port mapping for the container's RCON listener (Java only).
+    # Set at create-time; lets the console UI dispatch commands without going
+    # through the public MC port.
+    rcon_port: int | None = None
+    rcon_password: str | None = None
     created_at: datetime = field(default_factory=_now)

@@ -10,8 +10,14 @@ from ..domain.models import Family, Server, ServerStatus
 
 def _row_to_server(r: sqlite3.Row) -> Server:
     bedrock_bridge = None
+    rcon_port = None
+    rcon_password = None
     with contextlib.suppress(IndexError, KeyError):
         bedrock_bridge = r["bedrock_bridge_port"]
+    with contextlib.suppress(IndexError, KeyError):
+        rcon_port = r["rcon_port"]
+    with contextlib.suppress(IndexError, KeyError):
+        rcon_password = r["rcon_password"]
     return Server(
         id=r["id"],
         name=r["name"],
@@ -24,6 +30,8 @@ def _row_to_server(r: sqlite3.Row) -> Server:
         container_id=r["container_id"],
         cross_play=bool(r["cross_play"]),
         bedrock_bridge_port=bedrock_bridge,
+        rcon_port=rcon_port,
+        rcon_password=rcon_password,
         created_at=datetime.fromisoformat(r["created_at"]),
     )
 
@@ -32,8 +40,9 @@ def insert(conn: sqlite3.Connection, s: Server) -> None:
     conn.execute(
         """INSERT INTO servers
             (id, name, platform_id, family, version, port, memory_mb,
-             status, container_id, cross_play, bedrock_bridge_port, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             status, container_id, cross_play, bedrock_bridge_port,
+             rcon_port, rcon_password, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             s.id,
             s.name,
@@ -46,6 +55,8 @@ def insert(conn: sqlite3.Connection, s: Server) -> None:
             s.container_id,
             int(s.cross_play),
             s.bedrock_bridge_port,
+            s.rcon_port,
+            s.rcon_password,
             s.created_at.isoformat(),
         ),
     )
@@ -84,16 +95,18 @@ def delete(conn: sqlite3.Connection, server_id: str) -> None:
 
 
 def port_in_use(conn: sqlite3.Connection, port: int, *, exclude: str | None = None) -> bool:
-    """True iff any server has reserved this port — either as its main port
-    or as its Geyser UDP bridge port (cross-play servers)."""
+    """True iff any server has reserved this port. Checks the main port,
+    the Geyser UDP bridge port, and the RCON port — all of which need to be
+    host-unique because they're all docker-proxy bind targets."""
     if exclude is not None:
         row = conn.execute(
-            "SELECT 1 FROM servers WHERE (port = ? OR bedrock_bridge_port = ?) AND id != ?",
-            (port, port, exclude),
+            "SELECT 1 FROM servers "
+            "WHERE (port = ? OR bedrock_bridge_port = ? OR rcon_port = ?) AND id != ?",
+            (port, port, port, exclude),
         ).fetchone()
     else:
         row = conn.execute(
-            "SELECT 1 FROM servers WHERE port = ? OR bedrock_bridge_port = ?",
-            (port, port),
+            "SELECT 1 FROM servers WHERE port = ? OR bedrock_bridge_port = ? OR rcon_port = ?",
+            (port, port, port),
         ).fetchone()
     return row is not None
