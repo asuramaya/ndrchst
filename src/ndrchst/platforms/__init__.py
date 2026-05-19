@@ -10,6 +10,7 @@ from .base import Family, InstallArtifact, Platform, VersionInfo
 from .bedrock import Bedrock
 from .fabric import Fabric
 from .forge import Forge
+from .modpack import Modpack
 from .neoforge import NeoForge
 from .paper import Paper
 from .purpur import Purpur
@@ -17,7 +18,7 @@ from .vanilla import Vanilla
 
 REGISTRY: dict[str, Platform] = {
     p.id: p
-    for p in (Paper(), Purpur(), Vanilla(), Fabric(), Forge(), NeoForge(), Bedrock())
+    for p in (Paper(), Purpur(), Vanilla(), Fabric(), Forge(), NeoForge(), Modpack(), Bedrock())
 }
 
 

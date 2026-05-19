@@ -22,20 +22,46 @@
                   hx-get="/servers/new/versions"
                   hx-target="#version-options"
                   hx-trigger="load, change"
-                  hx-include="this">
+                  hx-include="this"
+                  onchange="ndrchstUpdateVersionHint()">
             {% for p in platforms if p.implemented and p.default_visible %}
               <option value="{{ p.id }}">{{ p.display_name }} ({{ p.family.value }})</option>
             {% endfor %}
           </select>
         </div>
         <div class="field">
-          <label for="version">Version</label>
+          <label for="version" id="version-label">Version</label>
           <input type="text" id="version" name="version" required
                  list="version-options" autocomplete="off"
                  value="latest" placeholder="latest or e.g. 1.21.3">
           <datalist id="version-options"></datalist>
+          <small id="version-hint" style="color: var(--text-muted); display: none;">
+            Paste the URL of a server-pack zip (e.g. ATM10's
+            <span class="mono">Server-Files-X.Y.Z.zip</span> from CurseForge / GitHub).
+          </small>
         </div>
       </div>
+      <script>
+        function ndrchstUpdateVersionHint() {
+          const sel = document.getElementById('platform_id');
+          const input = document.getElementById('version');
+          const label = document.getElementById('version-label');
+          const hint = document.getElementById('version-hint');
+          if (sel.value === 'modpack') {
+            label.textContent = 'Server-pack URL';
+            input.value = '';
+            input.placeholder = 'https://.../Server-Files-X.Y.Z.zip';
+            hint.style.display = 'block';
+          } else {
+            label.textContent = 'Version';
+            if (!input.value || input.value.startsWith('http')) {
+              input.value = 'latest';
+            }
+            input.placeholder = 'latest or e.g. 1.21.3';
+            hint.style.display = 'none';
+          }
+        }
+      </script>
 
       <div class="row">
         <div class="field">
