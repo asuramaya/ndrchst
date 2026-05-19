@@ -41,6 +41,8 @@ _ADDITIVE_COLUMNS = (
     ("servers", "bedrock_bridge_port", "INTEGER"),
     ("servers", "rcon_port", "INTEGER"),
     ("servers", "rcon_password", "TEXT"),
+    ("servers", "extra_jvm_flags", "TEXT"),
+    ("servers", "env_vars", "TEXT"),
 )
 
 

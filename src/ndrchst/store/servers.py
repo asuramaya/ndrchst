@@ -12,12 +12,18 @@ def _row_to_server(r: sqlite3.Row) -> Server:
     bedrock_bridge = None
     rcon_port = None
     rcon_password = None
+    extra_jvm_flags = None
+    env_vars = None
     with contextlib.suppress(IndexError, KeyError):
         bedrock_bridge = r["bedrock_bridge_port"]
     with contextlib.suppress(IndexError, KeyError):
         rcon_port = r["rcon_port"]
     with contextlib.suppress(IndexError, KeyError):
         rcon_password = r["rcon_password"]
+    with contextlib.suppress(IndexError, KeyError):
+        extra_jvm_flags = r["extra_jvm_flags"]
+    with contextlib.suppress(IndexError, KeyError):
+        env_vars = r["env_vars"]
     return Server(
         id=r["id"],
         name=r["name"],
@@ -32,6 +38,8 @@ def _row_to_server(r: sqlite3.Row) -> Server:
         bedrock_bridge_port=bedrock_bridge,
         rcon_port=rcon_port,
         rcon_password=rcon_password,
+        extra_jvm_flags=extra_jvm_flags,
+        env_vars=env_vars,
         created_at=datetime.fromisoformat(r["created_at"]),
     )
 
@@ -41,8 +49,9 @@ def insert(conn: sqlite3.Connection, s: Server) -> None:
         """INSERT INTO servers
             (id, name, platform_id, family, version, port, memory_mb,
              status, container_id, cross_play, bedrock_bridge_port,
-             rcon_port, rcon_password, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             rcon_port, rcon_password, extra_jvm_flags, env_vars,
+             created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             s.id,
             s.name,
@@ -57,6 +66,8 @@ def insert(conn: sqlite3.Connection, s: Server) -> None:
             s.bedrock_bridge_port,
             s.rcon_port,
             s.rcon_password,
+            s.extra_jvm_flags,
+            s.env_vars,
             s.created_at.isoformat(),
         ),
     )
@@ -87,6 +98,21 @@ def set_container_id(
     conn.execute(
         "UPDATE servers SET container_id = ? WHERE id = ?",
         (container_id, server_id),
+    )
+
+
+def update_config(
+    conn: sqlite3.Connection,
+    server_id: str,
+    *,
+    memory_mb: int,
+    extra_jvm_flags: str | None,
+    env_vars: str | None,
+) -> None:
+    conn.execute(
+        "UPDATE servers SET memory_mb = ?, extra_jvm_flags = ?, env_vars = ? "
+        "WHERE id = ?",
+        (memory_mb, extra_jvm_flags, env_vars, server_id),
     )
 
 

@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from ..api.deps import db, require_lifecycle, state
+from ..domain import config as cfg_mod
 from ..domain import files as files_mod
 from ..domain import players as players_mod
 from ..domain import plugins as plugins_mod
@@ -41,7 +42,7 @@ TEMPLATES = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "tem
 
 router = APIRouter()
 
-_VALID_TABS = ("console", "properties", "players", "worlds", "files", "mods", "plugins", "packs", "backups")
+_VALID_TABS = ("console", "properties", "players", "worlds", "files", "mods", "plugins", "packs", "config", "backups")
 
 
 def _get_server(conn: sqlite3.Connection, server_id: str) -> Server:
@@ -128,6 +129,8 @@ async def _tab_context(
     if tab == "packs":
         data_dir = _data_dir(request, server.id)
         return _packs_ctx(data_dir, server)
+    if tab == "config":
+        return _config_ctx(request, server)
     if tab == "backups":
         return {"backups": backup_mod.list_for(server.id)}
     return {}
@@ -590,6 +593,70 @@ async def resource_pack_set(
     return TEMPLATES.TemplateResponse(
         request, "servers/tabs/_packs.html",
         {"server": server, **_packs_ctx(data_dir, server)},
+    )
+
+
+# ─── Config (memory + JVM + env) ────────────────────────────────────────────
+
+
+def _config_ctx(request: Request, server: Server) -> dict:
+    """Read-only summary + editable fields. Mounts/ports are derived from the
+    current spec so the user can sanity-check what the container actually has."""
+    data_dir = _data_dir(request, server.id)
+    summary = {
+        "image_hint": "eclipse-temurin:21-jre"
+            if server.family is Family.JAVA and server.version >= "1.20.5"
+            else ("eclipse-temurin:17-jre" if server.family is Family.JAVA else "ubuntu:24.04"),
+        "data_dir": str(data_dir),
+        "container_id": server.container_id or "(not created)",
+        "ports": _summarize_ports(server),
+        "rcon_port": server.rcon_port,
+    }
+    return {
+        "server": server,
+        "summary": summary,
+        "extra_jvm_flags": server.extra_jvm_flags or "",
+        "env_vars": server.env_vars or "",
+    }
+
+
+def _summarize_ports(server: Server) -> list[str]:
+    rows: list[str] = []
+    if server.family is Family.JAVA:
+        rows.append(f"25565/tcp (game) → 0.0.0.0:{server.port}")
+        if server.cross_play and server.bedrock_bridge_port:
+            rows.append(f"19132/udp (bedrock bridge) → 0.0.0.0:{server.bedrock_bridge_port}")
+        if server.rcon_port:
+            rows.append(f"25575/tcp (rcon) → 127.0.0.1:{server.rcon_port}")
+    else:
+        rows.append(f"19132/udp (game) → 0.0.0.0:{server.port}")
+    return rows
+
+
+@router.post("/servers/{server_id}/config", response_class=HTMLResponse)
+async def config_save(
+    request: Request,
+    server_id: str,
+    memory_mb: int = Form(...),
+    extra_jvm_flags: str = Form(""),
+    env_vars: str = Form(""),
+    lifecycle: Lifecycle = Depends(require_lifecycle),
+    conn: sqlite3.Connection = Depends(db),
+) -> HTMLResponse:
+    server = _get_server(conn, server_id)
+    try:
+        server = await lifecycle.update_config(
+            server_id,
+            memory_mb=memory_mb,
+            extra_jvm_flags=extra_jvm_flags or None,
+            env_vars=env_vars or None,
+        )
+    except cfg_mod.ConfigError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    ctx = _config_ctx(request, server)
+    return TEMPLATES.TemplateResponse(
+        request, "servers/tabs/_config.html",
+        {**ctx, "flash": "Saved. Container recreated — click Start to apply."},
     )
 
 

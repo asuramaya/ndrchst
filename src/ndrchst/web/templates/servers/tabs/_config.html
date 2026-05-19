@@ -1,0 +1,77 @@
+{% if flash %}
+  <div class="card" style="margin-bottom: 1rem; background: var(--success-bg, #1f3a1f); border: 1px solid var(--success, #4ade80);">
+    {{ flash }}
+  </div>
+{% endif %}
+
+<div class="card" style="margin-bottom: 1rem;">
+  <strong>Runtime knobs</strong>
+  <small style="color: var(--text-muted); display: block; margin: 0.3rem 0 0.75rem;">
+    Saving rebuilds the container with these values. Data dir
+    (<span class="mono">{{ summary.data_dir }}</span>) is preserved — only the
+    container is recreated. Server must be started manually after save.
+  </small>
+
+  <form hx-post="/servers/{{ server.id }}/config"
+        hx-target="#tab-content" hx-swap="innerHTML"
+        style="display: grid; gap: 0.75rem;">
+
+    <label style="display: grid; gap: 0.2rem;">
+      <span><strong>Memory (MB)</strong></span>
+      <small style="color: var(--text-muted);">
+        Sets <span class="mono">-Xmx</span>. <span class="mono">-Xms</span> is auto-derived (half of Xmx, min 512). Container <span class="mono">mem_limit</span> is bumped to match.
+      </small>
+      <input type="number" name="memory_mb" min="512" required
+             value="{{ server.memory_mb }}"
+             class="mono"
+             style="background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.4rem 0.6rem; color: var(--text-primary); width: 12rem;">
+    </label>
+
+    {% if server.family.value == 'java' %}
+    <label style="display: grid; gap: 0.2rem;">
+      <span><strong>Extra JVM flags</strong></span>
+      <small style="color: var(--text-muted);">
+        Slotted in before <span class="mono">-jar</span>. Don't include
+        <span class="mono">-Xmx</span> / <span class="mono">-Xms</span> here — use the field above.
+        Example Aikar's flags:
+        <span class="mono">-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200</span>
+      </small>
+      <textarea name="extra_jvm_flags" rows="3"
+                class="mono"
+                style="background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.4rem 0.6rem; color: var(--text-primary);">{{ extra_jvm_flags }}</textarea>
+    </label>
+    {% endif %}
+
+    <label style="display: grid; gap: 0.2rem;">
+      <span><strong>Environment variables</strong></span>
+      <small style="color: var(--text-muted);">
+        One <span class="mono">KEY=VALUE</span> per line. Comments with <span class="mono">#</span>.
+        Reserved (set by ndrchst, can't override here): <span class="mono">EULA</span>, <span class="mono">LD_LIBRARY_PATH</span>.
+      </small>
+      <textarea name="env_vars" rows="4"
+                class="mono"
+                style="background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.4rem 0.6rem; color: var(--text-primary);">{{ env_vars }}</textarea>
+    </label>
+
+    <button type="submit" class="btn btn-primary" style="justify-self: start;">Save &amp; recreate container</button>
+  </form>
+</div>
+
+<div class="card">
+  <strong>Container summary</strong>
+  <small style="color: var(--text-muted); display: block; margin: 0.3rem 0 0.5rem;">
+    Read-only view of what the runtime will build for this server.
+  </small>
+  <dl class="kv mono" style="display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1rem; margin: 0;">
+    <dt>Image</dt><dd>{{ summary.image_hint }}</dd>
+    <dt>Data dir</dt><dd>{{ summary.data_dir }}</dd>
+    <dt>Container ID</dt><dd>{{ summary.container_id }}</dd>
+    <dt>Ports</dt>
+    <dd>
+      {% for row in summary.ports %}{{ row }}<br>{% endfor %}
+    </dd>
+    {% if summary.rcon_port %}
+    <dt>RCON</dt><dd>127.0.0.1:{{ summary.rcon_port }} (admin-only, localhost-bound)</dd>
+    {% endif %}
+  </dl>
+</div>

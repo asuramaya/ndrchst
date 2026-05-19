@@ -6,9 +6,11 @@ else stays oblivious.
 """
 from __future__ import annotations
 
+import contextlib
 import random
 import re
 import secrets
+import shlex
 import shutil
 import sqlite3
 import uuid
@@ -17,6 +19,7 @@ from pathlib import Path
 
 import httpx
 
+from ..domain import config as cfg_mod
 from ..domain.models import Family, Server, ServerStatus
 from ..platforms import REGISTRY as PLATFORMS
 from ..store import servers as srv_store
@@ -106,8 +109,17 @@ def _build_spec(server: Server, data_dir: Path) -> ContainerSpec:
         image = java_image_for(server.version)
         xmx = server.memory_mb
         xms = max(server.memory_mb // 2, 512)
-        cmd = ["java", f"-Xms{xms}m", f"-Xmx{xmx}m", "-jar", "server.jar", "nogui"]
+        cmd = ["java", f"-Xms{xms}m", f"-Xmx{xmx}m"]
+        # User-supplied JVM flags slotted in *before* -jar so they apply to
+        # the JVM, not to the server jar's arguments.
+        if server.extra_jvm_flags:
+            cmd.extend(shlex.split(server.extra_jvm_flags))
+        cmd.extend(["-jar", "server.jar", "nogui"])
         env = {"EULA": "TRUE"}
+        # User env merged after the runtime-required keys so reserved-keys
+        # validation (in domain/config) is the only guard we need.
+        if server.env_vars:
+            env.update(cfg_mod.parse_env_vars(server.env_vars))
         ports: dict[str, int | tuple[str, int]] = {"25565/tcp": server.port}
         # Cross-play servers also need Geyser's UDP listener exposed so
         # Bedrock clients can reach it from outside the container.
@@ -131,6 +143,8 @@ def _build_spec(server: Server, data_dir: Path) -> ContainerSpec:
             "&& exec ./bedrock_server",
         ]
         env = {"LD_LIBRARY_PATH": "."}
+        if server.env_vars:
+            env.update(cfg_mod.parse_env_vars(server.env_vars))
         ports = {"19132/udp": server.port}
     else:
         raise LifecycleError(f"unsupported family: {server.family}")
@@ -346,6 +360,56 @@ class Lifecycle:
         if server.container_id is None:
             raise LifecycleError(f"server {server_id} has no container")
         await self._docker.restart(server.container_id, timeout=timeout)
+
+    async def update_config(
+        self,
+        server_id: str,
+        *,
+        memory_mb: int,
+        extra_jvm_flags: str | None,
+        env_vars: str | None,
+    ) -> Server:
+        """Update the recreate-time knobs (memory + JVM args + env). Validates
+        first, then if the values would change the container spec we stop +
+        remove + recreate the container. Data dir is preserved (the world,
+        plugins, etc. all survive — only the container is rebuilt)."""
+        server = self._must_get(server_id)
+        memory_mb = cfg_mod.validate_memory(memory_mb)
+        flags = cfg_mod.normalize_jvm_flags(extra_jvm_flags)
+        env_norm = cfg_mod.normalize_env_vars(env_vars)
+
+        unchanged = (
+            server.memory_mb == memory_mb
+            and (server.extra_jvm_flags or None) == flags
+            and (server.env_vars or None) == env_norm
+        )
+        if unchanged:
+            return server
+
+        # Persist first so the new spec we build sees the new values.
+        srv_store.update_config(
+            self._conn, server_id,
+            memory_mb=memory_mb, extra_jvm_flags=flags, env_vars=env_norm,
+        )
+        server.memory_mb = memory_mb
+        server.extra_jvm_flags = flags
+        server.env_vars = env_norm
+
+        # Container exists → rebuild it. Stop + remove + create. Status is
+        # set back to STOPPED so the user has to explicitly Start to apply.
+        if server.container_id is not None:
+            # Container may already be stopped; suppress and proceed to remove.
+            with contextlib.suppress(Exception):
+                await self._docker.stop(server.container_id, timeout=15)
+            await self._docker.remove(server.container_id, force=True)
+            spec = _build_spec(server, self._root / server_id)
+            new_container_id = await self._docker.create_container(spec)
+            server.container_id = new_container_id
+            srv_store.set_container_id(self._conn, server_id, new_container_id)
+            srv_store.update_status(self._conn, server_id, ServerStatus.STOPPED)
+            server.status = ServerStatus.STOPPED
+
+        return server
 
     async def delete(self, server_id: str, *, remove_files: bool = False) -> None:
         server = self._must_get(server_id)

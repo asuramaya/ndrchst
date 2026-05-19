@@ -40,4 +40,10 @@ class Server:
     # through the public MC port.
     rcon_port: int | None = None
     rcon_password: str | None = None
+    # User-supplied JVM args appended to the launch command (Java only).
+    # Example: "-XX:+UseG1GC -Daikar.flags=true". Empty/None → no extras.
+    extra_jvm_flags: str | None = None
+    # User-supplied container env vars as "KEY=VALUE" lines. Merged on top of
+    # the runtime-required env (EULA, LD_LIBRARY_PATH).
+    env_vars: str | None = None
     created_at: datetime = field(default_factory=_now)

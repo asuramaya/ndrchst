@@ -296,3 +296,106 @@ def test_unknown_tab_404(detail_client):
     client, sid, _ = detail_client
     r = client.get(f"/servers/{sid}/nonexistent")
     assert r.status_code == 404
+
+
+# ─── Config tab ─────────────────────────────────────────────────────────────
+
+
+def test_config_tab_renders(detail_client):
+    client, sid, _ = detail_client
+    r = client.get(f"/servers/{sid}/config", headers={"HX-Request": "true"})
+    assert r.status_code == 200
+    assert "Runtime knobs" in r.text
+    assert "Memory" in r.text
+    assert "Extra JVM flags" in r.text
+    assert "Environment variables" in r.text
+    assert "Container summary" in r.text
+    # Default memory from create
+    assert 'value="2048"' in r.text
+
+
+def test_config_save_updates_record_and_rebuilds_container(detail_client):
+    client, sid, _ = detail_client
+    app = client.app
+    st = app.state.ndrchst
+    # Capture the original container_id so we can verify it changes.
+    from ndrchst.store import servers as srv_store
+    before = srv_store.get(st.conn, sid)
+    original_cid = before.container_id
+    assert original_cid is not None
+
+    r = client.post(f"/servers/{sid}/config", data={
+        "memory_mb": "3072",
+        "extra_jvm_flags": "-XX:+UseG1GC -XX:MaxGCPauseMillis=200",
+        "env_vars": "FOO=bar\nBAZ=qux",
+    })
+    assert r.status_code == 200, r.text
+    assert "Saved" in r.text
+
+    after = srv_store.get(st.conn, sid)
+    assert after.memory_mb == 3072
+    assert after.extra_jvm_flags == "-XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+    assert after.env_vars == "FOO=bar\nBAZ=qux"
+    # New container created
+    assert after.container_id != original_cid
+
+
+def test_config_save_rejects_invalid_jvm_flags(detail_client):
+    client, sid, _ = detail_client
+    r = client.post(f"/servers/{sid}/config", data={
+        "memory_mb": "2048",
+        "extra_jvm_flags": "-Xmx8G",  # clobbers ndrchst-owned flag
+        "env_vars": "",
+    })
+    assert r.status_code == 400
+    assert "conflict" in r.text.lower() or "Xmx" in r.text
+
+
+def test_config_save_rejects_reserved_env(detail_client):
+    client, sid, _ = detail_client
+    r = client.post(f"/servers/{sid}/config", data={
+        "memory_mb": "2048",
+        "extra_jvm_flags": "",
+        "env_vars": "EULA=FALSE",
+    })
+    assert r.status_code == 400
+
+
+def test_config_save_no_change_is_idempotent(detail_client):
+    """Submitting the same values shouldn't recreate the container."""
+    client, sid, _ = detail_client
+    from ndrchst.store import servers as srv_store
+    st = client.app.state.ndrchst
+    before = srv_store.get(st.conn, sid)
+
+    r = client.post(f"/servers/{sid}/config", data={
+        "memory_mb": str(before.memory_mb),
+        "extra_jvm_flags": "",
+        "env_vars": "",
+    })
+    assert r.status_code == 200
+    after = srv_store.get(st.conn, sid)
+    assert after.container_id == before.container_id
+
+
+def test_config_jvm_flags_appear_in_container_cmd(detail_client):
+    """The saved JVM flags must actually land in the docker run command."""
+    client, sid, _ = detail_client
+    r = client.post(f"/servers/{sid}/config", data={
+        "memory_mb": "2048",
+        "extra_jvm_flags": "-XX:+UseG1GC",
+        "env_vars": "DEBUG_FLAG=on",
+    })
+    assert r.status_code == 200
+
+    # Last create call on the fake docker client carries the new cmd + env
+    fake = client.app.state.ndrchst.lifecycle._docker._client
+    last = fake.containers.create_calls[-1]
+    cmd = last["command"]
+    assert "-XX:+UseG1GC" in cmd
+    # -Xmx still injected by lifecycle
+    assert any(a.startswith("-Xmx") for a in cmd)
+    # env merged
+    assert last["environment"].get("DEBUG_FLAG") == "on"
+    # required env preserved
+    assert last["environment"].get("EULA") == "TRUE"

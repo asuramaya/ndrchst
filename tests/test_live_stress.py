@@ -99,8 +99,9 @@ def test_new_form_full_partial(server):
     r = httpx.get(f"{server}/servers/new", headers={"HX-Request": "true"})
     assert r.status_code == 200
     html = r.text
-    # All 7 platform options, Bedrock included
-    for pid in ("paper", "purpur", "vanilla", "fabric", "forge", "neoforge", "bedrock"):
+    # Form only shows implemented platforms; stubs (vanilla, fabric, forge,
+    # neoforge, purpur) are filtered out by the template.
+    for pid in ("paper", "bedrock"):
         assert f'value="{pid}"' in html
     # htmx hooks
     assert 'hx-post="/servers"' in html
