@@ -18,7 +18,11 @@
       <div class="row">
         <div class="field">
           <label for="platform_id">Platform</label>
-          <select id="platform_id" name="platform_id" required>
+          <select id="platform_id" name="platform_id" required
+                  hx-get="/servers/new/versions"
+                  hx-target="#version-options"
+                  hx-trigger="load, change"
+                  hx-include="this">
             {% for p in platforms if p.implemented %}
               <option value="{{ p.id }}">{{ p.display_name }} ({{ p.family.value }})</option>
             {% endfor %}
@@ -27,7 +31,9 @@
         <div class="field">
           <label for="version">Version</label>
           <input type="text" id="version" name="version" required
+                 list="version-options" autocomplete="off"
                  value="latest" placeholder="latest or e.g. 1.21.3">
+          <datalist id="version-options"></datalist>
         </div>
       </div>
 

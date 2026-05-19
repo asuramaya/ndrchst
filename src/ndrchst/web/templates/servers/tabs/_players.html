@@ -28,7 +28,7 @@
     <div id="whitelist-result" style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--text-muted);"></div>
   </div>
 
-  <div class="card">
+  <div class="card" style="margin-bottom: 1rem;">
     <strong>Op</strong>
     <form style="display: flex; gap: 0.4rem; margin-top: 0.5rem;"
           hx-post="/servers/{{ server.id }}/players/op"
@@ -38,5 +38,27 @@
       <button type="submit" class="btn">Grant op</button>
     </form>
     <div id="op-result" style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--text-muted);"></div>
+  </div>
+
+  <div class="card">
+    <strong>Ban / Pardon</strong>
+    <form style="display: flex; gap: 0.4rem; margin-top: 0.5rem;"
+          hx-post="/servers/{{ server.id }}/players/ban"
+          hx-target="#players-list" hx-swap="outerHTML"
+          hx-confirm="Ban this player? They'll be kicked and prevented from rejoining.">
+      <input type="text" name="player" placeholder="Player name" required
+             style="flex: 1; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.4rem 0.6rem; color: var(--text-primary);">
+      <input type="text" name="reason" placeholder="Reason (optional)"
+             style="flex: 1; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.4rem 0.6rem; color: var(--text-primary);">
+      <button type="submit" class="btn btn-danger">Ban</button>
+    </form>
+    <form style="display: flex; gap: 0.4rem; margin-top: 0.4rem;"
+          hx-post="/servers/{{ server.id }}/players/unban"
+          hx-target="#ban-result" hx-swap="innerHTML">
+      <input type="text" name="player" placeholder="Player name to pardon" required
+             style="flex: 1; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.4rem 0.6rem; color: var(--text-primary);">
+      <button type="submit" class="btn">Pardon</button>
+    </form>
+    <div id="ban-result" style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--text-muted);"></div>
   </div>
 {% endif %}

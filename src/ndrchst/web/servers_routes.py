@@ -51,6 +51,30 @@ def new_form(request: Request) -> HTMLResponse:
     )
 
 
+@router.get("/servers/new/versions", response_class=HTMLResponse)
+async def new_form_versions(platform_id: str) -> HTMLResponse:
+    """htmx fragment: <option> elements for the version datalist, freshly
+    fetched from the platform's upstream API. Trigger: select#platform_id
+    change (and initial load)."""
+    if platform_id not in PLATFORMS:
+        return HTMLResponse("")
+    platform = PLATFORMS[platform_id]
+    if not platform.implemented:
+        return HTMLResponse('<option value="latest">latest</option>')
+    try:
+        versions = await platform.versions()
+    except Exception:
+        # Soft fail: empty datalist; the user can still type a version.
+        return HTMLResponse('<option value="latest">latest</option>')
+    opts = ['<option value="latest">latest (auto-resolves)</option>']
+    for v in versions[:50]:
+        label = f"{v.version}"
+        if not v.stable:
+            label += " (snapshot)"
+        opts.append(f'<option value="{v.version}">{label}</option>')
+    return HTMLResponse("".join(opts))
+
+
 @router.post("/servers", response_class=HTMLResponse)
 async def create(
     request: Request,
@@ -138,6 +162,64 @@ async def stop(
         await lifecycle.stop(server_id)
     except LifecycleError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    return _render_card(request, conn, server_id)
+
+
+@router.get("/servers/{server_id}/stats", response_class=HTMLResponse)
+async def stats_fragment(
+    server_id: str,
+    lifecycle: Lifecycle = Depends(require_lifecycle),
+) -> HTMLResponse:
+    """Tiny htmx-poll fragment: CPU% + memory used/limit. The full card
+    polls this every 5s while the server is running."""
+    try:
+        s = await lifecycle.stats(server_id)
+    except LifecycleError:
+        return HTMLResponse('<span class="mono" style="color: var(--text-muted);">—</span>')
+    if s is None:
+        return HTMLResponse('<span class="mono" style="color: var(--text-muted);">no container</span>')
+    bar_pct = min(100, int((s.memory_used_mb / max(s.memory_limit_mb, 1)) * 100))
+    return HTMLResponse(
+        f'<span class="mono" title="CPU usage">⚡ {s.cpu_percent:.1f}%</span>'
+        f'<span class="mono" title="Memory used / limit">'
+        f'🧠 {s.memory_used_mb}M / {s.memory_limit_mb}M ({bar_pct}%)</span>'
+    )
+
+
+@router.post("/servers/{server_id}/restart", response_class=HTMLResponse)
+async def restart(
+    request: Request,
+    server_id: str,
+    lifecycle: Lifecycle = Depends(require_lifecycle),
+    conn: sqlite3.Connection = Depends(db),
+) -> HTMLResponse:
+    try:
+        await lifecycle.restart(server_id)
+    except LifecycleError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return _render_card(request, conn, server_id)
+
+
+@router.put("/servers/{server_id}/name", response_class=HTMLResponse)
+async def rename(
+    request: Request,
+    server_id: str,
+    name: str = Form(...),
+    conn: sqlite3.Connection = Depends(db),
+) -> HTMLResponse:
+    """Inline rename. No container touch — just DB."""
+    server = srv_store.get(conn, server_id)
+    if server is None:
+        raise HTTPException(status_code=404, detail="server not found")
+    # Reuse the lifecycle name regex by parsing through _validate? It's bound
+    # to CreateRequest; simpler to inline the same constraint here.
+    import re
+    if not re.match(r"^[A-Za-z0-9 _-]{1,64}$", name):
+        raise HTTPException(
+            status_code=400,
+            detail="name must be 1-64 chars of [A-Za-z0-9 _-]",
+        )
+    conn.execute("UPDATE servers SET name = ? WHERE id = ?", (name, server_id))
     return _render_card(request, conn, server_id)
 
 

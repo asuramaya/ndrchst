@@ -83,3 +83,15 @@ async def stop_server(
     except LifecycleError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"status": "stopping"}
+
+
+@router.post("/{server_id}/restart", status_code=status.HTTP_202_ACCEPTED)
+async def restart_server(
+    server_id: str,
+    lifecycle: Lifecycle = Depends(require_lifecycle),
+) -> dict:
+    try:
+        await lifecycle.restart(server_id)
+    except LifecycleError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"status": "restarting"}

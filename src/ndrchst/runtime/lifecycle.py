@@ -302,6 +302,14 @@ class Lifecycle:
         remove_pilot_bundle(server_id)
         srv_store.delete(self._conn, server_id)
 
+    async def stats(self, server_id: str):
+        """Return Docker container stats for the server, or None if no
+        container exists (e.g. server was never started)."""
+        server = self._must_get(server_id)
+        if server.container_id is None:
+            return None
+        return await self._docker.stats(server.container_id)
+
     async def logs(self, server_id: str, *, lines: int = 100) -> str:
         server = self._must_get(server_id)
         if server.container_id is None:

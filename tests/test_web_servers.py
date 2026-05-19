@@ -283,6 +283,141 @@ def test_assets_appears_in_sidebar(app_no_docker):
         assert ">Assets<" in r.text
 
 
+# ─── Management functions ported from v2 (versions, restart, stats, rename) ──
+
+
+def test_versions_endpoint_returns_platform_versions(app_with_docker):
+    """GET /api/platforms/paper/versions reflects what platform.versions()
+    returns (stubbed in fixture to a single entry)."""
+    with TestClient(app_with_docker) as client:
+        r = client.get("/api/platforms/paper/versions")
+        assert r.status_code == 200
+        body = r.json()
+        assert any(v["version"] == "1.21.3" for v in body)
+
+
+def test_versions_endpoint_404_for_unknown_platform(app_with_docker):
+    with TestClient(app_with_docker) as client:
+        r = client.get("/api/platforms/madeup/versions")
+        assert r.status_code == 404
+
+
+def test_versions_endpoint_400_for_stub_platform(app_with_docker):
+    """Stub platforms (purpur/vanilla/etc.) reject with a clean 4xx."""
+    with TestClient(app_with_docker) as client:
+        # Restore the real (stub) implementation for vanilla
+        from ndrchst.platforms import REGISTRY
+        # The fixture replaced .versions with a stub; reach the real path by
+        # asking a stub directly through the API
+        # The fixture's monkeypatch is per-test scope so this works:
+        async def stub():
+            raise NotImplementedError
+        REGISTRY["vanilla"].versions = stub  # type: ignore
+        # vanilla.implemented = False, so we should get 400 before .versions runs
+        r = client.get("/api/platforms/vanilla/versions")
+        assert r.status_code == 400
+
+
+def test_new_form_versions_fragment_returns_datalist_options(app_with_docker):
+    """The htmx fragment endpoint returns <option> tags for the version
+    datalist. Used by the create form when platform changes."""
+    with TestClient(app_with_docker) as client:
+        r = client.get("/servers/new/versions?platform_id=paper")
+        assert r.status_code == 200
+        assert "<option" in r.text
+        assert 'value="latest"' in r.text
+        assert "1.21.3" in r.text
+
+
+def test_restart_endpoint_returns_card_with_running_state(app_with_docker):
+    with TestClient(app_with_docker) as client:
+        st: AppState = app_with_docker.state.ndrchst
+        import tempfile
+        root = Path(tempfile.mkdtemp())
+        st.lifecycle = Lifecycle(Docker(client=FakeClient()), st.conn, servers_root=root)
+
+        client.post("/servers", data={
+            "name": "RestartMe", "platform_id": "paper",
+            "version": "1.21.3", "port": "25700", "memory_mb": "2048",
+        }, headers={"HX-Request": "true"})
+        sid = next(s["id"] for s in client.get("/api/servers").json() if s["name"] == "RestartMe")
+
+        client.post(f"/servers/{sid}/start", headers={"HX-Request": "true"})
+        r = client.post(f"/servers/{sid}/restart", headers={"HX-Request": "true"})
+        assert r.status_code == 200
+        assert "RestartMe" in r.text
+        assert "Restart" in r.text   # button visible while running
+
+
+def test_rename_updates_db_and_returns_new_card(app_with_docker):
+    with TestClient(app_with_docker) as client:
+        st: AppState = app_with_docker.state.ndrchst
+        import tempfile
+        root = Path(tempfile.mkdtemp())
+        st.lifecycle = Lifecycle(Docker(client=FakeClient()), st.conn, servers_root=root)
+
+        client.post("/servers", data={
+            "name": "OldName", "platform_id": "paper",
+            "version": "1.21.3", "port": "25701", "memory_mb": "2048",
+        }, headers={"HX-Request": "true"})
+        sid = next(s["id"] for s in client.get("/api/servers").json() if s["name"] == "OldName")
+
+        r = client.put(f"/servers/{sid}/name", data={"name": "NewName"})
+        assert r.status_code == 200
+        assert "NewName" in r.text
+        assert "OldName" not in r.text
+        # DB also reflects it
+        assert any(s["name"] == "NewName" for s in client.get("/api/servers").json())
+
+
+def test_rename_rejects_bad_name(app_with_docker):
+    with TestClient(app_with_docker) as client:
+        st: AppState = app_with_docker.state.ndrchst
+        import tempfile
+        root = Path(tempfile.mkdtemp())
+        st.lifecycle = Lifecycle(Docker(client=FakeClient()), st.conn, servers_root=root)
+
+        client.post("/servers", data={
+            "name": "Original", "platform_id": "paper",
+            "version": "1.21.3", "port": "25702", "memory_mb": "2048",
+        }, headers={"HX-Request": "true"})
+        sid = next(s["id"] for s in client.get("/api/servers").json() if s["name"] == "Original")
+
+        r = client.put(f"/servers/{sid}/name", data={"name": "../escape"})
+        assert r.status_code == 400
+
+
+def test_stats_fragment_returns_cpu_and_memory_html(app_with_docker):
+    with TestClient(app_with_docker) as client:
+        st: AppState = app_with_docker.state.ndrchst
+        import tempfile
+        root = Path(tempfile.mkdtemp())
+        st.lifecycle = Lifecycle(Docker(client=FakeClient()), st.conn, servers_root=root)
+
+        # FakeClient doesn't stub stats(); patch the lifecycle method directly
+        from ndrchst.runtime.docker import ContainerStats
+
+        async def fake_stats(self, sid):
+            return ContainerStats(cpu_percent=12.5, memory_used_mb=512, memory_limit_mb=2048)
+
+        import ndrchst.runtime.lifecycle as lc
+        original = lc.Lifecycle.stats
+        lc.Lifecycle.stats = fake_stats
+        try:
+            client.post("/servers", data={
+                "name": "Stats", "platform_id": "paper",
+                "version": "1.21.3", "port": "25703", "memory_mb": "2048",
+            }, headers={"HX-Request": "true"})
+            sid = next(s["id"] for s in client.get("/api/servers").json() if s["name"] == "Stats")
+            r = client.get(f"/servers/{sid}/stats")
+            assert r.status_code == 200
+            assert "12.5%" in r.text
+            assert "512M" in r.text
+            assert "2048M" in r.text
+        finally:
+            lc.Lifecycle.stats = original
+
+
 def test_html_create_invalid_renders_inline_error(app_with_docker):
     with TestClient(app_with_docker) as client:
         st: AppState = app_with_docker.state.ndrchst

@@ -234,6 +234,40 @@ async def players_op(
     return HTMLResponse(content=result or f"Op granted to {player}")
 
 
+@router.post("/servers/{server_id}/players/ban", response_class=HTMLResponse)
+async def players_ban(
+    request: Request,
+    server_id: str,
+    player: str = Form(...),
+    reason: str = Form(""),
+    conn: sqlite3.Connection = Depends(db),
+) -> HTMLResponse:
+    server = _get_server(conn, server_id)
+    if server.family is not Family.JAVA:
+        raise HTTPException(status_code=400, detail="players UI is Java-only")
+    result = await _rcon_call(request, server, lambda r: players_mod.ban(r, player, reason))
+    # Refresh the players list so the banned player drops off
+    players = await _rcon_call(request, server, players_mod.online, fallback=[])
+    return TEMPLATES.TemplateResponse(
+        request, "servers/tabs/_players_list.html",
+        {"server": server, "players": players, "flash": result or f"Banned {player}"},
+    )
+
+
+@router.post("/servers/{server_id}/players/unban", response_class=HTMLResponse)
+async def players_unban(
+    request: Request,
+    server_id: str,
+    player: str = Form(...),
+    conn: sqlite3.Connection = Depends(db),
+) -> HTMLResponse:
+    server = _get_server(conn, server_id)
+    if server.family is not Family.JAVA:
+        raise HTTPException(status_code=400, detail="players UI is Java-only")
+    result = await _rcon_call(request, server, lambda r: players_mod.unban(r, player))
+    return HTMLResponse(content=result or f"Pardoned {player}")
+
+
 # ─── Files ──────────────────────────────────────────────────────────────────
 
 

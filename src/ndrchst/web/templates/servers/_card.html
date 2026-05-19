@@ -1,22 +1,40 @@
 {# Renders one server card. Used both inside _grid.html and as a swap target
-   for start/stop actions (hx-swap=outerHTML on the .card element). #}
+   for start/stop/restart/rename actions (hx-swap=outerHTML on .card). #}
 <div class="card server-card" id="server-{{ server.id }}">
   <div style="display: flex; justify-content: space-between; align-items: start; gap: 0.5rem;">
-    <div class="name">{{ server.name }}</div>
+    {# Click the name to edit it inline. #}
+    <div class="name"
+         tabindex="0"
+         title="Click to rename"
+         onclick="this.outerHTML = `<form class='name-edit' hx-put='/servers/{{ server.id }}/name' hx-target='#server-{{ server.id }}' hx-swap='outerHTML'><input name='name' value='{{ server.name }}' autofocus onblur='this.form.requestSubmit()' onkeydown='if(event.key===&quot;Escape&quot;){htmx.ajax(&quot;GET&quot;,&quot;/servers/list&quot;,{target:&quot;#servers-grid&quot;,swap:&quot;outerHTML&quot;})}'></form>`">
+      {{ server.name }}
+    </div>
     <span class="status {{ server.status.value }}">{{ server.status.value }}</span>
   </div>
   <div class="meta">
-    <span>{{ server.platform_id }} {{ server.version }}</span>
+    <span><a href="/servers/{{ server.id }}/console" style="color:inherit;text-decoration:none;">{{ server.platform_id }} {{ server.version }}</a></span>
     <span class="mono">:{{ server.port }}</span>
     <span>{{ server.memory_mb }} MB</span>
-    {% if server.cross_play %}<span title="Geyser cross-play">⛓ cross-play</span>{% endif %}
+    {% if server.cross_play %}<span title="Geyser cross-play on UDP {{ server.bedrock_bridge_port }}">⛓ cross-play</span>{% endif %}
   </div>
+  {% if server.status.value == 'running' %}
+    {# Poll Docker stats every 5s while running. Replaces just the inner span. #}
+    <div class="meta stats-row" hx-get="/servers/{{ server.id }}/stats"
+         hx-trigger="load, every 5s" hx-swap="innerHTML">
+      <span class="mono" style="color: var(--text-muted);">stats loading…</span>
+    </div>
+  {% endif %}
   <div class="actions">
     {% if server.status.value == 'running' %}
       <button class="btn"
               hx-post="/servers/{{ server.id }}/stop"
               hx-target="#server-{{ server.id }}"
               hx-swap="outerHTML">Stop</button>
+      <button class="btn"
+              hx-post="/servers/{{ server.id }}/restart"
+              hx-target="#server-{{ server.id }}"
+              hx-swap="outerHTML"
+              hx-confirm="Restart {{ server.name }}? Players will be disconnected.">Restart</button>
     {% else %}
       <button class="btn btn-primary"
               hx-post="/servers/{{ server.id }}/start"
