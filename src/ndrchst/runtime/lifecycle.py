@@ -109,13 +109,29 @@ def _build_spec(server: Server, data_dir: Path) -> ContainerSpec:
         image = java_image_for(server.version)
         xmx = server.memory_mb
         xms = max(server.memory_mb // 2, 512)
-        cmd = ["java", f"-Xms{xms}m", f"-Xmx{xmx}m"]
-        # User-supplied JVM flags slotted in *before* -jar so they apply to
-        # the JVM, not to the server jar's arguments.
-        if server.extra_jvm_flags:
-            cmd.extend(shlex.split(server.extra_jvm_flags))
-        cmd.extend(["-jar", "server.jar", "nogui"])
-        env = {"EULA": "TRUE"}
+        # NeoForge produces a `run.sh` that exec's java with its own
+        # @-args files (libraries, modlist, etc.). We can't replicate that
+        # arg list ourselves — invoke run.sh and inject memory via JAVA_TOOL_OPTIONS
+        # which the JVM picks up regardless of how it's launched.
+        is_neoforge = (server.platform_id == "neoforge")
+        if is_neoforge:
+            cmd = ["bash", "run.sh", "nogui"]
+        else:
+            cmd = ["java", f"-Xms{xms}m", f"-Xmx{xmx}m"]
+            # User-supplied JVM flags slotted in *before* -jar so they apply to
+            # the JVM, not to the server jar's arguments.
+            if server.extra_jvm_flags:
+                cmd.extend(shlex.split(server.extra_jvm_flags))
+            cmd.extend(["-jar", "server.jar", "nogui"])
+        env: dict[str, str] = {"EULA": "TRUE"}
+        if is_neoforge:
+            # JAVA_TOOL_OPTIONS gets read by every JVM start within the
+            # container — covers both run.sh's `java` invocation and any
+            # mod-bootstrap re-exec. Memory + user flags ride here.
+            jto = f"-Xms{xms}m -Xmx{xmx}m"
+            if server.extra_jvm_flags:
+                jto = f"{jto} {server.extra_jvm_flags}"
+            env["JAVA_TOOL_OPTIONS"] = jto
         # User env merged after the runtime-required keys so reserved-keys
         # validation (in domain/config) is the only guard we need.
         if server.env_vars:

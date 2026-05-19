@@ -233,6 +233,43 @@ async def test_version_latest_resolves_to_concrete(lifecycle: Lifecycle, monkeyp
     assert s.version == "1.21.4-resolved"
 
 
+async def test_build_spec_neoforge_uses_run_sh_and_java_tool_options(monkeypatch):
+    """NeoForge servers boot via the installer-produced run.sh; memory has
+    to ride on JAVA_TOOL_OPTIONS because we can't intercept run.sh's @-args."""
+    from ndrchst.domain.models import Family, Server
+    from ndrchst.runtime.lifecycle import _build_spec
+    s = Server(
+        id="nf-test", name="ATM", platform_id="neoforge", family=Family.JAVA,
+        version="21.11.42", port=25565, memory_mb=8192,
+        extra_jvm_flags="-XX:+UseG1GC",
+    )
+    spec = _build_spec(s, Path("/tmp/srv"))
+    assert spec.cmd == ["bash", "run.sh", "nogui"]
+    # Memory + user flags merged into JAVA_TOOL_OPTIONS so every JVM start
+    # within the container picks them up (run.sh + any mod-bootstrap re-exec).
+    jto = spec.env["JAVA_TOOL_OPTIONS"]
+    assert "-Xmx8192m" in jto
+    assert "-Xms4096m" in jto
+    assert "-XX:+UseG1GC" in jto
+    # EULA is still set (NeoForge writes eula.txt; env var is harmless)
+    assert spec.env["EULA"] == "TRUE"
+
+
+async def test_build_spec_paper_still_uses_direct_java(monkeypatch):
+    """Paper's spec is unchanged — direct `java -jar server.jar` invocation,
+    no JAVA_TOOL_OPTIONS sidecar (memory rides on the cmdline directly)."""
+    from ndrchst.domain.models import Family, Server
+    from ndrchst.runtime.lifecycle import _build_spec
+    s = Server(
+        id="pp-test", name="P", platform_id="paper", family=Family.JAVA,
+        version="1.21.3", port=25565, memory_mb=2048,
+    )
+    spec = _build_spec(s, Path("/tmp/srv"))
+    assert "-Xmx2048m" in spec.cmd
+    assert spec.cmd[-3:] == ["-jar", "server.jar", "nogui"]
+    assert "JAVA_TOOL_OPTIONS" not in spec.env
+
+
 async def test_create_paper_upstream_404_raises_clean_lifecycle_error(
     tmp_path: Path, monkeypatch,
 ):
