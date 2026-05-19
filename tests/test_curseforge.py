@@ -310,15 +310,14 @@ def test_file_id_from_url_returns_none_for_garbage():
     assert cf.file_id_from_url("") is None
 
 
-def _resolver_handler(*, project_id, file_id, server_pack_id=None, server_pack_filename=None):
-    """Mock the unofficial CF v1 endpoints used by the resolver."""
+def _resolver_handler(*, slug_path, project_id, file_id,
+                      server_pack_id=None, server_pack_filename=None):
+    """Mock the cfwidget slug-lookup + the unofficial CF v1 endpoints."""
     def h(request: httpx.Request) -> httpx.Response:
         url = str(request.url)
-        # /api/v1/mods/files/<fid> — reverse-lookup file → project
-        if url.endswith(f"/api/v1/mods/files/{file_id}"):
-            return httpx.Response(200, json={
-                "data": {"id": file_id, "modId": project_id, "projectId": project_id},
-            })
+        # cfwidget: slug → project id
+        if url.endswith(f"/{slug_path}"):
+            return httpx.Response(200, json={"id": project_id, "title": "X"})
         # /api/v1/mods/<pid>/files/<fid> — file metadata
         if url.endswith(f"/api/v1/mods/{project_id}/files/{file_id}"):
             return httpx.Response(200, json={
@@ -329,7 +328,7 @@ def _resolver_handler(*, project_id, file_id, server_pack_id=None, server_pack_f
                     "additionalFilesCount": 1 if server_pack_id else 0,
                 },
             })
-        # /api/v1/mods/<pid>/files/<fid>/additional-files — server pack zip
+        # additional-files lookup for the server pack
         if url.endswith(f"/files/{file_id}/additional-files"):
             data = []
             if server_pack_id:
@@ -339,16 +338,38 @@ def _resolver_handler(*, project_id, file_id, server_pack_id=None, server_pack_f
     return h
 
 
-async def test_resolve_to_server_pack_upgrades_client_pack_url():
-    """User pastes the CDN URL of the client pack; we upgrade to the
-    server-pack CDN URL because hasServerPack=True."""
+async def test_parse_cf_url_extracts_slug_and_file_id():
+    """Page URLs carry both slug + fileId — both are required to find
+    the server pack via cfwidget + CF v1."""
+    parts = cf.parse_cf_url(
+        "https://www.curseforge.com/minecraft/modpacks/all-the-mods-10/files/8091114"
+    )
+    assert parts is not None
+    assert parts.file_id == 8091114
+    assert parts.slug_path == "minecraft/modpacks/all-the-mods-10"
+
+    # CDN URL has no slug → slug_path is None
+    parts = cf.parse_cf_url(
+        "https://edge.forgecdn.net/files/8091/114/foo.zip"
+    )
+    assert parts is not None
+    assert parts.file_id == 8091114
+    assert parts.slug_path is None
+
+
+async def test_resolve_to_server_pack_upgrades_page_url():
+    """User pastes a CurseForge page URL → we hit cfwidget for the
+    project id → CF v1 for hasServerPack → swap to the server-pack
+    CDN URL."""
     h = _resolver_handler(
+        slug_path="minecraft/modpacks/all-the-mods-10",
         project_id=925200, file_id=8091114,
         server_pack_id=8094893, server_pack_filename="ServerFiles-7.0.zip",
     )
     client = httpx.AsyncClient(transport=httpx.MockTransport(h))
     new_url, note = await cf.resolve_to_server_pack(
-        client, "https://edge.forgecdn.net/files/8091/114/Client.zip",
+        client,
+        "https://www.curseforge.com/minecraft/modpacks/all-the-mods-10/files/8091114",
     )
     assert new_url == (
         "https://edge.forgecdn.net/files/8094/893/ServerFiles-7.0.zip"
@@ -357,11 +378,27 @@ async def test_resolve_to_server_pack_upgrades_client_pack_url():
     await client.aclose()
 
 
+async def test_resolve_to_server_pack_passthrough_for_cdn_only_url():
+    """A bare CDN URL doesn't carry the slug, so we can't resolve the
+    projectId without auth. Pass through unchanged."""
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(500)),
+    )
+    original = "https://edge.forgecdn.net/files/8091/114/Client.zip"
+    new_url, note = await cf.resolve_to_server_pack(client, original)
+    assert new_url == original
+    assert note is None
+    await client.aclose()
+
+
 async def test_resolve_to_server_pack_passthrough_when_no_server_pack():
-    """If hasServerPack=False, we return the original URL unchanged."""
-    h = _resolver_handler(project_id=100, file_id=999)
+    """If hasServerPack=False, return the original URL unchanged."""
+    h = _resolver_handler(
+        slug_path="minecraft/modpacks/some-pack",
+        project_id=100, file_id=999,
+    )
     client = httpx.AsyncClient(transport=httpx.MockTransport(h))
-    original = "https://edge.forgecdn.net/files/0/999/foo.zip"
+    original = "https://www.curseforge.com/minecraft/modpacks/some-pack/files/999"
     new_url, note = await cf.resolve_to_server_pack(client, original)
     assert new_url == original
     assert note is None
@@ -369,8 +406,9 @@ async def test_resolve_to_server_pack_passthrough_when_no_server_pack():
 
 
 async def test_resolve_to_server_pack_passthrough_for_non_cf_url():
-    """Not a CF URL at all → no lookup attempted, original URL returned."""
-    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(500)))
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(500)),
+    )
     original = "https://example.com/some-other-modpack.zip"
     new_url, note = await cf.resolve_to_server_pack(client, original)
     assert new_url == original
@@ -379,13 +417,12 @@ async def test_resolve_to_server_pack_passthrough_for_non_cf_url():
 
 
 async def test_resolve_to_server_pack_swallows_lookup_failures():
-    """If CF returns garbage / 5xx for the lookup, we fall back to the
-    original URL rather than failing the whole install. The operator
-    still gets a usable (if non-curated) zip."""
+    """cfwidget / CF v1 / network 5xx → fall back to the original URL
+    rather than failing the install."""
     client = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: httpx.Response(500)),
     )
-    original = "https://edge.forgecdn.net/files/8091/114/Client.zip"
+    original = "https://www.curseforge.com/minecraft/modpacks/x/files/999"
     new_url, note = await cf.resolve_to_server_pack(client, original)
     assert new_url == original
     assert note is None

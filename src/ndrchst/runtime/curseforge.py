@@ -45,13 +45,20 @@ log = logging.getLogger("ndrchst.curseforge")
 
 CF_WEBSITE_API = "https://www.curseforge.com/api/v1/mods"
 CF_CDN_BASE = "https://edge.forgecdn.net/files"
+# Public cfwidget mirror, keyed by slug. The CF v1 endpoints all require a
+# numeric projectId; cfwidget is the one no-auth way we have to resolve
+# a slug we lifted from a URL to that projectId.
+CFWIDGET_API = "https://api.cfwidget.com"
 
 # Patterns we know how to extract a CurseForge fileId from.
 _CDN_RE = re.compile(
     r"^https?://(?:edge|mediafilez?)\.forgecdn\.net/files/(\d+)/(\d+)/"
 )
+# Page URL like:
+#   https://www.curseforge.com/minecraft/modpacks/all-the-mods-10/files/8091114
+# We need both the category/slug pair (to find the project) and the fileId.
 _PAGE_RE = re.compile(
-    r"^https?://(?:www\.)?curseforge\.com/[^/]+/[^/]+/[^/]+/files/(\d+)"
+    r"^https?://(?:www\.)?curseforge\.com/([^/]+)/([^/]+)/([^/]+)/files/(\d+)"
 )
 
 # Default concurrency for the parallel mod-download phase. A typical
@@ -257,22 +264,60 @@ async def download_mod(
     return target
 
 
-def file_id_from_url(url: str) -> int | None:
-    """If `url` is a recognisable CurseForge link (CDN or curseforge.com
-    page), pull out the integer fileId. Otherwise return None.
+@dataclass(frozen=True, slots=True)
+class CFURLParts:
+    """What we can extract from a CurseForge URL without hitting the network.
 
-    CDN: ``https://edge.forgecdn.net/files/8091/114/All-the-Mods-10-7.0.zip``
-         → 8091114 (the path split rejoins).
-    Page: ``https://www.curseforge.com/minecraft/modpacks/all-the-mods-10/files/8091114``
-          → 8091114.
+    `slug_path` is the `<category>/<type>/<slug>` triple from page URLs
+    (e.g. `minecraft/modpacks/all-the-mods-10`) — we feed it to cfwidget
+    to resolve the projectId. CDN URLs don't carry the slug so this
+    field is None for them.
     """
+    file_id: int
+    slug_path: str | None
+
+
+def parse_cf_url(url: str) -> CFURLParts | None:
+    """Best-effort parse of a CurseForge URL. Returns None if the URL
+    isn't a CF link we recognise."""
     m = _CDN_RE.match(url)
     if m:
-        return int(m.group(1) + f"{int(m.group(2)):03d}")
+        return CFURLParts(
+            file_id=int(m.group(1) + f"{int(m.group(2)):03d}"),
+            slug_path=None,
+        )
     m = _PAGE_RE.match(url)
     if m:
-        return int(m.group(1))
+        return CFURLParts(
+            file_id=int(m.group(4)),
+            slug_path=f"{m.group(1)}/{m.group(2)}/{m.group(3)}",
+        )
     return None
+
+
+def file_id_from_url(url: str) -> int | None:
+    """Convenience: just the fileId if there is one."""
+    parts = parse_cf_url(url)
+    return parts.file_id if parts else None
+
+
+async def project_id_from_slug(
+    client: httpx.AsyncClient, slug_path: str,
+) -> int:
+    """Resolve a slug like `minecraft/modpacks/all-the-mods-10` to its
+    integer projectId via cfwidget. Used by the resolver since the
+    no-auth CF v1 endpoints all require a known projectId."""
+    r = await client.get(f"{CFWIDGET_API}/{slug_path}")
+    if r.status_code == 404:
+        raise CurseForgeError(f"cfwidget doesn't know slug {slug_path!r}")
+    r.raise_for_status()
+    payload = r.json()
+    pid = payload.get("id")
+    if not pid:
+        raise CurseForgeError(
+            f"cfwidget returned no project id for {slug_path!r}: {payload!r}"
+        )
+    return int(pid)
 
 
 async def fetch_file_metadata(
@@ -291,29 +336,8 @@ async def fetch_file_metadata(
     return payload
 
 
-async def find_project_id_for_file(
-    client: httpx.AsyncClient, file_id: int,
-) -> int:
-    """Given just a file_id, work out the projectId it belongs to. The
-    CF v1 endpoint is keyed by both — we use the unofficial v1 search
-    ``/api/v1/mods/files/<fid>`` which returns the file with its
-    projectId attached."""
-    url = f"{CF_WEBSITE_API}/files/{file_id}"
-    r = await client.get(url)
-    if r.status_code == 404:
-        raise CurseForgeError(f"CF doesn't know file {file_id}")
-    r.raise_for_status()
-    payload = r.json().get("data") or {}
-    pid = payload.get("modId") or payload.get("projectId")
-    if not pid:
-        raise CurseForgeError(
-            f"CF v1 file-lookup returned no projectId for {file_id}: {payload!r}"
-        )
-    return int(pid)
-
-
 async def find_server_pack_url(
-    client: httpx.AsyncClient, file_id: int, *, project_id: int | None = None,
+    client: httpx.AsyncClient, project_id: int, file_id: int,
 ) -> str | None:
     """If the given CF file has a published server-pack companion,
     return the CDN URL for that pack. Returns None if no server pack
@@ -327,20 +351,13 @@ async def find_server_pack_url(
     server-pack file record.
     """
     try:
-        if project_id is None:
-            project_id = await find_project_id_for_file(client, file_id)
         meta = await fetch_file_metadata(client, project_id, file_id)
         if not meta.get("hasServerPack"):
             return None
-        # The additional-files endpoint lists the server pack(s).
         url = f"{CF_WEBSITE_API}/{project_id}/files/{file_id}/additional-files"
         r = await client.get(url)
         r.raise_for_status()
         extras = r.json().get("data") or []
-        # CF tags server packs in the gameVersions list as e.g. "Server" or
-        # just by being on the additional-files list when hasServerPack=True.
-        # We take the first additional file as the server pack — it's the
-        # documented convention.
         if not extras:
             return None
         srv = extras[0]
@@ -348,7 +365,10 @@ async def find_server_pack_url(
         srv_filename = srv["fileName"]
         return _cdn_url(srv_fid, srv_filename)
     except (CurseForgeError, httpx.HTTPError, KeyError, ValueError) as e:
-        log.warning("server-pack lookup failed for file %s: %s", file_id, e)
+        log.warning(
+            "server-pack lookup failed for project %s file %s: %s",
+            project_id, file_id, e,
+        )
         return None
 
 
@@ -362,17 +382,30 @@ async def resolve_to_server_pack(
     uses ``resolved_url`` to actually download; ``note`` is surfaced to
     the operator so they understand the swap.
 
-    Non-CF URLs (or CF URLs without a server pack) pass through
-    unchanged, so this is safe to wrap around every modpack install.
+    Non-CF URLs pass through unchanged. CDN-only URLs (no slug → no way
+    to find the projectId without auth) also pass through. Page URLs
+    like ``curseforge.com/minecraft/modpacks/<slug>/files/<fileId>``
+    get the full server-pack-swap treatment.
     """
-    file_id = file_id_from_url(url)
-    if file_id is None:
+    parts = parse_cf_url(url)
+    if parts is None:
         return url, None
-    server_pack_url = await find_server_pack_url(client, file_id)
+    if parts.slug_path is None:
+        # CDN URL with no slug — we can't find the projectId without
+        # auth, so pass through. Operator can paste the page URL instead
+        # if they want the auto-swap.
+        return url, None
+    try:
+        project_id = await project_id_from_slug(client, parts.slug_path)
+    except (CurseForgeError, httpx.HTTPError) as e:
+        log.warning("project lookup failed for %s: %s", parts.slug_path, e)
+        return url, None
+    server_pack_url = await find_server_pack_url(client, project_id, parts.file_id)
     if server_pack_url is None:
         return url, None
     return server_pack_url, (
-        f"auto-upgraded to CurseForge server pack for file {file_id}"
+        f"auto-upgraded to CurseForge server pack "
+        f"(project {project_id}, file {parts.file_id})"
     )
 
 
