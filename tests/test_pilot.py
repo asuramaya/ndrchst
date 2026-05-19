@@ -100,3 +100,32 @@ def test_public_host_placeholder_when_empty(tmp_path: Path):
     with zipfile.ZipFile(b.zip_path) as zf:
         cfg = zf.read("ndrchst_pilot/config.py").decode()
         assert "REPLACE_WITH_SERVER_HOST" in cfg
+
+
+def test_edge_url_lands_in_manifest_and_readme(tmp_path: Path):
+    """When the operator pins NDRCHST_EDGE_URL, the bundle README points
+    users at the public surface and the manifest records the same URL so
+    a future updater knows where to GET fresh copies."""
+    s = _make_server()
+    b = pilot.build_bundle(
+        s, public_host="mc.ndrchst.com",
+        edge_url="https://play.ndrchst.com", pilots_root=tmp_path,
+    )
+    man = json.loads(b.manifest_path.read_text())
+    assert man["host"] == "mc.ndrchst.com"
+    assert man["edge_url"] == "https://play.ndrchst.com"
+    with zipfile.ZipFile(b.zip_path) as zf:
+        readme = zf.read("README.txt").decode()
+        assert "https://play.ndrchst.com/pilot/abc123def456/pilot.zip" in readme
+        assert "mc.ndrchst.com:25574" in readme
+
+
+def test_edge_url_missing_means_no_update_line(tmp_path: Path):
+    """If edge_url isn't set, the README simply omits the 'Grab the latest…'
+    line — we don't want a dangling URL fragment."""
+    s = _make_server()
+    b = pilot.build_bundle(s, public_host="example.com", pilots_root=tmp_path)
+    with zipfile.ZipFile(b.zip_path) as zf:
+        readme = zf.read("README.txt").decode()
+    assert "Grab the latest" not in readme
+    assert "/pilot/" not in readme

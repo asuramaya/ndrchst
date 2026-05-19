@@ -418,6 +418,72 @@ def test_stats_fragment_returns_cpu_and_memory_html(app_with_docker):
             lc.Lifecycle.stats = original
 
 
+def test_regenerate_pilot_rebuilds_bundle_with_current_env(app_with_docker, tmp_path):
+    """Creating a server bakes the lifespan's public_host into the bundle.
+    Changing the env + hitting POST /servers/{id}/pilot/regenerate should
+    rebuild with the new host — no recreate needed."""
+    with TestClient(app_with_docker) as client:
+        st: AppState = app_with_docker.state.ndrchst
+        pilots_root = tmp_path / "pilots"
+        servers_root = tmp_path / "servers"
+        st.lifecycle = Lifecycle(
+            Docker(client=FakeClient()), st.conn,
+            servers_root=servers_root,
+            public_host="old.example",
+            edge_url="",
+        )
+        import ndrchst.runtime.pilot as pilot_mod
+        original_root = pilot_mod.PILOTS_ROOT_DEFAULT
+        pilot_mod.PILOTS_ROOT_DEFAULT = pilots_root
+        try:
+            r = client.post("/servers", data={
+                "name": "Rebuilder", "platform_id": "paper",
+                "version": "1.21.3", "port": "25571", "memory_mb": "2048",
+            }, headers={"HX-Request": "true"})
+            assert r.status_code == 200, r.text
+            sid = next(s["id"] for s in client.get("/api/servers").json()
+                       if s["name"] == "Rebuilder")
+
+            import json
+            man = json.loads((pilots_root / sid / "manifest.json").read_text())
+            assert man["host"] == "old.example"
+            assert man["edge_url"] == ""
+
+            # Flip the live env on the lifecycle (simulating an operator
+            # editing systemd Environment= and restarting).
+            st.lifecycle._public_host = "mc.ndrchst.com"
+            st.lifecycle._edge_url = "https://play.ndrchst.com"
+
+            r = client.post(f"/servers/{sid}/pilot/regenerate")
+            assert r.status_code == 200
+            assert "Rebuilt pilot bundle" in r.text
+
+            man2 = json.loads((pilots_root / sid / "manifest.json").read_text())
+            assert man2["host"] == "mc.ndrchst.com"
+            assert man2["edge_url"] == "https://play.ndrchst.com"
+        finally:
+            pilot_mod.PILOTS_ROOT_DEFAULT = original_root
+
+
+def test_regenerate_pilot_bedrock_rejected(app_with_docker, tmp_path):
+    """Bedrock servers have no pilot bundle; the route must 400."""
+    with TestClient(app_with_docker) as client:
+        st: AppState = app_with_docker.state.ndrchst
+        st.lifecycle = Lifecycle(
+            Docker(client=FakeClient()), st.conn,
+            servers_root=tmp_path / "servers", public_host="x",
+        )
+        r = client.post("/servers", data={
+            "name": "Bdrk", "platform_id": "bedrock",
+            "version": "latest", "port": "19501", "memory_mb": "1024",
+        }, headers={"HX-Request": "true"})
+        assert r.status_code == 200, r.text
+        sid = next(s["id"] for s in client.get("/api/servers").json()
+                   if s["name"] == "Bdrk")
+        r = client.post(f"/servers/{sid}/pilot/regenerate")
+        assert r.status_code == 400
+
+
 def test_html_create_invalid_renders_inline_error(app_with_docker):
     with TestClient(app_with_docker) as client:
         st: AppState = app_with_docker.state.ndrchst

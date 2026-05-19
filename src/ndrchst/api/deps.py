@@ -48,19 +48,27 @@ def make_lifespan(
         conn = connect(db_path)
         lifecycle: Lifecycle | None = None
         docker_error: str | None = None
-        # Address pilot binaries should dial. Env var lets ops pin a public
-        # hostname (e.g. "play.ndrchst.com"); otherwise it's left blank and
-        # pilot configs ship a placeholder for the user to fill in.
+        # Address MC clients dial (NDRCHST_PUBLIC_HOST), and the HTTPS edge
+        # URL where the public surface lives so the pilot bundle README can
+        # point users at it for downloads/updates (NDRCHST_EDGE_URL). Both
+        # are blank by default; an unset PUBLIC_HOST means generated pilots
+        # ship a placeholder for the user to fill in by hand.
         import os
         public_host = os.environ.get("NDRCHST_PUBLIC_HOST", "")
+        edge_url = os.environ.get("NDRCHST_EDGE_URL", "")
         try:
             client = docker.from_env()
             client.ping()
             lifecycle = Lifecycle(
                 Docker(client=client), conn,
-                servers_root=servers_root, public_host=public_host,
+                servers_root=servers_root,
+                public_host=public_host, edge_url=edge_url,
             )
-            log.info("Docker reachable; lifecycle active (public_host=%s)", public_host or "<unset>")
+            log.info(
+                "Docker reachable; lifecycle active "
+                "(public_host=%s, edge_url=%s)",
+                public_host or "<unset>", edge_url or "<unset>",
+            )
         except Exception as e:
             docker_error = f"{type(e).__name__}: {e}"
             log.warning("Docker unreachable (%s); running in read-only mode", docker_error)

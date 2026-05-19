@@ -215,14 +215,18 @@ class Lifecycle:
         *,
         servers_root: Path = SERVERS_ROOT_DEFAULT,
         public_host: str | None = None,
+        edge_url: str | None = None,
     ):
         self._docker = docker
         self._conn = conn
         self._root = servers_root
-        # Address the pilot client should dial. Lifespan-time decision: env
-        # var (`NDRCHST_PUBLIC_HOST`) or the Tailscale IP; falls back to a
-        # placeholder users have to edit by hand.
+        # Address MC clients should dial. Set via `NDRCHST_PUBLIC_HOST` env;
+        # falls back to a placeholder users have to edit by hand.
         self._public_host = public_host or ""
+        # HTTPS base URL where the public surface lives — used in the pilot
+        # bundle README so end-users know where to fetch fresh copies.
+        # Set via `NDRCHST_EDGE_URL` (e.g. "https://play.ndrchst.com").
+        self._edge_url = edge_url or ""
 
     async def create(self, req: CreateRequest) -> Server:
         _validate(req, self._conn)
@@ -328,7 +332,11 @@ class Lifecycle:
         # client guaranteed to match this exact server.
         if server.family is Family.JAVA:
             try:
-                build_pilot_bundle(server, public_host=self._public_host)
+                build_pilot_bundle(
+                    server,
+                    public_host=self._public_host,
+                    edge_url=self._edge_url,
+                )
             except PilotBuildError:
                 # Pilot is best-effort — log but don't fail server create
                 import logging
@@ -433,6 +441,19 @@ class Lifecycle:
             if not srv_store.port_in_use(self._conn, candidate) and is_port_free(candidate, Family.JAVA):
                 return candidate
         raise LifecycleError("could not find a free RCON host port; range exhausted")
+
+    def regenerate_pilot(self, server_id: str):
+        """Rebuild the pilot bundle from the current server record + lifespan
+        env. Cheap (no compile step) — exists so the user can pick up a new
+        public_host / edge_url without recreating the server."""
+        server = self._must_get(server_id)
+        if server.family is not Family.JAVA:
+            raise LifecycleError("pilot bundles are Java-only")
+        return build_pilot_bundle(
+            server,
+            public_host=self._public_host,
+            edge_url=self._edge_url,
+        )
 
     async def stats(self, server_id: str):
         """Return Docker container stats for the server, or None if no

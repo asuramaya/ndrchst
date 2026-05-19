@@ -200,6 +200,28 @@ async def restart(
     return _render_card(request, conn, server_id)
 
 
+@router.post("/servers/{server_id}/pilot/regenerate", response_class=HTMLResponse)
+async def regenerate_pilot(
+    request: Request,
+    server_id: str,
+    lifecycle: Lifecycle = Depends(require_lifecycle),
+    conn: sqlite3.Connection = Depends(db),
+) -> HTMLResponse:
+    """Rebuild the pilot bundle for this server from the *current* lifespan
+    env (NDRCHST_PUBLIC_HOST + NDRCHST_EDGE_URL). Useful after the operator
+    changes those env vars without wanting to recreate the server."""
+    from ..runtime.pilot import PilotBuildError
+    try:
+        bundle = lifecycle.regenerate_pilot(server_id)
+    except LifecycleError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except PilotBuildError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return HTMLResponse(
+        f"Rebuilt pilot bundle ({bundle.size} bytes, sha256={bundle.sha256[:12]}…)",
+    )
+
+
 @router.put("/servers/{server_id}/name", response_class=HTMLResponse)
 async def rename(
     request: Request,

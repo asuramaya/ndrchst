@@ -68,11 +68,17 @@ def build_bundle(
     server: Server,
     *,
     public_host: str,
+    edge_url: str = "",
     pilots_root: Path | None = None,
     source_dir: Path | None = None,
 ) -> PilotBundle:
     """Generate and persist a pilot zip for this server. Idempotent — running
     twice overwrites with a fresh build.
+
+    `public_host` is the address MC clients will dial for game traffic
+    (e.g. "mc.ndrchst.com"). `edge_url` is the HTTP base URL where the
+    pilot zip + manifest live publicly (e.g. "https://play.ndrchst.com")
+    — surfaced in the README so end-users know where to grab updates.
 
     Only Java servers get a pilot. Bedrock servers raise PilotBuildError;
     callers should guard.
@@ -97,6 +103,7 @@ def build_bundle(
         "mc_version": server.version,
         "default_username": "Player",
         "server_id": server.id,
+        "edge_url": edge_url or "",
     }
 
     zip_buf = io.BytesIO()
@@ -137,6 +144,7 @@ def build_bundle(
         "mc_version": server.version,
         "host": host,
         "port": server.port,
+        "edge_url": edge_url or "",
         "built_at": datetime.now(UTC).isoformat(),
         "size": len(zip_bytes),
         "sha256": sha,
@@ -202,6 +210,12 @@ python -m venv .venv
 
 
 def _readme(cfg: dict) -> str:
+    edge_line = ""
+    if cfg.get("edge_url"):
+        edge_line = (
+            f"\nGrab the latest copy of this bundle any time at:\n"
+            f"  {cfg['edge_url'].rstrip('/')}/pilot/{cfg['server_id']}/pilot.zip\n"
+        )
     return f"""\
 {cfg['app_name']}
 {'=' * len(cfg['app_name'])}
@@ -219,6 +233,6 @@ What this does:
   2. Installs `portablemc` (the only dependency)
   3. Launches the Minecraft offline-mode pilot GUI
   4. Connects you to {cfg['server_host']}:{cfg['server_port']} on Minecraft {cfg['mc_version']}
-
+{edge_line}
 Server ID: {cfg['server_id']}
 """
