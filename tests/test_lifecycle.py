@@ -255,6 +255,21 @@ async def test_build_spec_neoforge_uses_run_sh_and_java_tool_options(monkeypatch
     assert spec.env["EULA"] == "TRUE"
 
 
+async def test_build_spec_modpack_uses_run_sh_like_neoforge(monkeypatch):
+    """Modpack servers layer on NeoForge — same `run.sh` entrypoint, same
+    JAVA_TOOL_OPTIONS memory plumbing as plain NeoForge."""
+    from ndrchst.domain.models import Family, Server
+    from ndrchst.runtime.lifecycle import _build_spec
+    s = Server(
+        id="mp-test", name="ATM10", platform_id="modpack", family=Family.JAVA,
+        version="http://127.0.0.1:9999/p.zip", port=25590, memory_mb=10240,
+    )
+    spec = _build_spec(s, Path("/tmp/srv"))
+    assert spec.cmd == ["bash", "run.sh", "nogui"]
+    assert "-Xmx10240m" in spec.env["JAVA_TOOL_OPTIONS"]
+    assert "-Xms5120m" in spec.env["JAVA_TOOL_OPTIONS"]
+
+
 async def test_build_spec_paper_still_uses_direct_java(monkeypatch):
     """Paper's spec is unchanged — direct `java -jar server.jar` invocation,
     no JAVA_TOOL_OPTIONS sidecar (memory rides on the cmdline directly)."""

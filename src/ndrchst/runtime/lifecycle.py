@@ -109,11 +109,12 @@ def _build_spec(server: Server, data_dir: Path) -> ContainerSpec:
         image = java_image_for(server.version)
         xmx = server.memory_mb
         xms = max(server.memory_mb // 2, 512)
-        # NeoForge produces a `run.sh` that exec's java with its own
-        # @-args files (libraries, modlist, etc.). We can't replicate that
-        # arg list ourselves — invoke run.sh and inject memory via JAVA_TOOL_OPTIONS
-        # which the JVM picks up regardless of how it's launched.
-        is_neoforge = (server.platform_id == "neoforge")
+        # NeoForge (and modpacks layered on top of NeoForge) produce a
+        # `run.sh` that exec's java with its own @-args files (libraries,
+        # modlist, etc.). We can't replicate that arg list ourselves —
+        # invoke run.sh and inject memory via JAVA_TOOL_OPTIONS which the
+        # JVM picks up regardless of how it's launched.
+        is_neoforge = server.platform_id in ("neoforge", "modpack")
         if is_neoforge:
             cmd = ["bash", "run.sh", "nogui"]
         else:
