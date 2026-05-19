@@ -188,7 +188,8 @@ def launch(
     # modded heap + G1GC.
     ram_mb = max(client_ram_mb, 2048)
     xms_mb = min(2048, ram_mb)
-    env.jvm_args[:0] = [
+    # env.jvm_args[0] is the java executable path; flags go AFTER it.
+    flags = [
         f"-Xmx{ram_mb}m",
         f"-Xms{xms_mb}m",
         "-XX:+UseG1GC",
@@ -200,6 +201,8 @@ def launch(
         "-XX:G1HeapRegionSize=8M",
         "-XX:G1ReservePercent=20",
     ]
+    insert_at = 1 if env.jvm_args else 0
+    env.jvm_args[insert_at:insert_at] = flags
     on_log(f"Client heap: -Xmx{ram_mb}m (G1GC)")
 
     on_log(
