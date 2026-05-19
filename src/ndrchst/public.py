@@ -80,6 +80,12 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             })
         return out
 
+    # Pilot bundles regenerate on demand (POST /servers/{id}/pilot/regenerate
+    # on the admin plane). If a CDN ahead of us caches the old copy, the new
+    # config sits unreachable until TTL expiry. `no-store` opts every layer
+    # — browsers + Cloudflare — out of caching these per-server files.
+    _NO_STORE = {"Cache-Control": "no-store, no-cache, must-revalidate"}
+
     @app.get("/pilot/{server_id}/pilot.zip")
     def download_pilot(server_id: str) -> FileResponse:
         server = srv_store.get(_conn(), server_id)
@@ -95,6 +101,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             path,
             media_type="application/zip",
             filename=f"ndrchst-pilot-{server.name.replace(' ', '_')}.zip",
+            headers=_NO_STORE,
         )
 
     @app.get("/pilot/{server_id}/config.json")
@@ -104,7 +111,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         if not cfg_path.exists():
             raise HTTPException(status_code=404, detail="config not found")
         import json
-        return JSONResponse(json.loads(cfg_path.read_text()))
+        return JSONResponse(json.loads(cfg_path.read_text()), headers=_NO_STORE)
 
     @app.get("/pilot/{server_id}/manifest.json")
     def pilot_manifest(server_id: str) -> JSONResponse:
@@ -113,7 +120,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         if not mp.exists():
             raise HTTPException(status_code=404, detail="manifest not found")
         import json
-        return JSONResponse(json.loads(mp.read_text()))
+        return JSONResponse(json.loads(mp.read_text()), headers=_NO_STORE)
 
     return app
 

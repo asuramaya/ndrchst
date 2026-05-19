@@ -101,6 +101,9 @@ def test_download_pilot_serves_zip(tmp_path: Path, monkeypatch):
         assert r.status_code == 200
         assert r.headers["content-type"] == "application/zip"
         assert len(r.content) > 1000
+        # Cache opt-out: bundle can be regenerated server-side at any time,
+        # we don't want a CDN to serve a stale copy after that happens.
+        assert "no-store" in r.headers.get("cache-control", "")
 
 
 def test_download_pilot_404_for_unknown_server(tmp_path: Path):
