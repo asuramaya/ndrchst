@@ -210,6 +210,42 @@ Completed in v0.1 (2026-05-18, this sweep):
 - Global `/assets` view groups installed mods/plugins/packs by server
 - Structured JSON logging via `logging_setup.configure()`, env-driven (`NDRCHST_LOG_*`), idempotent
 
+## Modded-Java pivot (2026-05-19)
+
+Direction shift: product narrows to vertically-integrated modded Java, as
+foundation for crypto integration. Bedrock stays in the codebase (hidden
+behind `default_visible=False`) so it can be OSS'd or re-enabled later;
+just not surfaced in the create form.
+
+New platforms shipped this sweep:
+
+- **NeoForge** — full implementation. Versions come from Maven; install
+  downloads the per-version installer.jar and runs it via a one-shot
+  `eclipse-temurin:21-jdk` container. Container cmd at boot is
+  `bash run.sh nogui`; memory + user JVM flags ride on
+  `JAVA_TOOL_OPTIONS` because we can't intercept run.sh's @-args files.
+  Verified end-to-end on ndrchst-01: install in ~16s, boot `Done (2.053s)`,
+  RCON `list` / `seed` / `time query daytime` all green.
+
+- **Modpack** — install from a server-pack zip URL. Streams the download
+  (cap 4 GiB), validates it's actually a zip (CurseForge sometimes returns
+  HTML interstitials), unzips with zip-slip guard, runs whichever bundled
+  installer.jar produces `run.sh`. ATM10-class packs are the target.
+
+- Per-platform `default_memory_mb` so the create form pre-fills 8192 for
+  NeoForge / Modpack instead of the Paper-sized 2048.
+
+Gotcha captured: JDK-image installers run as root by default and the
+output ends up root-owned, unwritable by the admin user. Fix in
+`runtime/jvm_installer.py` is to pass `user=$(id -u):$(id -g)` to
+docker.containers.run.
+
+Open: real ATM10 boot test pending — needs the server-pack zip URL.
+CurseForge gates direct downloads behind their (free) API key. Either:
+get a CF API key and call `/v1/mods/{id}/files/{fileId}/download-url`,
+or fetch the URL manually from the CurseForge website once and pass it
+to the modpack platform.
+
 ## Out of scope (explicit cuts, not gaps)
 
 - Auth / multi-user / RBAC / 2FA
