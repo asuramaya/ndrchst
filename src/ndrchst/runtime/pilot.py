@@ -143,8 +143,9 @@ def build_bundle(
             arc = "ndrchst_pilot/" + str(path.relative_to(src))
             zf.writestr(arc, path.read_text())
 
-        # 3. requirements.txt — single dep
-        zf.writestr("requirements.txt", "portablemc>=4.4\n")
+        # 3. requirements.txt — portablemc for the launcher core, httpx
+        # for the curseforge resolver (used by modpack install path).
+        zf.writestr("requirements.txt", "portablemc>=4.4\nhttpx>=0.27\n")
 
         # 4. launchers
         zf.writestr("launch.sh", _LAUNCH_SH)
