@@ -59,8 +59,16 @@ def _build_spec(server: Server, data_dir: Path) -> ContainerSpec:
         ports = {25565: server.port}
     elif server.family is Family.BEDROCK:
         image = BEDROCK_IMAGE
-        # BDS needs LD_LIBRARY_PATH because its libs live alongside the binary
-        cmd = ["./bedrock_server"]
+        # BDS needs LD_LIBRARY_PATH because its libs live alongside the binary.
+        # BDS 1.21+ links against libcurl4 which is NOT in ubuntu:24.04 by
+        # default — we install it on first boot. apt-get install is idempotent
+        # and fast (~1s) on subsequent boots after the package is cached.
+        cmd = [
+            "sh", "-c",
+            "command -v curl >/dev/null 2>&1 || "
+            "(apt-get update -qq && apt-get install -y -qq libcurl4 >/dev/null) "
+            "&& exec ./bedrock_server",
+        ]
         env = {"LD_LIBRARY_PATH": "."}
         ports = {19132: server.port}
     else:

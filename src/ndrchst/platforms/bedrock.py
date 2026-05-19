@@ -26,6 +26,8 @@ from __future__ import annotations
 import io
 import re
 import zipfile
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
@@ -38,8 +40,11 @@ BDS_LINKS_FEED = (
 )
 LINUX_DOWNLOAD_TYPE = "serverBedrockLinux"
 
-# Mojang blocks the default httpx UA with 403.
-_UA = "Mozilla/5.0 (ndrchst; +https://github.com/asuramaya/ndrchst-alpha)"
+# Mojang blocks the default httpx UA with 403. We also can't include a
+# `+https://github.com/...` reference URL — Akamai's bot detection on the BDS
+# zip CDN treats UAs containing the `+URL` pattern as bots and resets the
+# HTTP/2 stream with INTERNAL_ERROR. Keep the UA minimal Mozilla-shaped.
+_UA = "Mozilla/5.0 (ndrchst)"
 
 _FILENAME_VERSION = re.compile(r"bedrock-server-([\d.]+)\.zip")
 
@@ -59,23 +64,23 @@ class Bedrock(Platform):
     def __init__(self, client: httpx.AsyncClient | None = None):
         self._client = client
 
-    async def _http(self) -> httpx.AsyncClient:
-        if self._client is None:
-            # 300s read timeout: the zip is ~80 MB and we stream it; a slow
-            # link or temporary CDN hiccup shouldn't fail the install.
-            self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(connect=15.0, read=300.0, write=60.0, pool=15.0),
-                headers={"User-Agent": _UA},
-            )
-        return self._client
+    @asynccontextmanager
+    async def _http(self) -> AsyncIterator[httpx.AsyncClient]:
+        if self._client is not None:
+            yield self._client
+            return
+        # 300s read timeout: zip is ~80 MB streamed; tolerate slow CDNs.
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=15.0, read=300.0, write=60.0, pool=15.0),
+            headers={"User-Agent": _UA},
+        ) as c:
+            yield c
 
-    async def _resolve_linux_download(self) -> str:
-        client = await self._http()
+    async def _resolve_linux_download(self, client: httpx.AsyncClient) -> str:
         r = await client.get(BDS_LINKS_FEED)
         r.raise_for_status()
         data = r.json()
-        links = data.get("result", {}).get("links", [])
-        for link in links:
+        for link in data.get("result", {}).get("links", []):
             if link.get("downloadType") == LINUX_DOWNLOAD_TYPE:
                 return link["downloadUrl"]
         raise RuntimeError(
@@ -83,7 +88,8 @@ class Bedrock(Platform):
         )
 
     async def versions(self) -> list[VersionInfo]:
-        url = await self._resolve_linux_download()
+        async with self._http() as client:
+            url = await self._resolve_linux_download(client)
         version = _parse_version_from_url(url)
         return [VersionInfo(version=version, stable=True)]
 
@@ -91,22 +97,20 @@ class Bedrock(Platform):
         """Download + extract BDS. `version` is informational; Mojang only
         exposes the current build through this feed."""
         dest.mkdir(parents=True, exist_ok=True)
-        client = await self._http()
 
-        url = await self._resolve_linux_download()
-        resolved_version = _parse_version_from_url(url)
-        if version not in ("latest", resolved_version):
-            # Soft warning via exception — caller picks the policy
-            raise ValueError(
-                f"requested bedrock {version} but Mojang only publishes "
-                f"{resolved_version} from this endpoint"
-            )
-
-        async with client.stream("GET", url) as resp:
-            resp.raise_for_status()
-            buf = io.BytesIO()
-            async for chunk in resp.aiter_bytes(chunk_size=128 * 1024):
-                buf.write(chunk)
+        async with self._http() as client:
+            url = await self._resolve_linux_download(client)
+            resolved_version = _parse_version_from_url(url)
+            if version not in ("latest", resolved_version):
+                raise ValueError(
+                    f"requested bedrock {version} but Mojang only publishes "
+                    f"{resolved_version} from this endpoint"
+                )
+            async with client.stream("GET", url) as resp:
+                resp.raise_for_status()
+                buf = io.BytesIO()
+                async for chunk in resp.aiter_bytes(chunk_size=128 * 1024):
+                    buf.write(chunk)
 
         buf.seek(0)
         with zipfile.ZipFile(buf) as zf:
