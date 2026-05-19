@@ -200,6 +200,24 @@ async def restart(
     return _render_card(request, conn, server_id)
 
 
+@router.post("/servers/{server_id}/container/recreate", response_class=HTMLResponse)
+async def container_recreate(
+    request: Request,
+    server_id: str,
+    lifecycle: Lifecycle = Depends(require_lifecycle),
+    conn: sqlite3.Connection = Depends(db),
+) -> HTMLResponse:
+    """Stop + remove + recreate the docker container from the current
+    spec. Data dir is preserved. Useful when ndrchst upgrades change the
+    container cmd/env and existing servers need to pick up the new spec
+    without losing world data."""
+    try:
+        server = await lifecycle.recreate_container(server_id)
+    except LifecycleError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return _render_card(request, conn, server.id)
+
+
 @router.post("/servers/{server_id}/pilot/regenerate", response_class=HTMLResponse)
 async def regenerate_pilot(
     request: Request,

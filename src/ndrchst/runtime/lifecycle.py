@@ -459,6 +459,25 @@ class Lifecycle:
                 return candidate
         raise LifecycleError("could not find a free RCON host port; range exhausted")
 
+    async def recreate_container(self, server_id: str) -> Server:
+        """Stop + remove the existing container and create a fresh one from
+        the current spec. Data dir is preserved (world, mods, configs, all
+        survive). Used when the container's baked-in cmd or env drifts from
+        what the current ndrchst version would build — e.g. after a server
+        was created with an older release."""
+        server = self._must_get(server_id)
+        if server.container_id is not None:
+            with contextlib.suppress(Exception):
+                await self._docker.stop(server.container_id, timeout=15)
+            await self._docker.remove(server.container_id, force=True)
+        spec = _build_spec(server, self._root / server_id)
+        new_id = await self._docker.create_container(spec)
+        server.container_id = new_id
+        srv_store.set_container_id(self._conn, server_id, new_id)
+        srv_store.update_status(self._conn, server_id, ServerStatus.STOPPED)
+        server.status = ServerStatus.STOPPED
+        return server
+
     def regenerate_pilot(self, server_id: str):
         """Rebuild the pilot bundle from the current server record + lifespan
         env. Cheap (no compile step) — exists so the user can pick up a new
