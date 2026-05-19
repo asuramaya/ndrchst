@@ -46,7 +46,8 @@ def app_no_docker(tmp_path: Path, monkeypatch):
 @pytest.fixture
 def app_with_docker(tmp_path: Path, monkeypatch):
     """App with a fake Docker injected post-startup."""
-    # Stub platform install so create() doesn't hit the network
+    # Stub platform install + versions so create() doesn't hit the network.
+    from ndrchst.platforms.base import VersionInfo
     for p in PLATFORMS.values():
         async def fake_install(version, dest, *, _p=p):
             dest.mkdir(parents=True, exist_ok=True)
@@ -55,7 +56,10 @@ def app_with_docker(tmp_path: Path, monkeypatch):
                 return InstallArtifact(path=dest, entrypoint="server.jar")
             (dest / "bedrock_server").write_bytes(b"fake")
             return InstallArtifact(path=dest, entrypoint="bedrock_server")
+        async def fake_versions():
+            return [VersionInfo(version="1.21.3")]
         monkeypatch.setattr(p, "install", fake_install)
+        monkeypatch.setattr(p, "versions", fake_versions)
 
     app = create_app(db_path=tmp_path / "t.db", servers_root=tmp_path / "servers")
 
@@ -187,11 +191,13 @@ def test_html_create_round_trip(app_with_docker):
         # The create handler signals the list to refresh
         assert r.headers.get("HX-Trigger") == "ndrchst:servers-changed"
 
-        # The list fragment now contains the new server
+        # The list fragment now contains the new server. "latest" resolves
+        # to the concrete version reported by Platform.versions() — the
+        # fixture stubs that to "1.21.3".
         r = client.get("/servers/list", headers={"HX-Request": "true"})
         assert r.status_code == 200
         assert "FromForm" in r.text
-        assert "bedrock latest" in r.text
+        assert "bedrock 1.21.3" in r.text
         assert ":19132" in r.text
 
 

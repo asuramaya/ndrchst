@@ -59,6 +59,46 @@ async def test_install_is_idempotent(tmp_path: Path):
     await client.aclose()
 
 
+async def test_install_seeds_online_mode_false_for_fresh_data_dir(tmp_path: Path):
+    """Floodgate requires online-mode=false. With no pre-existing
+    server.properties we pre-create a minimal one with the right flags."""
+    _, h = _handler()
+    client = httpx.AsyncClient(transport=httpx.MockTransport(h))
+    await install_cross_play(tmp_path, client=client)
+    props = (tmp_path / "server.properties").read_text()
+    assert "online-mode=false" in props
+    assert "enforce-secure-profile=false" in props
+    await client.aclose()
+
+
+async def test_install_flips_existing_server_properties(tmp_path: Path):
+    """If Paper has already generated server.properties with the wrong
+    flags, install_cross_play must rewrite them in place — preserving
+    every other key + comment."""
+    props_path = tmp_path / "server.properties"
+    props_path.write_text(
+        "# Minecraft server properties\n"
+        "motd=Welcome!\n"
+        "online-mode=true\n"
+        "max-players=20\n"
+        "enforce-secure-profile=true\n"
+        "level-name=world\n"
+    )
+    _, h = _handler()
+    client = httpx.AsyncClient(transport=httpx.MockTransport(h))
+    await install_cross_play(tmp_path, client=client)
+    text = props_path.read_text()
+    assert "online-mode=false" in text
+    assert "online-mode=true" not in text
+    assert "enforce-secure-profile=false" in text
+    # untouched keys + comment survive
+    assert "motd=Welcome!" in text
+    assert "max-players=20" in text
+    assert "# Minecraft server properties" in text
+    assert "level-name=world" in text
+    await client.aclose()
+
+
 # ─── lifecycle integration ──────────────────────────────────────────────────
 
 

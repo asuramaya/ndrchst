@@ -56,10 +56,11 @@ async def create(
     request: Request,
     name: str = Form(...),
     platform_id: str = Form(...),
-    version: str = Form(...),
+    version: str = Form("latest"),
     port: int = Form(...),
     memory_mb: int = Form(2048),
     cross_play: bool = Form(False),
+    bedrock_bridge_port: int = Form(19132),
     lifecycle: Lifecycle = Depends(require_lifecycle),
     conn: sqlite3.Connection = Depends(db),
 ) -> HTMLResponse:
@@ -67,6 +68,7 @@ async def create(
         await lifecycle.create(CreateRequest(
             name=name, platform_id=platform_id, version=version,
             port=port, memory_mb=memory_mb, cross_play=cross_play,
+            bedrock_bridge_port=bedrock_bridge_port,
         ))
     except LifecycleError as e:
         # Re-render the form with the error inline; status 422 so htmx knows it failed

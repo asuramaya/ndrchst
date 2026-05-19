@@ -27,7 +27,7 @@
         <div class="field">
           <label for="version">Version</label>
           <input type="text" id="version" name="version" required
-                 value="1.21.3" placeholder="latest">
+                 value="latest" placeholder="latest or e.g. 1.21.3">
         </div>
       </div>
 
@@ -44,9 +44,20 @@
 
       <div class="field">
         <label>
-          <input type="checkbox" name="cross_play" value="true">
+          <input type="checkbox" id="cross_play_cb" name="cross_play" value="true"
+                 onchange="document.getElementById('bridge-port-row').style.display = this.checked ? 'block' : 'none'">
           Enable Bedrock cross-play (Geyser+Floodgate, Java only)
         </label>
+      </div>
+
+      <div class="field" id="bridge-port-row" style="display: none;">
+        <label for="bedrock_bridge_port">Bedrock bridge port (UDP)</label>
+        <input type="number" id="bedrock_bridge_port" name="bedrock_bridge_port"
+               min="1024" max="65535" value="19132">
+        <small style="color: var(--text-muted)">
+          Bedrock clients connect to this UDP port; Geyser proxies them to the Java server.
+          Must not collide with a standalone Bedrock server on the host.
+        </small>
       </div>
 
       {% if error %}<div class="error">{{ error }}</div>{% endif %}

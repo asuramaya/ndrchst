@@ -17,10 +17,11 @@ router = APIRouter()
 class CreateServerBody(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     platform_id: str
-    version: str
+    version: str = "latest"
     port: int = Field(ge=1024, le=65535)
     memory_mb: int = Field(ge=512, le=65536, default=2048)
     cross_play: bool = False
+    bedrock_bridge_port: int = Field(ge=1024, le=65535, default=19132)
 
 
 def _serialize(server) -> dict:

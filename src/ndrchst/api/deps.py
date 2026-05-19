@@ -48,11 +48,19 @@ def make_lifespan(
         conn = connect(db_path)
         lifecycle: Lifecycle | None = None
         docker_error: str | None = None
+        # Address pilot binaries should dial. Env var lets ops pin a public
+        # hostname (e.g. "play.ndrchst.com"); otherwise it's left blank and
+        # pilot configs ship a placeholder for the user to fill in.
+        import os
+        public_host = os.environ.get("NDRCHST_PUBLIC_HOST", "")
         try:
             client = docker.from_env()
             client.ping()
-            lifecycle = Lifecycle(Docker(client=client), conn, servers_root=servers_root)
-            log.info("Docker reachable; lifecycle active")
+            lifecycle = Lifecycle(
+                Docker(client=client), conn,
+                servers_root=servers_root, public_host=public_host,
+            )
+            log.info("Docker reachable; lifecycle active (public_host=%s)", public_host or "<unset>")
         except Exception as e:
             docker_error = f"{type(e).__name__}: {e}"
             log.warning("Docker unreachable (%s); running in read-only mode", docker_error)

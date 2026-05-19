@@ -1,0 +1,151 @@
+"""Public surface tests: pilot downloads, server listing, no admin leaks."""
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from ndrchst.domain.models import Family, Server, ServerStatus
+from ndrchst.public import create_public_app
+from ndrchst.runtime import pilot
+from ndrchst.store import servers as srv_store
+from ndrchst.store.db import connect
+
+
+def _seed_server(db_path: Path, *, family=Family.JAVA, cross_play=False) -> Server:
+    conn = connect(db_path)
+    s = Server(
+        id="srvjava01",
+        name="Public Test",
+        platform_id="paper",
+        family=family,
+        version="1.21.11",
+        port=25574,
+        memory_mb=2048,
+        status=ServerStatus.RUNNING,
+        container_id="cid",
+        cross_play=cross_play,
+        bedrock_bridge_port=19150 if cross_play else None,
+    )
+    srv_store.insert(conn, s)
+    conn.close()
+    return s
+
+
+def test_healthz_marks_public(tmp_path: Path):
+    db = tmp_path / "t.db"
+    app = create_public_app(db_path=db)
+    with TestClient(app) as c:
+        r = c.get("/healthz")
+        assert r.status_code == 200
+        assert r.json()["surface"] == "public"
+
+
+def test_list_servers_only_includes_java(tmp_path: Path, monkeypatch):
+    db = tmp_path / "t.db"
+    s = _seed_server(db)
+    # also seed a bedrock server — should be hidden from the public surface
+    conn = connect(db)
+    bedrock = Server(
+        id="bdrk001", name="HiddenBedrock", platform_id="bedrock",
+        family=Family.BEDROCK, version="latest", port=19132, memory_mb=1024,
+        status=ServerStatus.RUNNING, container_id="cid2",
+    )
+    srv_store.insert(conn, bedrock)
+    conn.close()
+
+    app = create_public_app(db_path=db)
+    with TestClient(app) as c:
+        r = c.get("/servers")
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body) == 1
+        assert body[0]["id"] == s.id
+        assert body[0]["mc_version"] == "1.21.11"
+        assert body[0]["pilot_url"] == "/pilot/srvjava01/pilot.zip"
+
+
+def test_index_renders_html_with_download_link(tmp_path: Path):
+    db = tmp_path / "t.db"
+    _seed_server(db, cross_play=True)
+    app = create_public_app(db_path=db)
+    with TestClient(app) as c:
+        r = c.get("/")
+        assert r.status_code == 200
+        assert "Public Test" in r.text
+        assert "/pilot/srvjava01/pilot.zip" in r.text
+        assert "cross-play" in r.text
+        assert "bedrock 19150/udp" in r.text
+
+
+def test_download_pilot_404_when_no_bundle(tmp_path: Path):
+    db = tmp_path / "t.db"
+    _seed_server(db)
+    app = create_public_app(db_path=db)
+    with TestClient(app) as c:
+        r = c.get("/pilot/srvjava01/pilot.zip")
+        assert r.status_code == 404
+
+
+def test_download_pilot_serves_zip(tmp_path: Path, monkeypatch):
+    db = tmp_path / "t.db"
+    s = _seed_server(db)
+    # Build a bundle into a custom root and point the public surface at it
+    pilots_root = tmp_path / "pilots"
+    pilot.build_bundle(s, public_host="100.89.8.49", pilots_root=pilots_root)
+    monkeypatch.setattr(pilot, "PILOTS_ROOT_DEFAULT", pilots_root)
+
+    app = create_public_app(db_path=db)
+    with TestClient(app) as c:
+        r = c.get("/pilot/srvjava01/pilot.zip")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "application/zip"
+        assert len(r.content) > 1000
+
+
+def test_download_pilot_404_for_unknown_server(tmp_path: Path):
+    db = tmp_path / "t.db"
+    app = create_public_app(db_path=db)
+    with TestClient(app) as c:
+        r = c.get("/pilot/nope/pilot.zip")
+        assert r.status_code == 404
+
+
+def test_config_json_endpoint(tmp_path: Path, monkeypatch):
+    db = tmp_path / "t.db"
+    s = _seed_server(db)
+    pilots_root = tmp_path / "pilots"
+    pilot.build_bundle(s, public_host="x.example", pilots_root=pilots_root)
+    monkeypatch.setattr(pilot, "PILOTS_ROOT_DEFAULT", pilots_root)
+
+    app = create_public_app(db_path=db)
+    with TestClient(app) as c:
+        r = c.get(f"/pilot/{s.id}/config.json")
+        assert r.status_code == 200
+        cfg = r.json()
+        assert cfg["mc_version"] == "1.21.11"
+        assert cfg["server_host"] == "x.example"
+
+
+def test_no_admin_routes_on_public_app(tmp_path: Path):
+    """Public app must NOT expose any of the admin routes."""
+    db = tmp_path / "t.db"
+    app = create_public_app(db_path=db)
+    with TestClient(app) as c:
+        for path in ("/api/servers", "/api/platforms", "/system", "/settings", "/assets", "/servers/new"):
+            r = c.get(path)
+            assert r.status_code == 404, f"public app leaked admin route {path}"
+        # POST /servers exists as GET only; reject the verb. Same for DELETE.
+        r = c.post("/servers", data={})
+        assert r.status_code in (404, 405)
+        r = c.delete("/servers/abc")
+        assert r.status_code in (404, 405)
+
+
+def test_empty_state_renders_friendly(tmp_path: Path):
+    db = tmp_path / "t.db"
+    app = create_public_app(db_path=db)
+    with TestClient(app) as c:
+        r = c.get("/")
+        assert r.status_code == 200
+        assert "No servers available" in r.text

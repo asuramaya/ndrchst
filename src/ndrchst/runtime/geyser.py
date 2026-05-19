@@ -56,7 +56,14 @@ async def install_cross_play(
     bedrock_port: int = DEFAULT_BEDROCK_PORT,
     client: httpx.AsyncClient | None = None,
 ) -> None:
-    """Idempotent. Overwrites existing Geyser/Floodgate jars and config."""
+    """Idempotent. Overwrites existing Geyser/Floodgate jars and config.
+
+    Also writes the cross-play server.properties requirements:
+    Floodgate handles Bedrock-side auth on the Java server's behalf, which
+    only works when the Java server itself runs with ``online-mode=false``.
+    Without this, Floodgate silently fails to inject Bedrock players and
+    Java clients also see "Invalid session" if they're not Mojang-authed.
+    """
     own_client = client is None
     if own_client:
         client = httpx.AsyncClient(timeout=120.0)
@@ -70,9 +77,47 @@ async def install_cross_play(
         cfg_dir = plugins / "Geyser-Spigot"
         cfg_dir.mkdir(exist_ok=True)
         (cfg_dir / "config.yml").write_text(_geyser_config(java_port, bedrock_port))
+
+        _ensure_cross_play_properties(data_dir)
     finally:
         if own_client:
             await client.aclose()
+
+
+def _ensure_cross_play_properties(data_dir: Path) -> None:
+    """Force online-mode=false + enforce-secure-profile=false in
+    server.properties. The file may not exist yet (Paper generates it on
+    first boot); we pre-create a minimal one in that case."""
+    props_path = data_dir / "server.properties"
+    required = {
+        "online-mode": "false",
+        "enforce-secure-profile": "false",
+    }
+    if props_path.exists():
+        lines = props_path.read_text().splitlines()
+        keys_seen: set[str] = set()
+        new_lines: list[str] = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                new_lines.append(line)
+                continue
+            key = stripped.split("=", 1)[0].strip()
+            if key in required:
+                new_lines.append(f"{key}={required[key]}")
+                keys_seen.add(key)
+            else:
+                new_lines.append(line)
+        for key, value in required.items():
+            if key not in keys_seen:
+                new_lines.append(f"{key}={value}")
+        props_path.write_text("\n".join(new_lines) + "\n")
+    else:
+        props_path.write_text(
+            "# Pre-seeded by ndrchst for cross-play (Floodgate requirement).\n"
+            "online-mode=false\n"
+            "enforce-secure-profile=false\n"
+        )
 
 
 async def _download(client: httpx.AsyncClient, url: str, dest: Path) -> None:

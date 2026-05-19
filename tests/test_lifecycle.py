@@ -171,6 +171,68 @@ async def test_create_stub_platform_raises_clean_lifecycle_error(
     assert not list((tmp_path / "servers").iterdir()) if (tmp_path / "servers").exists() else True
 
 
+async def test_cross_play_reserves_bedrock_bridge_port_and_exposes_udp(
+    lifecycle: Lifecycle, monkeypatch,
+):
+    """cross_play=True on Java must:
+      1. record bedrock_bridge_port on the Server,
+      2. exposes BOTH 25565/tcp (Paper) and 19132/udp (Geyser) on the container,
+      3. reserve the bridge port so a second server can't reuse it.
+    """
+    # Stub geyser install since we're not exercising the download path here
+    monkeypatch.setattr(
+        "ndrchst.runtime.lifecycle.install_cross_play",
+        lambda *a, **kw: __import__("asyncio").sleep(0),
+    )
+    s = await lifecycle.create(CreateRequest(
+        name="CP", platform_id="paper", version="1.21.3",
+        port=25565, memory_mb=2048, cross_play=True,
+        bedrock_bridge_port=19150,
+    ))
+    assert s.bedrock_bridge_port == 19150
+
+    # The container spec exposes both protocols
+    from ndrchst.runtime.lifecycle import _build_spec
+    spec = _build_spec(s, lifecycle._root / s.id)
+    assert "25565/tcp" in spec.ports
+    assert "19132/udp" in spec.ports
+    assert spec.ports["19132/udp"] == 19150
+
+    # A second cross-play server can't reuse the bridge port
+    with pytest.raises(LifecycleError, match=r"bedrock_bridge_port 19150 already used"):
+        await lifecycle.create(CreateRequest(
+            name="CP2", platform_id="paper", version="1.21.3",
+            port=25566, memory_mb=2048, cross_play=True,
+            bedrock_bridge_port=19150,
+        ))
+
+
+async def test_cross_play_rejects_same_port_for_java_and_bridge(lifecycle: Lifecycle):
+    with pytest.raises(LifecycleError, match="must differ from the Java port"):
+        await lifecycle.create(CreateRequest(
+            name="Same", platform_id="paper", version="1.21.3",
+            port=25565, memory_mb=2048, cross_play=True,
+            bedrock_bridge_port=25565,
+        ))
+
+
+async def test_version_latest_resolves_to_concrete(lifecycle: Lifecycle, monkeypatch):
+    """version='latest' must resolve to whatever platform.versions()[0] is."""
+    from ndrchst.platforms.base import VersionInfo
+
+    async def fake_versions():
+        return [VersionInfo(version="1.21.4-resolved"), VersionInfo(version="1.21.3")]
+
+    paper = next(p for p in __import__("ndrchst.platforms", fromlist=["REGISTRY"]).REGISTRY.values() if p.id == "paper")
+    monkeypatch.setattr(paper, "versions", fake_versions)
+
+    s = await lifecycle.create(CreateRequest(
+        name="LatestPaper", platform_id="paper", version="latest",
+        port=25580, memory_mb=2048,
+    ))
+    assert s.version == "1.21.4-resolved"
+
+
 async def test_create_paper_upstream_404_raises_clean_lifecycle_error(
     tmp_path: Path, monkeypatch,
 ):

@@ -50,13 +50,18 @@ def java_image_for(mc_version: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class ContainerSpec:
-    """Everything `create_container` needs. Built by lifecycle.py from a Server."""
+    """Everything `create_container` needs. Built by lifecycle.py from a Server.
+
+    ``ports`` keys carry the protocol explicitly (e.g. ``"25565/tcp"``,
+    ``"19132/udp"``) — needed because cross-play Java servers expose both
+    TCP (Paper) and UDP (Geyser) in the same container.
+    """
     name: str           # docker container name, e.g. "ndrchst-srv-abc"
     image: str
     cmd: list[str]
     workdir: str
     data_dir: Path      # host path mounted at /data
-    ports: dict[int, int]   # container_port -> host_port
+    ports: dict[str, int]   # "container_port/proto" -> host_port
     memory_mb: int
     server_id: str      # tagged into label
     family: Family
@@ -114,10 +119,7 @@ class Docker:
                         "mode": "rw",
                     }
                 },
-                ports={
-                    f"{cport}/{_proto_for(spec.family)}": hport
-                    for cport, hport in spec.ports.items()
-                },
+                ports=dict(spec.ports),
                 mem_limit=f"{spec.memory_mb}m",
                 memswap_limit=f"{spec.memory_mb}m",  # disable swap
                 restart_policy={"Name": "unless-stopped"},
@@ -213,10 +215,6 @@ class Docker:
             except NotFound:
                 pass
         await asyncio.to_thread(_do)
-
-
-def _proto_for(family: Family) -> str:
-    return "udp" if family is Family.BEDROCK else "tcp"
 
 
 def _docker_state_to_status(short: str, full: dict) -> ServerStatus:

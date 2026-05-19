@@ -1,6 +1,7 @@
 """Server-record CRUD. Plain functions, no repository class."""
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 from datetime import datetime
 
@@ -8,6 +9,9 @@ from ..domain.models import Family, Server, ServerStatus
 
 
 def _row_to_server(r: sqlite3.Row) -> Server:
+    bedrock_bridge = None
+    with contextlib.suppress(IndexError, KeyError):
+        bedrock_bridge = r["bedrock_bridge_port"]
     return Server(
         id=r["id"],
         name=r["name"],
@@ -19,6 +23,7 @@ def _row_to_server(r: sqlite3.Row) -> Server:
         status=ServerStatus(r["status"]),
         container_id=r["container_id"],
         cross_play=bool(r["cross_play"]),
+        bedrock_bridge_port=bedrock_bridge,
         created_at=datetime.fromisoformat(r["created_at"]),
     )
 
@@ -27,8 +32,8 @@ def insert(conn: sqlite3.Connection, s: Server) -> None:
     conn.execute(
         """INSERT INTO servers
             (id, name, platform_id, family, version, port, memory_mb,
-             status, container_id, cross_play, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             status, container_id, cross_play, bedrock_bridge_port, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             s.id,
             s.name,
@@ -40,6 +45,7 @@ def insert(conn: sqlite3.Connection, s: Server) -> None:
             s.status.value,
             s.container_id,
             int(s.cross_play),
+            s.bedrock_bridge_port,
             s.created_at.isoformat(),
         ),
     )
@@ -78,12 +84,16 @@ def delete(conn: sqlite3.Connection, server_id: str) -> None:
 
 
 def port_in_use(conn: sqlite3.Connection, port: int, *, exclude: str | None = None) -> bool:
+    """True iff any server has reserved this port — either as its main port
+    or as its Geyser UDP bridge port (cross-play servers)."""
     if exclude is not None:
         row = conn.execute(
-            "SELECT 1 FROM servers WHERE port = ? AND id != ?", (port, exclude)
+            "SELECT 1 FROM servers WHERE (port = ? OR bedrock_bridge_port = ?) AND id != ?",
+            (port, port, exclude),
         ).fetchone()
     else:
         row = conn.execute(
-            "SELECT 1 FROM servers WHERE port = ?", (port,)
+            "SELECT 1 FROM servers WHERE port = ? OR bedrock_bridge_port = ?",
+            (port, port),
         ).fetchone()
     return row is not None

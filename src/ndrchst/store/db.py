@@ -32,3 +32,21 @@ def connect(path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
 
 def _init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
+    _apply_additive_migrations(conn)
+
+
+# Additive column migrations. Each line is idempotent — SQLite raises
+# "duplicate column name" if applied twice; we swallow that and keep going.
+_ADDITIVE_COLUMNS = (
+    ("servers", "bedrock_bridge_port", "INTEGER"),
+)
+
+
+def _apply_additive_migrations(conn: sqlite3.Connection) -> None:
+    for table, column, type_ in _ADDITIVE_COLUMNS:
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {type_}")
+        except sqlite3.OperationalError as e:
+            if "duplicate column" in str(e).lower():
+                continue
+            raise

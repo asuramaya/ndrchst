@@ -1,0 +1,17 @@
+[project]
+name = "ndrchst-pilot"
+version = "0.0.1"
+description = "Offline Minecraft client for ndrchst private-server pilots."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["portablemc>=4.4"]
+
+[project.scripts]
+ndrchst-pilot = "ndrchst_pilot.app:run"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

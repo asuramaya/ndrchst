@@ -33,4 +33,6 @@ class Server:
     status: ServerStatus = ServerStatus.CREATED
     container_id: str | None = None
     cross_play: bool = False  # Java + Geyser
+    # Host UDP port that Geyser exposes for Bedrock clients (cross-play only).
+    bedrock_bridge_port: int | None = None
     created_at: datetime = field(default_factory=_now)
