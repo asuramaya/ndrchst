@@ -134,3 +134,54 @@ def test_yaml_scan_inline_authors_list(tmp_path: Path):
     (tmp_path / "plugins" / "Multi.jar").write_bytes(buf.getvalue())
     found = plugins.list_plugins(tmp_path)
     assert found[0].author == "Alice"
+
+
+def test_sha1_of_matches_hashlib(tmp_path: Path):
+    import hashlib
+    target = tmp_path / "blob.jar"
+    target.write_bytes(b"some bytes" * 1000)
+    assert plugins.sha1_of(target) == hashlib.sha1(b"some bytes" * 1000).hexdigest()
+
+
+def test_hash_inventory_only_enabled_jars(tmp_path: Path):
+    (tmp_path / "plugins").mkdir()
+    (tmp_path / "plugins" / "A.jar").write_bytes(_make_jar(name="A"))
+    (tmp_path / "plugins" / "B.jar.disabled").write_bytes(_make_jar(name="B"))
+    inv = plugins.hash_inventory(tmp_path)
+    assert "A.jar" in inv
+    assert "B.jar.disabled" not in inv
+    assert len(inv["A.jar"]) == 40  # SHA1 hex digest
+
+
+def test_replace_plugin_swaps_contents(tmp_path: Path):
+    (tmp_path / "plugins").mkdir()
+    (tmp_path / "plugins" / "Old.jar").write_bytes(_make_jar(name="Old", version="1.0"))
+    new_bytes = _make_jar(name="Old", version="2.0")
+    target = plugins.replace_plugin(tmp_path, "Old.jar", new_bytes)
+    assert target.exists()
+    # Content updated
+    listed = plugins.list_plugins(tmp_path)
+    assert listed[0].version == "2.0"
+
+
+def test_replace_plugin_renames_to_versioned_filename(tmp_path: Path):
+    """Modrinth jars often carry the version in the filename. The update path
+    must let the new filename replace the old one, removing the legacy file."""
+    (tmp_path / "plugins").mkdir()
+    (tmp_path / "plugins" / "Geyser-Spigot.jar").write_bytes(_make_jar(name="Geyser"))
+    new_bytes = _make_jar(name="Geyser", version="2.10.1")
+    plugins.replace_plugin(
+        tmp_path, "Geyser-Spigot.jar", new_bytes,
+        new_filename="Geyser-Spigot-2.10.1.jar",
+    )
+    assert not (tmp_path / "plugins" / "Geyser-Spigot.jar").exists()
+    assert (tmp_path / "plugins" / "Geyser-Spigot-2.10.1.jar").exists()
+
+
+def test_replace_plugin_rejects_bad_zip(tmp_path: Path):
+    (tmp_path / "plugins").mkdir()
+    (tmp_path / "plugins" / "X.jar").write_bytes(_make_jar(name="X"))
+    with pytest.raises(plugins.PluginError, match="not a valid jar"):
+        plugins.replace_plugin(tmp_path, "X.jar", b"not a zip")
+    # Original still present (atomicity)
+    assert (tmp_path / "plugins" / "X.jar").exists()

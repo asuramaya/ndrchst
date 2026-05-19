@@ -105,3 +105,67 @@ async def test_versions_picks_primary_and_surfaces_sha1():
     assert v.sha1 == "deadbeef"
     assert v.file_size == 12345
     await client.aclose()
+
+
+async def test_latest_by_hash_round_trips_modrinth_response():
+    """POST /v2/version_files/update returns a map keyed by input hash."""
+    body_seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v2/version_files/update" and request.method == "POST":
+            body_seen.append(json.loads(request.content.decode()))
+            return httpx.Response(200, json={
+                "abc123": {
+                    "project_id": "geyser",
+                    "version_number": "2.10.1-SNAPSHOT",
+                    "version_type": "release",
+                    "date_published": "2026-04-01T00:00:00Z",
+                    "game_versions": ["1.21", "1.21.11"],
+                    "loaders": ["paper", "spigot"],
+                    "dependencies": [],
+                    "files": [{
+                        "primary": True,
+                        "filename": "Geyser-Spigot-2.10.1.jar",
+                        "url": "https://cdn/geyser-2.10.1.jar",
+                        "size": 4321,
+                        "hashes": {"sha1": "f00dbabe"},
+                    }],
+                }
+                # `unknown-hash` is intentionally absent so we test silent omission
+            })
+        return httpx.Response(404)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    m = Modrinth(client=client)
+    out = await m.latest_by_hash(
+        ["abc123", "unknown-hash"],
+        loaders=["paper", "spigot"],
+        game_versions=["1.21.11", "1.21"],
+    )
+    assert "unknown-hash" not in out
+    assert "abc123" in out
+    v = out["abc123"]
+    assert v.version_number == "2.10.1-SNAPSHOT"
+    assert v.download_url == "https://cdn/geyser-2.10.1.jar"
+    assert v.sha1 == "f00dbabe"
+    # body has both filters + algorithm
+    assert body_seen[0]["algorithm"] == "sha1"
+    assert body_seen[0]["loaders"] == ["paper", "spigot"]
+    assert "1.21" in body_seen[0]["game_versions"]
+    await client.aclose()
+
+
+async def test_latest_by_hash_empty_input_skips_request():
+    """Don't even call out if there's nothing to ask about."""
+    captured: list[httpx.Request] = []
+
+    def h(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(500)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(h))
+    m = Modrinth(client=client)
+    out = await m.latest_by_hash([])
+    assert out == {}
+    assert captured == []
+    await client.aclose()

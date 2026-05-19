@@ -6,9 +6,19 @@
   <div class="card" style="margin-bottom: 1rem;">
     <div style="display: flex; justify-content: space-between; align-items: center;">
       <strong>Installed plugins ({{ plugins|length }})</strong>
-      <small style="color: var(--text-muted);">Scanned from <span class="mono">plugins/</span></small>
+      <div style="display: flex; gap: 0.5rem; align-items: center;">
+        <button class="btn btn-ghost"
+                hx-post="/servers/{{ server.id }}/plugins/check-updates"
+                hx-target="#plugins-list" hx-swap="outerHTML"
+                hx-disabled-elt="this"
+                hx-on::before-request="this.textContent = 'Checking…'"
+                hx-on::after-request="this.textContent = 'Check updates'">
+          Check updates
+        </button>
+        <small style="color: var(--text-muted);">Scanned from <span class="mono">plugins/</span></small>
+      </div>
     </div>
-    <div id="plugins-list" style="margin-top: 0.5rem;">
+    <div style="margin-top: 0.5rem;">
       {% include "servers/tabs/_plugins_list.html" %}
     </div>
   </div>

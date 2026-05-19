@@ -1,5 +1,15 @@
-{# Plugin list table. Hot-swappable: toggle + delete swap this template. #}
+{# Plugin list table. Hot-swappable: toggle + delete + update swap this template. #}
 <div id="plugins-list">
+  {% if flash %}
+    <div class="empty" style="padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; background: var(--success-bg, #1f3a1f); border-radius: var(--radius-sm);">
+      {{ flash }}
+    </div>
+  {% endif %}
+  {% if note %}
+    <div class="empty" style="padding: 0.5rem 0.75rem; margin-bottom: 0.5rem;">
+      {{ note }}
+    </div>
+  {% endif %}
   {% if not plugins %}
     <div class="empty" style="padding: 0.5rem 0;">
       No plugins yet. Drop a .jar via the upload form below, or install via the Marketplace tab.
@@ -7,10 +17,18 @@
   {% else %}
     <div class="file-list">
       {% for p in plugins %}
+        {% set update = (updates or {}).get(p.filename) %}
         <div class="file-row" style="opacity: {{ '0.55' if p.disabled else '1' }};">
           <span class="icon">{{ '💤' if p.disabled else '🧩' }}</span>
           <div style="display: grid; gap: 0.1rem;">
-            <span class="mono" style="font-weight: 600;">{{ p.display_name }}</span>
+            <span class="mono" style="font-weight: 600;">
+              {{ p.display_name }}
+              {% if update %}
+                <span style="background: var(--accent, #3b82f6); color: white; font-size: 0.7rem; padding: 0.05rem 0.4rem; border-radius: 999px; margin-left: 0.4rem;">
+                  update → v{{ update.version_number }}
+                </span>
+              {% endif %}
+            </span>
             <span style="font-size: 0.78rem; color: var(--text-muted);">
               {% if p.version %}v{{ p.version }}{% endif %}
               {% if p.author %} · by {{ p.author }}{% endif %}
@@ -22,6 +40,16 @@
             </span>
           </div>
           <div style="display: flex; gap: 0.3rem;">
+            {% if update %}
+              <form hx-post="/servers/{{ server.id }}/plugins/{{ p.filename }}/update"
+                    hx-target="#plugins-list" hx-swap="outerHTML"
+                    hx-confirm="Update {{ p.display_name }} to v{{ update.version_number }}? The old .jar will be replaced. Restart the server to load it."
+                    style="display: inline;">
+                <input type="hidden" name="download_url" value="{{ update.download_url }}">
+                <input type="hidden" name="new_filename" value="{{ update.file_name }}">
+                <button type="submit" class="btn btn-primary">Update</button>
+              </form>
+            {% endif %}
             <button class="btn btn-ghost"
                     hx-post="/servers/{{ server.id }}/plugins/{{ p.filename }}/toggle"
                     hx-target="#plugins-list" hx-swap="outerHTML">

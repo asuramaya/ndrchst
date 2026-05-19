@@ -111,6 +111,58 @@ class Modrinth(Source):
             for hit in hits
         ]
 
+    async def latest_by_hash(
+        self,
+        hashes: list[str],
+        *,
+        loaders: list[str] | None = None,
+        game_versions: list[str] | None = None,
+    ) -> dict[str, Version]:
+        """Map each input SHA1 → its project's latest matching version.
+
+        Uses Modrinth's batch endpoint ``POST /v2/version_files/update`` which
+        accepts a list of file hashes plus loader/game-version filters and
+        returns one ``Version`` object per known file (unknown hashes are
+        silently absent from the response).
+
+        Returns a dict keyed by the *input* hash so callers can correlate
+        back to the file they uploaded.
+        """
+        if not hashes:
+            return {}
+        client = await self._http()
+        body: dict = {"hashes": hashes, "algorithm": "sha1"}
+        if loaders:
+            body["loaders"] = loaders
+        if game_versions:
+            body["game_versions"] = game_versions
+        r = await client.post(
+            f"{MODRINTH_API}/version_files/update", json=body,
+        )
+        r.raise_for_status()
+        payload = r.json()
+        out: dict[str, Version] = {}
+        for input_hash, v in payload.items():
+            files = v.get("files") or []
+            primary = next((f for f in files if f.get("primary")), files[0] if files else {})
+            if not primary:
+                continue
+            file_hashes = primary.get("hashes") or {}
+            out[input_hash] = Version(
+                project_id=v.get("project_id", ""),
+                version_number=v.get("version_number", ""),
+                file_name=primary.get("filename", ""),
+                download_url=primary.get("url", ""),
+                file_size=int(primary.get("size") or 0),
+                sha1=file_hashes.get("sha1", ""),
+                game_versions=tuple(v.get("game_versions") or ()),
+                loaders=tuple(v.get("loaders") or ()),
+                dependencies=tuple(v.get("dependencies") or ()),
+                release_type=v.get("version_type", "release"),
+                published_at=v.get("date_published", ""),
+            )
+        return out
+
     async def versions(
         self,
         asset_id: str,

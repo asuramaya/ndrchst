@@ -10,6 +10,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -466,6 +467,109 @@ async def plugins_remove(
     return TEMPLATES.TemplateResponse(
         request, "servers/tabs/_plugins_list.html",
         {"server": server, **_plugins_ctx(data_dir)},
+    )
+
+
+_PAPER_LOADERS = ["paper", "spigot", "bukkit", "purpur"]
+
+
+def _major_minor(version: str) -> str:
+    """Trim a Paper version like '1.21.11' to '1.21' so Modrinth's loose
+    matching catches plugins built against 1.21 minor revisions."""
+    parts = version.split(".")
+    if len(parts) <= 2:
+        return version
+    return ".".join(parts[:2])
+
+
+@router.post("/servers/{server_id}/plugins/check-updates", response_class=HTMLResponse)
+async def plugins_check_updates(
+    request: Request, server_id: str,
+    conn: sqlite3.Connection = Depends(db),
+) -> HTMLResponse:
+    """Hash every enabled jar, ask Modrinth for the latest matching build,
+    re-render the list with update annotations.
+
+    Plugins whose hash Modrinth doesn't recognise (locally-built or pulled
+    from BukkitDev / SpigotMC) simply don't get an annotation — no error.
+    """
+    server = _get_server(conn, server_id)
+    if server.family is not Family.JAVA:
+        raise HTTPException(status_code=400, detail="plugins are Java-only")
+    data_dir = _data_dir(request, server_id)
+    inventory = plugins_mod.hash_inventory(data_dir)
+    updates: dict[str, plugins_mod.PluginInfo] = {}
+    note: str | None = None
+    if inventory:
+        source = state(request).modrinth or Modrinth()
+        # Try both the exact version and the major.minor pair — plugins
+        # commonly mark themselves compatible with `1.21` not `1.21.11`.
+        game_versions = [server.version]
+        mm = _major_minor(server.version)
+        if mm != server.version:
+            game_versions.append(mm)
+        try:
+            latest_by_hash = await source.latest_by_hash(
+                list(inventory.values()),
+                loaders=_PAPER_LOADERS,
+                game_versions=game_versions,
+            )
+        except (httpx.HTTPError, ValueError) as e:
+            log.warning("Modrinth update check failed for %s: %s", server_id, e)
+            latest_by_hash = {}
+            note = f"Modrinth unreachable: {e}"
+        # Re-key by filename so the template can correlate
+        for filename, current_hash in inventory.items():
+            v = latest_by_hash.get(current_hash)
+            if v and v.sha1 and v.sha1 != current_hash:
+                updates[filename] = v
+    plugins = plugins_mod.list_plugins(data_dir)
+    return TEMPLATES.TemplateResponse(
+        request, "servers/tabs/_plugins_list.html",
+        {"server": server, "plugins": plugins, "updates": updates, "note": note},
+    )
+
+
+@router.post("/servers/{server_id}/plugins/{filename}/update", response_class=HTMLResponse)
+async def plugins_update_one(
+    request: Request, server_id: str, filename: str,
+    download_url: str = Form(...),
+    new_filename: str = Form(...),
+    conn: sqlite3.Connection = Depends(db),
+) -> HTMLResponse:
+    """Download the Modrinth-pointed jar and atomically replace the local
+    one. The new filename is taken from Modrinth so version-tagged jars
+    (e.g. 'Geyser-Spigot-2.10.1.jar') get the right name on disk."""
+    server = _get_server(conn, server_id)
+    if server.family is not Family.JAVA:
+        raise HTTPException(status_code=400, detail="plugins are Java-only")
+    data_dir = _data_dir(request, server_id)
+    http = state(request).http_client
+    try:
+        if http is None:
+            http = httpx.AsyncClient(timeout=60.0)
+            close_after = True
+        else:
+            close_after = False
+        try:
+            r = await http.get(download_url)
+            r.raise_for_status()
+            new_bytes = r.content
+        finally:
+            if close_after:
+                await http.aclose()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"download failed: {e}") from e
+    try:
+        plugins_mod.replace_plugin(
+            data_dir, filename, new_bytes, new_filename=new_filename,
+        )
+    except plugins_mod.PluginError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    plugins = plugins_mod.list_plugins(data_dir)
+    return TEMPLATES.TemplateResponse(
+        request, "servers/tabs/_plugins_list.html",
+        {"server": server, "plugins": plugins, "updates": {}, "flash": f"Updated {filename} → {new_filename}"},
     )
 
 

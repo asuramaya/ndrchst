@@ -13,6 +13,7 @@ convention; the server skips files that don't end in .jar at load time.
 """
 from __future__ import annotations
 
+import hashlib
 import shutil
 import zipfile
 from dataclasses import dataclass
@@ -94,6 +95,59 @@ def remove_plugin(data_dir: Path, filename: str) -> None:
     if not src.exists():
         raise PluginError(f"plugin not found: {filename}")
     src.unlink()
+
+
+def sha1_of(path: Path) -> str:
+    """Stream-hash a file with SHA1. Modrinth's version_files endpoint indexes
+    by SHA1; we never need MD5 or SHA512 here."""
+    h = hashlib.sha1()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(64 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def hash_inventory(data_dir: Path) -> dict[str, str]:
+    """For every enabled jar in plugins/, compute the SHA1 once. Returns
+    filename -> hash. Disabled jars are excluded; you can't run an update
+    on something that isn't loaded."""
+    plugins_dir = data_dir / "plugins"
+    if not plugins_dir.exists():
+        return {}
+    return {
+        p.name: sha1_of(p)
+        for p in sorted(plugins_dir.iterdir())
+        if p.is_file() and p.name.endswith(".jar")
+    }
+
+
+def replace_plugin(
+    data_dir: Path, filename: str, new_bytes: bytes, *, new_filename: str | None = None,
+) -> Path:
+    """Atomically swap a plugin's contents for a new build. The old jar is
+    removed; the new bytes are written to `<new_filename or filename>`. The
+    operation goes through a `.upload` temp like save_upload so a half-write
+    can't get loaded by the server."""
+    src = (data_dir / "plugins" / filename).resolve()
+    base = (data_dir / "plugins").resolve()
+    if base not in src.parents and src != base:
+        raise PluginError(f"plugin path escapes plugins/: {filename}")
+    if not src.exists():
+        raise PluginError(f"plugin not found: {filename}")
+    target_name = new_filename or filename
+    if "/" in target_name or "\\" in target_name or target_name.startswith("."):
+        raise PluginError(f"unsafe filename: {target_name}")
+    if not target_name.endswith(".jar"):
+        raise PluginError("new filename must end in .jar")
+    target = base / target_name
+    tmp = target.with_suffix(target.suffix + ".upload")
+    tmp.write_bytes(new_bytes)
+    if not zipfile.is_zipfile(tmp):
+        tmp.unlink(missing_ok=True)
+        raise PluginError("downloaded file is not a valid jar")
+    src.unlink()
+    tmp.rename(target)
+    return target
 
 
 def save_upload(data_dir: Path, filename: str, stream: IO[bytes]) -> Path:

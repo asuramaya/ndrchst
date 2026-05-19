@@ -378,6 +378,120 @@ def test_config_save_no_change_is_idempotent(detail_client):
     assert after.container_id == before.container_id
 
 
+def test_plugins_check_updates_annotates_outdated_jars(detail_client):
+    """Drop a jar in plugins/, mock Modrinth to claim a newer build exists,
+    POST /plugins/check-updates, and assert the rendered list shows the
+    update badge + an Update form pointing at the new download URL."""
+    import hashlib
+    import io
+    import zipfile
+
+    client, sid, root = detail_client
+
+    plugins_dir = root / "servers" / sid / "plugins"
+    plugins_dir.mkdir(parents=True, exist_ok=True)
+    # Build a real jar (zip with plugin.yml) and write it. SHA1 will be
+    # whatever hashlib computes on the actual bytes.
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("plugin.yml", "name: Geyser\nversion: 2.10.0\n")
+    jar_bytes = buf.getvalue()
+    jar_path = plugins_dir / "Geyser-Spigot.jar"
+    jar_path.write_bytes(jar_bytes)
+    jar_sha1 = hashlib.sha1(jar_bytes).hexdigest()
+
+    # Swap the detail_client's mocked Modrinth to respond on the update
+    # endpoint with a newer build for this exact hash.
+    def updates_handler(request):
+        if request.url.path == "/v2/version_files/update":
+            return httpx.Response(200, json={
+                jar_sha1: {
+                    "project_id": "geyser",
+                    "version_number": "2.10.1",
+                    "version_type": "release",
+                    "date_published": "2026-04-01T00:00:00Z",
+                    "game_versions": ["1.21.3"],
+                    "loaders": ["paper", "spigot"],
+                    "dependencies": [],
+                    "files": [{
+                        "primary": True,
+                        "filename": "Geyser-Spigot-2.10.1.jar",
+                        "url": "https://cdn/geyser-new.jar",
+                        "size": len(jar_bytes) + 100,
+                        "hashes": {"sha1": "deadbeef1234"},
+                    }],
+                },
+            })
+        return httpx.Response(404)
+
+    from ndrchst.mods.modrinth import Modrinth
+    new_client = httpx.AsyncClient(transport=httpx.MockTransport(updates_handler))
+    client.app.state.ndrchst.modrinth = Modrinth(client=new_client)
+
+    r = client.post(f"/servers/{sid}/plugins/check-updates",
+                    headers={"HX-Request": "true"})
+    assert r.status_code == 200, r.text
+    html = r.text
+    assert "update → v2.10.1" in html
+    # Update form carries the Modrinth URL + new filename
+    assert "https://cdn/geyser-new.jar" in html
+    assert "Geyser-Spigot-2.10.1.jar" in html
+
+
+def test_plugins_update_one_replaces_jar_atomically(detail_client):
+    """POST /plugins/<file>/update downloads from the provided URL and
+    swaps the local jar."""
+    import io
+    import zipfile
+
+    client, sid, root = detail_client
+
+    plugins_dir = root / "servers" / sid / "plugins"
+    plugins_dir.mkdir(parents=True, exist_ok=True)
+    # Old jar
+    old = io.BytesIO()
+    with zipfile.ZipFile(old, "w") as zf:
+        zf.writestr("plugin.yml", "name: Geyser\nversion: 2.10.0\n")
+    (plugins_dir / "Geyser-Spigot.jar").write_bytes(old.getvalue())
+
+    # New jar bytes that the CDN will serve
+    new = io.BytesIO()
+    with zipfile.ZipFile(new, "w") as zf:
+        zf.writestr("plugin.yml", "name: Geyser\nversion: 2.10.1\n")
+    new_bytes = new.getvalue()
+
+    def cdn(request):
+        if str(request.url) == "https://cdn/geyser-new.jar":
+            return httpx.Response(200, content=new_bytes)
+        return httpx.Response(404)
+
+    fresh = httpx.AsyncClient(transport=httpx.MockTransport(cdn))
+    client.app.state.ndrchst.http_client = fresh
+
+    r = client.post(
+        f"/servers/{sid}/plugins/Geyser-Spigot.jar/update",
+        data={
+            "download_url": "https://cdn/geyser-new.jar",
+            "new_filename": "Geyser-Spigot-2.10.1.jar",
+        },
+        headers={"HX-Request": "true"},
+    )
+    assert r.status_code == 200, r.text
+    assert not (plugins_dir / "Geyser-Spigot.jar").exists()
+    assert (plugins_dir / "Geyser-Spigot-2.10.1.jar").exists()
+    # New version visible in the rendered list
+    assert "v2.10.1" in r.text
+
+
+def test_plugins_check_updates_no_jars_returns_empty_list(detail_client):
+    """Server with no plugins yet: route still renders the empty-state."""
+    client, sid, _ = detail_client
+    r = client.post(f"/servers/{sid}/plugins/check-updates",
+                    headers={"HX-Request": "true"})
+    assert r.status_code == 200
+    assert "No plugins yet" in r.text
+
+
 def test_config_jvm_flags_appear_in_container_cmd(detail_client):
     """The saved JVM flags must actually land in the docker run command."""
     client, sid, _ = detail_client
