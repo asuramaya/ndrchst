@@ -187,23 +187,23 @@ async def test_cross_play_reserves_bedrock_bridge_port_and_exposes_udp(
     s = await lifecycle.create(CreateRequest(
         name="CP", platform_id="paper", version="1.21.3",
         port=25565, memory_mb=2048, cross_play=True,
-        bedrock_bridge_port=19150,
+        bedrock_bridge_port=59150,
     ))
-    assert s.bedrock_bridge_port == 19150
+    assert s.bedrock_bridge_port == 59150
 
     # The container spec exposes both protocols
     from ndrchst.runtime.lifecycle import _build_spec
     spec = _build_spec(s, lifecycle._root / s.id)
     assert "25565/tcp" in spec.ports
     assert "19132/udp" in spec.ports
-    assert spec.ports["19132/udp"] == 19150
+    assert spec.ports["19132/udp"] == 59150
 
     # A second cross-play server can't reuse the bridge port
-    with pytest.raises(LifecycleError, match=r"bedrock_bridge_port 19150 already used"):
+    with pytest.raises(LifecycleError, match=r"bedrock_bridge_port 59150 already used"):
         await lifecycle.create(CreateRequest(
             name="CP2", platform_id="paper", version="1.21.3",
             port=25566, memory_mb=2048, cross_play=True,
-            bedrock_bridge_port=19150,
+            bedrock_bridge_port=59150,
         ))
 
 
