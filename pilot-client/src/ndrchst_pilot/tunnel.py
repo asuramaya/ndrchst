@@ -104,8 +104,21 @@ def ensure_cloudflared(data_dir: Path, *, on_log) -> Path:
     return target
 
 
-def _pick_free_port() -> int:
-    """Ask the OS for an ephemeral port we know is currently free."""
+def _port_is_free(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
+
+def _pick_free_port(preferred: int = 25565) -> int:
+    """Prefer a fixed port (so servers.dat / Direct Connect to a known
+    address works) and fall back to an OS-assigned ephemeral one if it's
+    taken."""
+    if _port_is_free(preferred):
+        return preferred
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]

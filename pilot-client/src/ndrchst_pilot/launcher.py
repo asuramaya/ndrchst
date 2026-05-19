@@ -162,6 +162,21 @@ def launch(
         dial_host = "127.0.0.1"
         dial_port = tunnel.port
 
+    # Seed servers.dat so the target is pre-listed in the Multiplayer menu
+    # (one-click join). Belt-and-suspenders alongside quick-play: heavily
+    # modded title screens sometimes swallow the quick-play auto-connect,
+    # but the server-list entry is always there.
+    try:
+        from .servers_dat import write_servers_dat
+        server_name = app_slug.replace("-", " ").title()
+        write_servers_dat(
+            data_dir / "servers.dat",
+            [(server_name, f"{dial_host}:{dial_port}")],
+        )
+        on_log(f"Server listed in Multiplayer menu as {dial_host}:{dial_port}")
+    except Exception as e:
+        on_log(f"(couldn't seed servers.dat: {e})")
+
     version.auth_session = OfflineAuthSession(username, uuid4().hex)
     version.quick_play = QuickPlayMultiplayer(dial_host, dial_port)
     env = version.install(watcher=_GuiWatcher(on_log))
