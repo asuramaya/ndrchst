@@ -9,7 +9,11 @@ Required fields:
 
 Optional fields (modpack + tunnel support):
   NEOFORGE_VERSION   — pin the NeoForge build, e.g. "21.1.228"
-  MODPACK_URL        — CurseForge client-pack zip URL to install
+  MODPACK_URL        — CurseForge client-pack zip URL (for overrides/* only;
+                       mods are pulled from the server, see MODS_SYNC_URL)
+  MODS_SYNC_URL      — base URL for the server-driven mod sync. Pilot pulls
+                       <MODS_SYNC_URL>/mods/index.json and individual jars.
+                       Default form is "<edge_url>/pilot/<server_id>".
   TUNNEL_HOSTNAME    — Cloudflare Tunnel hostname for cloudflared access tcp
 """
 from __future__ import annotations
@@ -22,6 +26,7 @@ SERVER_PORT = 25565
 MC_VERSION = "1.21.1"
 NEOFORGE_VERSION: str | None = None
 MODPACK_URL: str | None = None
+MODS_SYNC_URL: str | None = None
 TUNNEL_HOSTNAME: str | None = None
 
 DEFAULT_USERNAME = "Player"

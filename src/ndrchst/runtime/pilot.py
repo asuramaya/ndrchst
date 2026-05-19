@@ -116,6 +116,12 @@ def build_bundle(
     mc_version = server.version
     if not _looks_like_mc_version(mc_version):
         mc_version = "1.21.1"
+    # Mods sync URL: server is source of truth, pilot pulls its mod set from
+    # this endpoint at install time. Defaults to the edge-served path; can
+    # be overridden by the caller for testing or air-gapped setups.
+    mods_sync_url = (
+        f"{edge_url.rstrip('/')}/pilot/{server.id}" if edge_url else None
+    )
     config = {
         "app_name": f"ndrchst Pilot — {server.name}",
         "server_host": host,
@@ -126,6 +132,7 @@ def build_bundle(
         "edge_url": edge_url or "",
         "tunnel_hostname": tunnel_hostname or None,
         "modpack_url": modpack_url or None,
+        "mods_sync_url": mods_sync_url,
         "neoforge_version": neoforge_version or None,
     }
 
@@ -212,6 +219,7 @@ def _render_config_py(cfg: dict) -> str:
         f"MC_VERSION = {cfg['mc_version']!r}\n"
         f"NEOFORGE_VERSION = {cfg.get('neoforge_version')!r}\n"
         f"MODPACK_URL = {cfg.get('modpack_url')!r}\n"
+        f"MODS_SYNC_URL = {cfg.get('mods_sync_url')!r}\n"
         f"TUNNEL_HOSTNAME = {cfg.get('tunnel_hostname')!r}\n"
         f"DEFAULT_USERNAME = {cfg['default_username']!r}\n"
         f"SERVER_ID = {cfg['server_id']!r}\n"

@@ -18,22 +18,14 @@ missed.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import zipfile
 from pathlib import Path
 from typing import Callable
 
-import httpx
-
 from . import curseforge as cf
 
 log = logging.getLogger("ndrchst_pilot.modpack")
-
-# Same tolerance as the server side — kitchen-sink packs lose 1-2 file
-# IDs to author deletion over their lifetime. More than 5% is broken
-# enough that the operator should pick a different pack version.
-MODPACK_FAILURE_TOLERANCE = 0.05
 
 
 class ModpackInstallError(RuntimeError):
@@ -91,70 +83,10 @@ def fetch_modpack_zip(
         raise
 
 
-async def _async_install(
-    *,
-    pack_zip: Path,
-    profile_dir: Path,
-    on_log: Callable[[str], None],
-) -> tuple[int, int]:
-    """Returns (successes, failures). Raises ModpackInstallError if the
-    failure ratio is above tolerance."""
-    manifest = cf.read_manifest(pack_zip)
-    on_log(
-        f"Pack: {manifest.name} v{manifest.version} "
-        f"(MC {manifest.mc_version}, {manifest.loader_id}, {len(manifest.files)} mods)"
-    )
-    mods_dir = profile_dir / "mods"
-    async with httpx.AsyncClient(
-        timeout=60.0,
-        follow_redirects=True,
-        headers={"User-Agent": "Mozilla/5.0 (ndrchst-pilot)"},
-    ) as client:
-        last_logged = 0
-
-        def progress(done: int, total: int) -> None:
-            nonlocal last_logged
-            if done == total or done - last_logged >= 25:
-                on_log(f"  mod download {done}/{total}")
-                last_logged = done
-
-        successes, failures = await cf.download_all_mods(
-            client, manifest.files, mods_dir, on_progress=progress,
-        )
-
-    if failures:
-        ratio = len(failures) / max(len(manifest.files), 1)
-        for entry, err in failures:
-            log.warning("mod download failed: %s/%s: %s",
-                        entry.project_id, entry.file_id, err)
-        on_log(
-            f"⚠ {len(failures)} of {len(manifest.files)} mods could not be "
-            f"downloaded ({ratio:.1%}); details in "
-            "ndrchst-missing-mods.txt"
-        )
-        missing_path = profile_dir / "ndrchst-missing-mods.txt"
-        missing_path.write_text(
-            f"# {len(failures)} mods from this modpack's manifest could "
-            "not be downloaded.\n"
-            "# Manifest entries (projectID/fileID) and the reason:\n\n"
-            + "\n".join(
-                f"{e.project_id}/{e.file_id}\t{err}"
-                for e, err in failures
-            )
-            + "\n",
-        )
-        if ratio > MODPACK_FAILURE_TOLERANCE:
-            raise ModpackInstallError(
-                f"{len(failures)} of {len(manifest.files)} mods failed to "
-                f"download ({ratio:.1%} > "
-                f"{MODPACK_FAILURE_TOLERANCE:.0%} threshold)"
-            )
-
-    # Apply overrides on top of the profile dir.
-    on_log("Applying override files…")
-    n = cf.apply_overrides(pack_zip, profile_dir, manifest.overrides_dir)
-    on_log(f"Applied {n} override files")
-    return len(successes), len(failures)
+def _read_manifest_summary(pack_zip: Path) -> cf.ManifestSummary:
+    """Bare-minimum: just so the operator sees the pack name + MC version
+    in the log. Mod sync is server-driven; we don't resolve from manifest."""
+    return cf.read_manifest(pack_zip)
 
 
 def install_client_pack(
@@ -162,14 +94,51 @@ def install_client_pack(
     url: str,
     profile_dir: Path,
     on_log: Callable[[str], None],
+    sync_base_url: str | None = None,
 ) -> tuple[int, int]:
-    """Sync wrapper for the async install. Downloads the pack, resolves
-    every mod via CurseForge, applies overrides. Returns
-    (mods_installed, mods_failed)."""
+    """Install path:
+      1. Download the CurseForge client-pack zip (cached if already present).
+      2. Extract overrides/ on top of `profile_dir` — configs, kubejs
+         scripts, defaultconfigs.
+      3. If `sync_base_url` is provided, sync mods/ from the server (the
+         authoritative source); otherwise leave mods/ empty for the
+         operator to populate.
+
+    Mods deliberately come from the server, not from the manifest. The
+    operator's curated set wins over upstream rot.
+
+    Returns (mods_synced, override_files_applied)."""
     pack_zip = profile_dir / "_modpack.zip"
     fetch_modpack_zip(url, pack_zip, on_log=on_log)
-    # Keep the zip around — fetch_modpack_zip's cache check will skip
-    # re-downloading on subsequent installs.
-    return asyncio.run(_async_install(
-        pack_zip=pack_zip, profile_dir=profile_dir, on_log=on_log,
-    ))
+
+    manifest = _read_manifest_summary(pack_zip)
+    on_log(
+        f"Pack: {manifest.name} v{manifest.version} "
+        f"(MC {manifest.mc_version}, {manifest.loader_id})"
+    )
+
+    on_log("Applying override files…")
+    n_overrides = cf.apply_overrides(pack_zip, profile_dir, manifest.overrides_dir)
+    on_log(f"Applied {n_overrides} override files")
+
+    n_mods = 0
+    if sync_base_url:
+        on_log("Syncing mods from server (server is source of truth)…")
+        from .sync import sync_mods_from_server
+        try:
+            result = sync_mods_from_server(
+                sync_base_url=sync_base_url,
+                mods_dir=profile_dir / "mods",
+                on_log=on_log,
+            )
+            on_log(
+                f"Mod sync complete: +{result.added} new, "
+                f"~{result.replaced} updated, ={result.kept} unchanged, "
+                f"-{result.removed} removed"
+            )
+            n_mods = result.added + result.replaced + result.kept
+        except Exception as e:
+            on_log(f"Mod sync failed: {e}")
+            raise
+
+    return n_mods, n_overrides

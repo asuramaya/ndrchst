@@ -110,6 +110,7 @@ def launch(
     on_log: Callable[[str], None],
     neoforge_version: Optional[str] = None,
     modpack_url: Optional[str] = None,
+    mods_sync_url: Optional[str] = None,
     tunnel_hostname: Optional[str] = None,
 ) -> int:
     """Install + run MC in offline mode, auto-connecting to the server.
@@ -134,10 +135,16 @@ def launch(
         on_log(f"Installing modpack from {modpack_url}…")
         from .modpack import install_client_pack
         try:
-            n_ok, n_fail = install_client_pack(
-                url=modpack_url, profile_dir=data_dir, on_log=on_log,
+            n_mods, n_overrides = install_client_pack(
+                url=modpack_url,
+                profile_dir=data_dir,
+                on_log=on_log,
+                sync_base_url=mods_sync_url,
             )
-            on_log(f"Modpack ready: {n_ok} mods installed, {n_fail} missing")
+            on_log(
+                f"Modpack ready: {n_mods} mods synced, "
+                f"{n_overrides} override files applied"
+            )
         except Exception as e:
             on_log(f"Modpack install failed: {e}")
             raise

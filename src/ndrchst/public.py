@@ -126,7 +126,12 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
     def pilot_modpack(server_id: str) -> FileResponse:
         """Per-server modpack zip companion to pilot.zip — staged when
         the operator wants the pilot to install a CF client pack that CF's
-        own CDN won't serve directly (which is most client packs)."""
+        own CDN won't serve directly (which is most client packs).
+
+        Used for the overrides/* tree (configs, kubejs, defaultconfigs);
+        the actual mod jars come from the /mods/ endpoints below so the
+        client mirrors the server's curated set, not whatever the upstream
+        CF manifest happens to point at."""
         from .runtime.pilot import PILOTS_ROOT_DEFAULT
         path = PILOTS_ROOT_DEFAULT / server_id / "modpack.zip"
         if not path.exists():
@@ -135,6 +140,56 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             path,
             media_type="application/zip",
             filename="modpack.zip",
+            headers=_NO_STORE,
+        )
+
+    @app.get("/pilot/{server_id}/mods/index.json")
+    def pilot_mods_index(server_id: str) -> JSONResponse:
+        """List every .jar in the server's data_dir/mods/ with its size +
+        SHA1. The pilot uses this to sync its local mods/ to whatever the
+        server currently has — operator's substitutions (e.g. CC: Tweaked
+        version bumps when upstream manifest rots) propagate automatically.
+        Disabled jars (*.jar.disabled) are excluded."""
+        import hashlib
+
+        from .runtime.lifecycle import SERVERS_ROOT_DEFAULT
+        server = srv_store.get(_conn(), server_id)
+        if server is None:
+            raise HTTPException(status_code=404, detail="server not found")
+        mods_dir = SERVERS_ROOT_DEFAULT / server_id / "mods"
+        if not mods_dir.exists():
+            return JSONResponse({"mods": []}, headers=_NO_STORE)
+        out = []
+        for p in sorted(mods_dir.iterdir()):
+            if not p.is_file() or not p.name.endswith(".jar"):
+                continue
+            h = hashlib.sha1()
+            with p.open("rb") as f:
+                for chunk in iter(lambda: f.read(64 * 1024), b""):
+                    h.update(chunk)
+            out.append({
+                "filename": p.name,
+                "size": p.stat().st_size,
+                "sha1": h.hexdigest(),
+            })
+        return JSONResponse({"server_id": server_id, "mods": out}, headers=_NO_STORE)
+
+    @app.get("/pilot/{server_id}/mods/{filename}")
+    def pilot_mod_file(server_id: str, filename: str) -> FileResponse:
+        """Stream a single mod jar from the server's mods directory."""
+        from .runtime.lifecycle import SERVERS_ROOT_DEFAULT
+        # Path-traversal guard: filename must be a plain *.jar with no separators.
+        if "/" in filename or "\\" in filename or filename.startswith("."):
+            raise HTTPException(status_code=400, detail="unsafe filename")
+        if not filename.endswith(".jar"):
+            raise HTTPException(status_code=400, detail="not a jar")
+        path = SERVERS_ROOT_DEFAULT / server_id / "mods" / filename
+        if not path.exists() or not path.is_file():
+            raise HTTPException(status_code=404, detail="mod not found")
+        return FileResponse(
+            path,
+            media_type="application/java-archive",
+            filename=filename,
             headers=_NO_STORE,
         )
 
