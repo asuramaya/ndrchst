@@ -44,8 +44,11 @@ public final class NdrchstAuth {
     public static final Map<UUID, JoinVerifier.Result> VERIFIED = new ConcurrentHashMap<>();
 
     public NdrchstAuth(IEventBus modBus) {
+        // RegisterPayloadHandlersEvent + RegisterConfigurationTasksEvent are
+        // BOTH mod-bus events (IModBusEvent). PlayerLoggedInEvent is a game-bus
+        // event. Getting the bus wrong is a fatal ModLoadingException.
         modBus.addListener(NdrchstAuth::onRegisterPayloads);
-        NeoForge.EVENT_BUS.addListener(NdrchstAuth::onRegisterConfigTasks);
+        modBus.addListener(NdrchstAuth::onRegisterConfigTasks);
         NeoForge.EVENT_BUS.addListener(NdrchstAuth::onPlayerLogin);
         LOG.info("[ndrchst-auth] loaded — wallet-gated join + holdings ranks");
     }

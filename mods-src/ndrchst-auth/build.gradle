@@ -16,6 +16,16 @@ repositories {
 neoForge {
     version = project.neo_version
 
+    // Throwaway dedicated server for load-testing the mod in isolation
+    // (catches ModLoadingException / wrong-bus errors before we ever touch the
+    // live ATM10 server). `gradle runServer` boots it with just this mod.
+    runs {
+        server {
+            server()
+            programArgument '--nogui'
+        }
+    }
+
     mods {
         "${mod_id}" {
             sourceSet(sourceSets.main)
