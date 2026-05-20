@@ -19,7 +19,11 @@ import java.time.Duration;
  * overridable via {@code NDRCHST_JOIN_VERIFY_URL}.
  */
 public final class JoinVerifier {
+    // Force HTTP/1.1: the default HttpClient tries an HTTP/2 (h2c) upgrade on
+    // plaintext http://, which uvicorn doesn't support — it drops the request
+    // body, so /join/verify saw no body and 422'd (rejecting every join).
     private static final HttpClient HTTP = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
 
