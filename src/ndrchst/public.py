@@ -80,6 +80,13 @@ def _cookie_secure() -> bool:
     return os.environ.get("NDRCHST_COOKIE_SECURE", "1") != "0"
 
 
+def _cookie_domain() -> str | None:
+    """Optional cookie Domain. Set NDRCHST_COOKIE_DOMAIN=.ndrchst.com so one
+    sign-in is recognized across the apex landing, play, and www. Unset (the
+    default) scopes the cookie to the current host — correct for dev/tests."""
+    return os.environ.get("NDRCHST_COOKIE_DOMAIN") or None
+
+
 def _is_internal_caller(request: Request) -> bool:
     """True iff the request came from the box's own container network (the
     ndrchst-auth mod), not the public internet.
@@ -249,6 +256,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         resp.set_cookie(
             _SESSION_COOKIE, token, max_age=7 * 24 * 3600, httponly=True,
             samesite="lax", secure=_cookie_secure(), path="/",
+            domain=_cookie_domain(),
         )
         return resp
 
@@ -407,7 +415,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
     @app.post("/auth/logout")
     def auth_logout() -> JSONResponse:
         resp = JSONResponse({"ok": True}, headers=_NO_STORE)
-        resp.delete_cookie(_SESSION_COOKIE, path="/")
+        resp.delete_cookie(_SESSION_COOKIE, path="/", domain=_cookie_domain())
         return resp
 
     def _play_servers() -> list[dict]:

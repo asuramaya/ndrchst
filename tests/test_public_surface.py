@@ -85,11 +85,30 @@ def test_play_renders_html_with_download_link(tmp_path: Path):
         r = c.get("/play")
         assert r.status_code == 200
         assert "Public Test" in r.text
-        # Download is now gated behind wallet sign-in (auth-first): a pilot-dl
+        # Download is now gated behind wallet sign-in (auth-first): a client-dl
         # button carrying the server id, not a bare download link.
-        assert 'class="btn pilot-dl" data-sid="srvjava01"' in r.text
+        assert 'class="btn client-dl" data-sid="srvjava01"' in r.text
         assert "Sign in to download" in r.text
         assert "bedrock 19150/udp" in r.text
+
+
+def test_cookie_domain_env(monkeypatch):
+    # Unset → host-scoped (dev/tests); set → shared across subdomains.
+    from ndrchst.public import _cookie_domain
+    monkeypatch.delenv("NDRCHST_COOKIE_DOMAIN", raising=False)
+    assert _cookie_domain() is None
+    monkeypatch.setenv("NDRCHST_COOKIE_DOMAIN", ".ndrchst.com")
+    assert _cookie_domain() == ".ndrchst.com"
+
+
+def test_nav_home_points_at_apex(monkeypatch):
+    # On the play host "/" serves the app, so Home/brand must be the absolute
+    # apex, derived from the edge URL (play.<zone> -> <zone>).
+    from ndrchst.web.public_pages import _home_url, render_play
+    monkeypatch.setenv("NDRCHST_EDGE_URL", "https://play.ndrchst.com")
+    monkeypatch.delenv("NDRCHST_HOME_URL", raising=False)
+    assert _home_url() == "https://ndrchst.com"
+    assert 'href="https://ndrchst.com"' in render_play([])
 
 
 def test_ranks_renders_ladder_and_holders(tmp_path: Path):
