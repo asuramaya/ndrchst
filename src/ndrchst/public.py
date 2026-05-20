@@ -11,20 +11,55 @@ Distinct from the admin surface (:8080) so:
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from pydantic import BaseModel
 
+from .domain import auth_session, wallet
 from .domain.models import Family
 from .logging_setup import configure as configure_logging
+from .runtime import solana
 from .runtime.pilot import bundle_path as pilot_bundle_path
 from .store import servers as srv_store
 from .store.db import DEFAULT_DB_PATH, connect
 from .web.public_pages import render_landing, render_play
+
+_SESSION_COOKIE = "ndrchst_session"
+
+
+class _ChallengeReq(BaseModel):
+    pubkey: str
+
+
+class _VerifyReq(BaseModel):
+    pubkey: str
+    message: str
+    signature: str  # base64 of the raw ed25519 signature bytes
+
+
+def _cookie_secure() -> bool:
+    return os.environ.get("NDRCHST_COOKIE_SECURE", "1") != "0"
+
+
+def _identity(pubkey: str) -> dict:
+    """Public identity view for a wallet: display handle, derived MC name,
+    holdings %, and rank tier. Holdings is a live RPC read (0.0 on any miss)."""
+    pct = solana.holdings_pct(pubkey)
+    tier = wallet.tier_for(pct)
+    return {
+        "wallet": pubkey,
+        "display": wallet.abbreviate(pubkey),
+        "mc_name": wallet.derive_mc_name(pubkey),
+        "holdings_pct": round(pct, 6),
+        "tier": tier.key if tier else None,
+        "tier_name": tier.name if tier else None,
+    }
 
 
 def create_public_app(*, db_path: Path | None = None) -> FastAPI:
@@ -53,6 +88,64 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
     @app.get("/healthz")
     def healthz() -> dict:
         return {"status": "ok", "surface": "public"}
+
+    # --- wallet auth (Sign-In With Solana) -----------------------------------
+    @app.post("/auth/challenge")
+    def auth_challenge(req: _ChallengeReq = Body(...)) -> JSONResponse:
+        """Issue a single-use challenge message for the wallet to sign."""
+        if not wallet.is_valid_pubkey(req.pubkey):
+            raise HTTPException(status_code=400, detail="invalid wallet address")
+        nonce = auth_session.issue_nonce()
+        message = auth_session.build_message(req.pubkey, nonce)
+        return JSONResponse({"message": message}, headers=_NO_STORE)
+
+    @app.post("/auth/verify")
+    def auth_verify(req: _VerifyReq = Body(...)) -> JSONResponse:
+        """Verify the signed challenge, then set a session cookie."""
+        import base64
+
+        if not wallet.is_valid_pubkey(req.pubkey):
+            raise HTTPException(status_code=400, detail="invalid wallet address")
+        # The nonce in the message must be one we issued (single-use), and the
+        # message must be exactly the challenge we'd build — pins the signed
+        # bytes to our domain + statement, not arbitrary attacker text.
+        nonce = ""
+        for line in req.message.splitlines():
+            if line.startswith("Nonce: "):
+                nonce = line[len("Nonce: "):].strip()
+                break
+        if not nonce or not auth_session.consume_nonce(nonce):
+            raise HTTPException(status_code=401, detail="challenge expired or unknown")
+        if req.message != auth_session.build_message(req.pubkey, nonce):
+            raise HTTPException(status_code=401, detail="challenge mismatch")
+        try:
+            sig = base64.b64decode(req.signature)
+        except (ValueError, TypeError) as e:
+            raise HTTPException(status_code=400, detail="bad signature encoding") from e
+        if not wallet.verify_signature(req.pubkey, req.message.encode(), sig):
+            raise HTTPException(status_code=401, detail="signature verification failed")
+
+        token = auth_session.sign_session(req.pubkey)
+        resp = JSONResponse(_identity(req.pubkey), headers=_NO_STORE)
+        resp.set_cookie(
+            _SESSION_COOKIE, token, max_age=7 * 24 * 3600, httponly=True,
+            samesite="lax", secure=_cookie_secure(), path="/",
+        )
+        return resp
+
+    @app.get("/me")
+    def me(request: Request) -> JSONResponse:
+        """Current wallet identity from the session cookie, or 401."""
+        pubkey = auth_session.verify_session(request.cookies.get(_SESSION_COOKIE))
+        if not pubkey:
+            raise HTTPException(status_code=401, detail="not signed in")
+        return JSONResponse(_identity(pubkey), headers=_NO_STORE)
+
+    @app.post("/auth/logout")
+    def auth_logout() -> JSONResponse:
+        resp = JSONResponse({"ok": True}, headers=_NO_STORE)
+        resp.delete_cookie(_SESSION_COOKIE, path="/")
+        return resp
 
     def _play_servers() -> list[dict]:
         return [

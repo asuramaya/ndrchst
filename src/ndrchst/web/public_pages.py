@@ -82,7 +82,94 @@ nav.top .links a.active,nav.top .links a:hover{color:var(--fg)}
 .os-panel ol{margin:.3rem 0 0;padding-left:1.2rem;color:var(--fg2);line-height:1.7;font-size:.92rem}
 .os-panel code{background:var(--bg3);padding:.1rem .35rem;border-radius:4px;font-size:.85em}
 .empty{color:var(--muted);text-align:center;padding:2.5rem 1rem;border:1px dashed var(--border);border-radius:var(--radius)}
+.eyebrow{display:inline-block;font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--accent);border:1px solid rgba(34,197,94,.32);border-radius:999px;
+  padding:.32rem .75rem;margin-bottom:1.1rem}
+.feature .num{font-family:'JetBrains Mono',ui-monospace,monospace;color:var(--accent);
+  font-size:.8rem;letter-spacing:.05em}
+.callout{background:linear-gradient(135deg,#101411,#16181b);border:1px solid var(--border);
+  border-radius:var(--radius);padding:1.3rem 1.4rem;color:var(--fg2);font-size:.95rem;line-height:1.65}
+.callout strong{color:var(--fg)}
+.disclaimer{color:var(--muted);font-size:.78rem;line-height:1.65;margin-top:1.4rem}
+.disclaimer .status{color:var(--fg2)}
+.wbtn{font:inherit;cursor:pointer;border:1px solid rgba(34,197,94,.4);background:rgba(34,197,94,.08);
+  color:var(--accent);border-radius:999px;padding:.4rem .9rem;font-size:.85rem;font-weight:600}
+.wbtn:hover{background:rgba(34,197,94,.16)}
+.wchip{display:none;align-items:center;gap:.5rem;border:1px solid var(--border);background:var(--bg2);
+  border-radius:999px;padding:.32rem .4rem .32rem .8rem;font-size:.84rem;color:var(--fg)}
+.wchip .tier{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:#052e16;
+  background:var(--accent);border-radius:999px;padding:.15rem .5rem;font-weight:700}
+.wchip .tier.none{background:var(--bg3);color:var(--fg2)}
+.wchip button{font:inherit;cursor:pointer;background:none;border:none;color:var(--muted);font-size:.9rem;padding:0 .2rem}
+.rankcard{display:none;background:linear-gradient(135deg,#101411,#16181b);border:1px solid var(--border);
+  border-radius:var(--radius);padding:1.2rem 1.4rem;margin:0 0 2rem}
+.rankcard .row{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+.rankcard .big{font-size:1.3rem;font-weight:700}
+.rankcard .pct{color:var(--fg2);font-size:.9rem}
 footer{padding:2.5rem 0 3rem;color:var(--muted);font-size:.82rem;border-top:1px solid var(--border)}
+"""
+
+# Vanilla wallet connect — no npm, no framework. Talks to the injected
+# Phantom / Solflare provider, signs the server's challenge, posts to
+# /auth/verify. The API base defaults to same-origin; set window.NDRCHST_API
+# to point at a separate origin (the edge Worker must proxy /auth/* + /me).
+_WALLET_JS = """
+<script>
+(function(){
+  var API = window.NDRCHST_API || '';
+  function $(id){return document.getElementById(id);}
+  function provider(){
+    if(window.phantom&&window.phantom.solana) return window.phantom.solana;
+    if(window.solana) return window.solana;
+    if(window.solflare) return window.solflare;
+    return null;
+  }
+  function render(me){
+    var btn=$('wallet-connect'), chip=$('wallet-chip');
+    if(!me){ if(btn)btn.style.display=''; if(chip)chip.style.display='none';
+      document.querySelectorAll('.rankcard').forEach(function(c){c.style.display='none';}); return; }
+    if(btn)btn.style.display='none';
+    if(chip){ chip.style.display='inline-flex';
+      $('wallet-addr').textContent=me.display;
+      var t=$('wallet-tier'); t.textContent=me.tier_name||'No rank';
+      t.className='tier'+(me.tier?'':' none'); }
+    var rc=$('rankcard');
+    if(rc){ rc.style.display='block';
+      $('rc-tier').textContent=me.tier_name||'Not a holder yet';
+      $('rc-pct').textContent=(me.holdings_pct||0).toFixed(4)+'% of supply';
+      $('rc-name').textContent=me.mc_name; }
+  }
+  async function refresh(){
+    try{ var r=await fetch(API+'/me',{credentials:'include'});
+      render(r.ok?await r.json():null);}catch(e){ render(null);} }
+  async function connect(){
+    var p=provider();
+    if(!p){ alert('No Solana wallet found. Install Phantom to sign in.'); return; }
+    try{
+      var res=await p.connect(); var pk=(res&&res.publicKey?res.publicKey:p.publicKey).toString();
+      var ch=await fetch(API+'/auth/challenge',{method:'POST',
+        headers:{'content-type':'application/json'},body:JSON.stringify({pubkey:pk})});
+      if(!ch.ok){ alert('Could not start sign-in'); return; }
+      var msg=(await ch.json()).message;
+      var enc=new TextEncoder().encode(msg);
+      var signed=await p.signMessage(enc,'utf8');
+      var sig=signed.signature||signed;
+      var b64=btoa(String.fromCharCode.apply(null,new Uint8Array(sig)));
+      var v=await fetch(API+'/auth/verify',{method:'POST',credentials:'include',
+        headers:{'content-type':'application/json'},
+        body:JSON.stringify({pubkey:pk,message:msg,signature:b64})});
+      render(v.ok?await v.json():null);
+      if(!v.ok) alert('Sign-in failed');
+    }catch(e){ console.error(e); }
+  }
+  async function logout(){ try{await fetch(API+'/auth/logout',{method:'POST',credentials:'include'});}catch(e){} render(null); }
+  document.addEventListener('DOMContentLoaded',function(){
+    var b=$('wallet-connect'); if(b)b.addEventListener('click',connect);
+    var o=$('wallet-logout'); if(o)o.addEventListener('click',logout);
+    refresh();
+  });
+})();
+</script>
 """
 
 _HEAD = """<!doctype html><html lang="en"><head>
@@ -101,56 +188,51 @@ def _shell(title: str, body: str, *, active: str) -> str:
         '<div class="links">'
         f'<a href="/"{cls("home")}>Home</a>'
         f'<a href="/play"{cls("play")}>Play</a>'
+        '<button id="wallet-connect" class="wbtn">Connect Wallet</button>'
+        '<span id="wallet-chip" class="wchip">'
+        '<span id="wallet-addr" class="mono"></span>'
+        '<span id="wallet-tier" class="tier"></span>'
+        '<button id="wallet-logout" title="Sign out">&times;</button></span>'
         "</div></nav>"
     )
-    return _HEAD.format(title=html.escape(title), css=_CSS) + nav + body + "</div></body></html>"
+    return (
+        _HEAD.format(title=html.escape(title), css=_CSS)
+        + nav + body + _WALLET_JS + "</div></body></html>"
+    )
 
 
 def render_landing(*, play_url: str = "/play") -> str:
     play = html.escape(play_url, quote=True)
     body = f"""
 <section class="hero">
-  <h1>Your own Minecraft, top to bottom.</h1>
-  <p class="lede">ndrchst is a vertically-integrated Minecraft stack — a custom launcher,
-     your own private edge, and a server you control. One click puts players in your world
-     with the exact modpack you run, no manual setup.</p>
+  <span class="eyebrow">$NDRCHST · on Solana</span>
+  <h1>Connect your wallet. Play. Rank up.</h1>
+  <p class="lede">A Minecraft server where your wallet is your login and your holdings
+     are your rank.</p>
   <a class="cta" href="{play}">Play now →</a>
-  <a class="cta ghost" href="#how">How it works</a>
 </section>
 
-<div class="features">
-  <div class="feature">
-    <h3>One pack, always in sync</h3>
-    <p>The server is the source of truth. Clients mirror its mod set on launch — update
-       a mod once and every player gets it next time they play.</p>
-  </div>
-  <div class="feature">
-    <h3>Your edge, not your address</h3>
-    <p>Players connect through your domain at the network edge. The server's real address
-       never leaves your machine — no port-forwarding, no exposed IP.</p>
-  </div>
-  <div class="feature">
-    <h3>Bring your own machine</h3>
-    <p>A small cross-platform launcher for Windows, macOS, and Linux installs the modpack,
-       tunes the JVM, and joins — so players don't fight with mod folders.</p>
-  </div>
+<div id="rankcard" class="rankcard">
+  <div class="row"><span class="big" id="rc-tier"></span><span class="pct" id="rc-pct"></span></div>
+  <p style="margin:.6rem 0 0;color:var(--fg2);font-size:.9rem">
+    In-game name <span class="mono" id="rc-name" style="color:var(--fg)"></span></p>
 </div>
 
-<section class="section" id="how">
-  <h2>How it works</h2>
-  <div class="features" style="padding-bottom:0">
-    <div class="feature"><h3>1 · Download the launcher</h3>
-      <p>Grab the pilot for your OS from the <a href="/play">Play</a> page.</p></div>
-    <div class="feature"><h3>2 · Press Play</h3>
-      <p>It pulls the modpack from a global CDN, mirrors the server's mod set, and tunes memory.</p></div>
-    <div class="feature"><h3>3 · You're in</h3>
-      <p>It connects through your edge straight into the world. No accounts to wire up.</p></div>
-  </div>
-</section>
+<div class="features">
+  <div class="feature"><h3>One wallet, everywhere</h3>
+    <p>Sign in once. The same identity carries the site, the launcher, and the server.</p></div>
+  <div class="feature"><h3>Holdings are rank</h3>
+    <p>Your tier is your share of $NDRCHST supply — read from the chain, both ways.</p></div>
+  <div class="feature"><h3>A stack you own</h3>
+    <p>Custom launcher, private edge, your server. The token sits on real infrastructure.</p></div>
+</div>
 
-<footer>ndrchst — a self-hosted, vertically-integrated Minecraft stack.</footer>
+<p class="disclaimer">$NDRCHST powers identity and in-game rank. It is not an investment,
+   a security, or a promise of financial return.</p>
+
+<footer>ndrchst — on-chain identity and rank for Minecraft.</footer>
 """
-    return _shell("ndrchst — your own Minecraft stack", body, active="home")
+    return _shell("ndrchst — connect your wallet, play, rank up", body, active="home")
 
 
 def _status_class(status: str) -> str:

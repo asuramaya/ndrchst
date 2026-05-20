@@ -71,7 +71,9 @@ def test_landing_renders_marketing(tmp_path: Path):
     with TestClient(app) as c:
         r = c.get("/")
         assert r.status_code == 200
-        assert "Your own Minecraft" in r.text
+        assert "Minecraft" in r.text
+        assert "Solana" in r.text
+        assert "NDRCHST" in r.text
         assert 'href="/play"' in r.text
 
 
