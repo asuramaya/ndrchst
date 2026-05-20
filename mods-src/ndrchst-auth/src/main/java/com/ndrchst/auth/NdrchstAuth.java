@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerConfigurationPacketListenerImpl;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
@@ -49,18 +50,21 @@ public final class NdrchstAuth {
         LOG.info("[ndrchst-auth] loaded — wallet-gated join + holdings ranks");
     }
 
-    /** Once the verified player is in, set their LuckPerms group from the tier. */
+    /** Once the verified player is in, set their FTB Ranks rank from the tier. */
     private static void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
         JoinVerifier.Result res = VERIFIED.remove(event.getEntity().getUUID());
         if (res == null || res.tier() == null) {
             return;
         }
+        if (!(event.getEntity() instanceof ServerPlayer player)) {
+            return;
+        }
         try {
-            Ranks.apply(event.getEntity().getUUID(), res.tier());
+            Ranks.apply(player, res.tier());
             LOG.info("[ndrchst-auth] rank {} -> {}", res.tier(),
-                    event.getEntity().getName().getString());
+                    player.getGameProfile().getName());
         } catch (Throwable t) {
-            // LuckPerms absent or API error — the gate still held; skip rank.
+            // FTB Ranks absent or command error — the gate still held; skip rank.
             LOG.warn("[ndrchst-auth] rank assign skipped: {}", t.toString());
         }
     }

@@ -1,29 +1,43 @@
 package com.ndrchst.auth;
 
-import java.util.UUID;
-import net.luckperms.api.LuckPerms;
-import net.luckperms.api.LuckPermsProvider;
-import net.luckperms.api.node.NodeType;
-import net.luckperms.api.node.types.InheritanceNode;
+import java.util.List;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 
 /**
- * Sets a player's LuckPerms group from their holdings tier. The tier key
- * (holder/bronze/silver/gold/diamond/whale) is used directly as the group
- * name — those groups must exist on the server (created in M6).
+ * Sets a player's rank from their holdings tier using <b>FTB Ranks</b> — the
+ * permissions/ranks mod ATM10 already ships (alongside FTB Essentials/Chunks,
+ * which is where the per-rank gameplay perks come from). We assign by
+ * dispatching the server command rather than linking an API, so this stays
+ * decoupled: if FTB Ranks isn't present the command simply no-ops (the gate
+ * still held).
  *
- * LuckPerms references are isolated here so the caller can guard the whole
- * thing in a try/catch(Throwable): if the LuckPerms mod isn't installed, this
- * class fails to link and the gate still works — only the rank is skipped.
+ * <p>The six tier ids double as the FTB Ranks rank ids (holder … whale); their
+ * prefixes + perk permission nodes live in world/serverconfig/ftbranks.
  */
 final class Ranks {
     private Ranks() {}
 
-    static void apply(UUID uuid, String tier) {
-        LuckPerms lp = LuckPermsProvider.get();
-        lp.getUserManager().modifyUser(uuid, user -> {
-            // One group at a time: drop existing inheritance, set the tier group.
-            user.data().clear(NodeType.INHERITANCE::matches);
-            user.data().add(InheritanceNode.builder(tier).build());
-        });
+    /** The holdings tiers, ascending — also the FTB Ranks rank ids. */
+    static final List<String> TIERS =
+            List.of("holder", "bronze", "silver", "gold", "diamond", "whale");
+
+    static void apply(ServerPlayer player, String tier) {
+        MinecraftServer server = player.getServer();
+        if (server == null) {
+            return;
+        }
+        String name = player.getGameProfile().getName();
+        CommandSourceStack src = server.createCommandSourceStack().withPermission(4)
+                .withSuppressedOutput();
+        var commands = server.getCommands();
+        // Single active tier: drop the other tier ranks, then add the current.
+        for (String t : TIERS) {
+            if (!t.equals(tier)) {
+                commands.performPrefixedCommand(src, "ftbranks remove " + name + " " + t);
+            }
+        }
+        commands.performPrefixedCommand(src, "ftbranks add " + name + " " + tier);
     }
 }
