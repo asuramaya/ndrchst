@@ -14,6 +14,7 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.network.event.RegisterConfigurationTasksEvent;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
@@ -50,7 +51,12 @@ public final class NdrchstAuth {
         modBus.addListener(NdrchstAuth::onRegisterPayloads);
         modBus.addListener(NdrchstAuth::onRegisterConfigTasks);
         NeoForge.EVENT_BUS.addListener(NdrchstAuth::onPlayerLogin);
-        LOG.info("[ndrchst-auth] loaded — wallet-gated join + holdings ranks");
+        NeoForge.EVENT_BUS.addListener(NdrchstAuth::onRegisterCommands);
+        LOG.info("[ndrchst-auth] loaded — wallet-gated join + ranks + /daily");
+    }
+
+    private static void onRegisterCommands(RegisterCommandsEvent event) {
+        DailyCommand.register(event.getDispatcher());
     }
 
     /** Once the verified player is in, set their FTB Ranks rank from the tier. */
@@ -62,6 +68,8 @@ public final class NdrchstAuth {
         if (!(event.getEntity() instanceof ServerPlayer player)) {
             return;
         }
+        // Remember the tier for /daily (in-memory v1).
+        DailyCommand.TIER.put(player.getUUID(), res.tier());
         try {
             Ranks.apply(player, res.tier());
             LOG.info("[ndrchst-auth] rank {} -> {}", res.tier(),
