@@ -154,8 +154,14 @@ def build_bundle(
         # for the curseforge resolver (used by modpack install path).
         zf.writestr("requirements.txt", "portablemc>=4.4\nhttpx>=0.27\n")
 
-        # 4. launchers
-        zf.writestr("launch.sh", _LAUNCH_SH)
+        # 4. launchers. launch.sh must carry the Unix executable bit so
+        # `./launch.sh` works after unzip — zipfile.writestr() defaults to
+        # 0o600 (no +x), so set it explicitly via a ZipInfo. (launch.bat
+        # doesn't need it; Windows runs .bat regardless.)
+        sh_info = zipfile.ZipInfo("launch.sh")
+        sh_info.compress_type = zipfile.ZIP_DEFLATED
+        sh_info.external_attr = 0o755 << 16  # -rwxr-xr-x in the high 16 bits
+        zf.writestr(sh_info, _LAUNCH_SH)
         zf.writestr("launch.bat", _LAUNCH_BAT)
 
         # 5. README

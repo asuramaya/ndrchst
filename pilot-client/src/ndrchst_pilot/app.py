@@ -101,10 +101,12 @@ def run() -> None:
     form.pack(fill=tk.X)
     form.columnconfigure(1, weight=1)
 
-    ttk.Label(form, text="In-game name").grid(row=0, column=0, sticky="w", pady=4)
-    name_var = tk.StringVar(value=cfg.default_username)
-    name_entry = ttk.Entry(form, textvariable=name_var)
-    name_entry.grid(row=0, column=1, sticky="ew", padx=(10, 0), pady=4)
+    # Identity is your wallet — no manual username. The in-game name is the
+    # wallet-derived handle, shown read-only once signed in.
+    ttk.Label(form, text="Playing as").grid(row=0, column=0, sticky="w", pady=4)
+    name_var = tk.StringVar(value="— sign in with your wallet —")
+    ttk.Label(form, textvariable=name_var).grid(
+        row=0, column=1, sticky="w", padx=(10, 0), pady=4)
 
     ttk.Label(form, text="Memory (GB)").grid(row=1, column=0, sticky="w", pady=4)
     ram_var = tk.StringVar(value="8")
@@ -135,11 +137,16 @@ def run() -> None:
     # ---- Play + progress ----------------------------------------------
     action = ttk.Frame(root, padding=(16, 8))
     action.pack(fill=tk.X)
-    launch_btn = ttk.Button(action, text="Play", style="Accent.TButton")
+    launch_btn = ttk.Button(action, text="Play", style="Accent.TButton",
+                            state=tk.DISABLED)
     launch_btn.pack(side=tk.LEFT)
-    phase_var = tk.StringVar(value="Ready")
+    phase_var = tk.StringVar(value="Sign in with your wallet to play")
     ttk.Label(action, textvariable=phase_var, style="Muted.TLabel").pack(
         side=tk.LEFT, padx=12)
+
+    # Wallet sign-in is the mandated auth path: no wallet, no Play. mc_name is
+    # the wallet-derived in-game identity set on a successful sign-in.
+    wallet_id: dict[str, str | None] = {"mc_name": None}
 
     bar = ttk.Progressbar(root, mode="determinate", maximum=len(_PHASES))
     bar.pack(fill=tk.X, padx=16, pady=(0, 6))
@@ -166,17 +173,19 @@ def run() -> None:
 
     def set_controls(enabled: bool) -> None:
         widget_state = tk.NORMAL if enabled else tk.DISABLED
-        name_entry.config(state=widget_state)
         ram_spin.config(state=widget_state)
         if platform.system() == "Linux":
             gpu_combo.config(state="readonly" if enabled else tk.DISABLED)
+        # Play is only available once a wallet is linked (mandated auth path).
+        signed_in = wallet_id["mc_name"] is not None
         launch_btn.config(
-            state=widget_state, text="Play" if enabled else "Running…")
+            state=tk.NORMAL if (enabled and signed_in) else tk.DISABLED,
+            text="Play" if enabled else "Running…")
 
     def on_launch() -> None:
-        username = (name_var.get() or cfg.default_username).strip()
+        username = wallet_id["mc_name"]
         if not username:
-            append_log("Username cannot be empty.")
+            append_log("Sign in with your wallet first.")
             return
         try:
             ram_gb = max(2, int(float(ram_var.get())))
@@ -227,11 +236,13 @@ def run() -> None:
                 return
 
             def apply() -> None:
+                wallet_id["mc_name"] = ident.mc_name
                 name_var.set(ident.mc_name)
-                name_entry.config(state=tk.DISABLED)
                 tier = f"  ·  {ident.tier_name}" if ident.tier_name else "  ·  no rank"
                 wallet_status.set(f"{ident.display}{tier}")
                 wallet_btn.config(text="Signed in", state=tk.DISABLED)
+                launch_btn.config(state=tk.NORMAL)  # mandated auth path satisfied
+                phase_var.set("Ready")
             root.after(0, apply)
 
         threading.Thread(target=worker, daemon=True).start()

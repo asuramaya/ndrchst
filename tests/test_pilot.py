@@ -51,6 +51,16 @@ def test_build_bundle_produces_zip_with_pinned_config(tmp_path: Path):
         assert "SERVER_ID = 'abc123def456'" in cfg
 
 
+def test_launch_sh_is_executable_in_zip(tmp_path: Path):
+    """`./launch.sh` must work after unzip — the Unix +x bit has to be stored
+    in the zip (zipfile.writestr defaults to no execute bit)."""
+    s = _make_server()
+    b = pilot.build_bundle(s, public_host="x", pilots_root=tmp_path)
+    with zipfile.ZipFile(b.zip_path) as zf:
+        mode = (zf.getinfo("launch.sh").external_attr >> 16) & 0o777
+        assert mode & 0o111, f"launch.sh not executable (mode {mode:o})"
+
+
 def test_build_bundle_writes_config_and_manifest_json(tmp_path: Path):
     s = _make_server()
     b = pilot.build_bundle(s, public_host="play.example.com", pilots_root=tmp_path)

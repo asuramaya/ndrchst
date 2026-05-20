@@ -17,6 +17,10 @@ from dataclasses import dataclass
 
 DEFAULT_BASE = "https://play.ndrchst.com"
 
+# Cloudflare's WAF 403s the default `Python-urllib/x.y` UA in front of the
+# public surface, so present a browser-ish one (same trick as modpack.py).
+_UA = "Mozilla/5.0 (ndrchst-pilot)"
+
 
 @dataclass(frozen=True, slots=True)
 class WalletIdentity:
@@ -35,13 +39,15 @@ class WalletAuthError(Exception):
 def _post_json(url: str, payload: dict | None = None, timeout: float = 15) -> dict:
     data = json.dumps(payload or {}).encode()
     req = urllib.request.Request(
-        url, data=data, headers={"content-type": "application/json"}, method="POST")
+        url, data=data,
+        headers={"content-type": "application/json", "user-agent": _UA},
+        method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode())
 
 
 def _get_json(url: str, timeout: float = 15) -> dict:
-    req = urllib.request.Request(url, method="GET")
+    req = urllib.request.Request(url, headers={"user-agent": _UA}, method="GET")
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode())
 
