@@ -302,6 +302,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
     def _play_servers() -> list[dict]:
         return [
             {
+                "id": s.id,
                 "name": s.name,
                 "version": s.version,
                 "port": s.port,

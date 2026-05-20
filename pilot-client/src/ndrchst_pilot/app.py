@@ -147,7 +147,8 @@ def run() -> None:
     # Wallet sign-in is the mandated auth path: no wallet, no Play. mc_name is
     # the wallet-derived in-game identity; join_token is the credential the
     # ndrchst-auth mod presents to the server at connect time.
-    wallet_id: dict[str, str | None] = {"mc_name": None, "join_token": None}
+    wallet_id: dict[str, str | None] = {
+        "mc_name": None, "join_token": None, "device_token": None}
 
     bar = ttk.Progressbar(root, mode="determinate", maximum=len(_PHASES))
     bar.pack(fill=tk.X, padx=16, pady=(0, 6))
@@ -197,6 +198,17 @@ def run() -> None:
         phase_var.set("Starting…")
 
         def worker() -> None:
+            # Fetch a FRESH join token right before connecting (the device
+            # token is durable; the join token is short-lived) so a long first
+            # install can't let it expire. Falls back to the cached one.
+            jt = wallet_id["join_token"]
+            dev = wallet_id.get("device_token")
+            if dev:
+                try:
+                    jt = wallet_auth.exchange_device_token(
+                        cfg.auth_base_url or wallet_auth.DEFAULT_BASE, dev).join_token
+                except wallet_auth.WalletAuthError as exc:
+                    emit_from_worker(f"(couldn't refresh join token: {exc}; using cached)")
             try:
                 launch(
                     app_slug=APP_SLUG,
@@ -209,7 +221,7 @@ def run() -> None:
                     modpack_url=cfg.modpack_url,
                     mods_sync_url=cfg.mods_sync_url,
                     tunnel_hostname=cfg.tunnel_hostname,
-                    join_token=wallet_id["join_token"],
+                    join_token=jt,
                     client_ram_mb=ram_gb * 1024,
                     gpu=gpu,
                 )
@@ -293,4 +305,31 @@ def run() -> None:
 
     launch_btn.config(command=on_launch)
     wallet_btn.config(command=on_wallet_signin)
+
+    # Auth-first: if this bundle was downloaded after signing in on the play
+    # page, it carries a device token — auto-sign-in, no button press needed.
+    def _try_device_signin() -> None:
+        dev = wallet_auth.read_device_token()
+        if not dev:
+            return
+        base = cfg.auth_base_url or wallet_auth.DEFAULT_BASE
+        try:
+            ident = wallet_auth.exchange_device_token(base, dev)
+        except wallet_auth.WalletAuthError as exc:
+            emit_from_worker(f"Device sign-in unavailable ({exc}) — use 'Sign in with wallet'.")
+            return
+
+        def apply() -> None:
+            wallet_id["mc_name"] = ident.mc_name
+            wallet_id["join_token"] = ident.join_token
+            wallet_id["device_token"] = dev
+            name_var.set(ident.mc_name)
+            tier = f"  ·  {ident.tier_name}" if ident.tier_name else "  ·  no rank"
+            wallet_status.set(f"{ident.display}{tier}")
+            wallet_btn.config(text="Signed in", state=tk.DISABLED)
+            launch_btn.config(state=tk.NORMAL)
+            phase_var.set("Ready")
+        root.after(0, apply)
+
+    threading.Thread(target=_try_device_signin, daemon=True).start()
     root.mainloop()

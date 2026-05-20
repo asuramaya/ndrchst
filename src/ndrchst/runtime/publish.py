@@ -28,6 +28,7 @@ _IMMUTABLE = "public, max-age=31536000, immutable"
 def _play_server_dicts(java_servers) -> list[dict]:
     return [
         {
+            "id": s.id,
             "name": s.name,
             "version": s.version,
             "port": s.port,

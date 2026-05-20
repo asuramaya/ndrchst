@@ -125,6 +125,7 @@ _WALLET_JS = """
 <script>
 (function(){
   var API = window.NDRCHST_API || '';
+  var signedIn = false;
   function $(id){return document.getElementById(id);}
   function provider(){
     if(window.phantom&&window.phantom.solana) return window.phantom.solana;
@@ -133,6 +134,9 @@ _WALLET_JS = """
     return null;
   }
   function render(me){
+    signedIn = !!me;
+    document.querySelectorAll('.pilot-dl').forEach(function(d){
+      d.disabled=false; d.textContent = me ? 'Download pilot' : 'Sign in to download'; });
     var btn=$('wallet-connect'), chip=$('wallet-chip');
     if(!me){ if(btn)btn.style.display=''; if(chip)chip.style.display='none';
       document.querySelectorAll('.rankcard').forEach(function(c){c.style.display='none';}); return; }
@@ -174,6 +178,12 @@ _WALLET_JS = """
   document.addEventListener('DOMContentLoaded',function(){
     var b=$('wallet-connect'); if(b)b.addEventListener('click',connect);
     var o=$('wallet-logout'); if(o)o.addEventListener('click',logout);
+    document.querySelectorAll('.pilot-dl').forEach(function(d){
+      d.addEventListener('click',function(){
+        if(signedIn){ window.location.href = API + '/me/pilot/' + d.dataset.sid; }
+        else { connect(); }
+      });
+    });
     refresh();
   });
 })();
@@ -335,7 +345,8 @@ def render_play(servers: list[dict], *, downloads_base: str = "") -> str:
             '</div>'
             '<div class="right">'
             f'<span class="dot {st}">{html.escape(s.get("status",""))}</span>'
-            f'<a class="btn" href="{s["pilot_url"]}">Download pilot</a>'
+            f'<button class="btn pilot-dl" data-sid="{html.escape(str(s.get("id","")), quote=True)}" '
+            'disabled>Sign in to download</button>'
             f'<a class="btn ghost" href="{s["config_url"]}">config</a>'
             '</div></div>'
         )
@@ -358,8 +369,8 @@ def render_play(servers: list[dict], *, downloads_base: str = "") -> str:
     body = f"""
 <section class="hero" style="padding:3rem 0 1.5rem">
   <h1 style="font-size:2.1rem">Play on ndrchst</h1>
-  <p class="lede">Pick a server, download its pilot, and press Play. The pilot installs the
-     modpack and joins for you.</p>
+  <p class="lede">Connect your wallet to download your pilot — it arrives already linked to
+     your wallet, so you just press Play. It installs the modpack and joins for you.</p>
 </section>
 
 <section class="section" style="border-top:none;padding-top:0">

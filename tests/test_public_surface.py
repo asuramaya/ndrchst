@@ -85,7 +85,10 @@ def test_play_renders_html_with_download_link(tmp_path: Path):
         r = c.get("/play")
         assert r.status_code == 200
         assert "Public Test" in r.text
-        assert "/pilot/srvjava01/pilot.zip" in r.text
+        # Download is now gated behind wallet sign-in (auth-first): a pilot-dl
+        # button carrying the server id, not a bare download link.
+        assert 'class="btn pilot-dl" data-sid="srvjava01"' in r.text
+        assert "Sign in to download" in r.text
         assert "bedrock 19150/udp" in r.text
 
 

@@ -33,6 +33,8 @@ function isDynamic(path) {
     path === "/me" ||
     path === "/link" ||
     path === "/ranks" ||
+    path.startsWith("/me/") ||        // /me/pilot/<sid> personalized download
+    path.startsWith("/device/") ||    // /device/exchange
     path.startsWith("/auth/") ||
     path.startsWith("/pilot/auth/")
   );

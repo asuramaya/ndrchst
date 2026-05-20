@@ -14,6 +14,7 @@ import urllib.request
 import webbrowser
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 DEFAULT_BASE = "https://play.ndrchst.com"
 
@@ -51,6 +52,45 @@ def _get_json(url: str, timeout: float = 15) -> dict:
     req = urllib.request.Request(url, headers={"user-agent": _UA}, method="GET")
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode())
+
+
+_DEVICE_TOKEN_FILE = "ndrchst-device.token"
+
+
+def read_device_token() -> str | None:
+    """The auth-first download bakes a device token into the bundle. The pilot
+    runs from the bundle dir, so look there (cwd) + next to this package."""
+    here = Path(__file__).resolve().parent
+    for p in (Path(_DEVICE_TOKEN_FILE), here / _DEVICE_TOKEN_FILE,
+              here.parent.parent / _DEVICE_TOKEN_FILE):
+        with contextlib.suppress(OSError):
+            if p.is_file():
+                tok = p.read_text().strip()
+                if tok:
+                    return tok
+    return None
+
+
+def exchange_device_token(base_url: str | None, device_token: str) -> WalletIdentity:
+    """Trade the durable device token for a FRESH wallet identity + join token
+    (tier re-read from chain) — the auth-first replacement for the device-flow,
+    and what's called right before Play so the join token is never stale."""
+    base = (base_url or DEFAULT_BASE).rstrip("/")
+    try:
+        d = _post_json(f"{base}/device/exchange", {"device_token": device_token})
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        raise WalletAuthError(f"device sign-in failed: {e}") from e
+    if not d.get("wallet"):
+        raise WalletAuthError("device token rejected — sign in again")
+    return WalletIdentity(
+        wallet=d["wallet"],
+        display=d.get("display", ""),
+        mc_name=d.get("mc_name", ""),
+        tier=d.get("tier"),
+        tier_name=d.get("tier_name"),
+        holdings_pct=float(d.get("holdings_pct", 0.0)),
+        join_token=d.get("join_token", ""),
+    )
 
 
 def begin(
