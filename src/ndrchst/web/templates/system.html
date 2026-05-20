@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}System — ndrchst{% endblock %}
+{% block header %}System{% endblock %}
+{% block content %}
+  <div class="stat-grid">
+    <div class="card stat">
+      <div class="stat-label">Servers</div>
+      <div class="stat-value">{{ counts.running }}/{{ counts.total }}</div>
+      <div class="stat-sub">running · {{ counts.java }} Java · {{ counts.bedrock }} Bedrock</div>
+    </div>
+    {% if host.loadavg %}
+      <div class="card stat">
+        <div class="stat-label">Load average</div>
+        <div class="stat-value">{{ '%.2f'|format(host.loadavg[0]) }}</div>
+        <div class="stat-sub">{{ '%.2f'|format(host.loadavg[1]) }} / {{ '%.2f'|format(host.loadavg[2]) }} · {{ host.cpu_count }} CPUs</div>
+      </div>
+    {% endif %}
+    {% if host.memory %}
+      <div class="card stat">
+        <div class="stat-label">Memory</div>
+        <div class="stat-value">{{ host.memory.used_pct }}%</div>
+        <div class="stat-sub">{{ human_bytes(host.memory.used) }} / {{ human_bytes(host.memory.total) }}</div>
+        <div class="usage"><div class="usage-fill" style="width: {{ host.memory.used_pct or 0 }}%"></div></div>
+      </div>
+    {% endif %}
+    <div class="card stat">
+      <div class="stat-label">Uptime</div>
+      <div class="stat-value">{{ human_duration(host.uptime_seconds) }}</div>
+      <div class="stat-sub">{{ host.hostname }}</div>
+    </div>
+  </div>
+
+  <h2 class="section-title">Host</h2>
+  <div class="card kv">
+    <div class="kv-row"><span class="kv-key">Platform</span><span class="kv-val mono">{{ host.platform }}</span></div>
+    <div class="kv-row"><span class="kv-key">Kernel</span><span class="kv-val mono">{{ host.kernel }}</span></div>
+    <div class="kv-row"><span class="kv-key">Architecture</span><span class="kv-val mono">{{ host.arch }}</span></div>
+    <div class="kv-row"><span class="kv-key">CPUs</span><span class="kv-val mono">{{ host.cpu_count }}</span></div>
+    <div class="kv-row"><span class="kv-key">Python</span><span class="kv-val mono">{{ host.python }}</span></div>
+  </div>
+
+  <h2 class="section-title">Disk</h2>
+  <div class="card kv">
+    {% for label, d in disks.items() %}
+      <div class="kv-row">
+        <span class="kv-key">{{ label }}</span>
+        <span class="kv-val mono">
+          {% if d %}{{ human_bytes(d.used) }} / {{ human_bytes(d.total) }} ({{ d.used_pct }}% · {{ human_bytes(d.free) }} free){% else %}unavailable{% endif %}
+        </span>
+      </div>
+    {% endfor %}
+  </div>
+
+  <h2 class="section-title">Docker engine</h2>
+  {% if engine is none %}
+    <div class="empty">Docker is unavailable — engine info can't be read.</div>
+  {% elif engine.error %}
+    <div class="banner">Engine query failed: <span class="mono">{{ engine.error }}</span></div>
+  {% else %}
+    <div class="card kv">
+      <div class="kv-row"><span class="kv-key">Engine version</span><span class="kv-val mono">{{ engine.engine_version }} (API {{ engine.api_version }})</span></div>
+      <div class="kv-row"><span class="kv-key">Containers</span><span class="kv-val mono">{{ engine.containers_running }} running / {{ engine.containers }} total</span></div>
+      <div class="kv-row"><span class="kv-key">Images</span><span class="kv-val mono">{{ engine.images }}</span></div>
+      <div class="kv-row"><span class="kv-key">Storage driver</span><span class="kv-val mono">{{ engine.driver }}</span></div>
+      <div class="kv-row"><span class="kv-key">Host OS</span><span class="kv-val mono">{{ engine.os }} ({{ engine.arch }})</span></div>
+      <div class="kv-row"><span class="kv-key">Engine memory</span><span class="kv-val mono">{{ human_bytes(engine.mem_total) }} · {{ engine.ncpu }} CPUs</span></div>
+    </div>
+  {% endif %}
+{% endblock %}

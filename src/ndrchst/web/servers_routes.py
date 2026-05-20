@@ -214,9 +214,41 @@ async def build_mods_index(
         total, cdn, client_only = await lifecycle.build_mods_index(server_id)
     except LifecycleError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return HTMLResponse(
+    msg = (
         f"Built mods index: {total} mods ({cdn} from CDN, "
-        f"{total - cdn} from origin, {client_only} client-only)",
+        f"{total - cdn} from origin, {client_only} client-only)"
+    )
+    # Auto-publish the light set (index + pages) to R2 if configured, so the
+    # edge reflects the new index immediately. Best-effort — never fail the
+    # rebuild on a publish hiccup.
+    try:
+        pub = await lifecycle.publish_to_r2(server_id, heavy=False)
+        if pub.get("published"):
+            msg += f" · published {pub.get('uploaded', 0)} objects to R2"
+    except Exception as e:
+        msg += f" · R2 publish skipped ({e})"
+    return HTMLResponse(msg)
+
+
+@router.post("/servers/{server_id}/r2-publish", response_class=HTMLResponse)
+async def r2_publish(
+    request: Request,
+    server_id: str,
+    heavy: bool = False,
+    lifecycle: Lifecycle = Depends(require_lifecycle),
+) -> HTMLResponse:
+    """Publish pilot artifacts + public pages to Cloudflare R2. `?heavy=true`
+    also pushes the big blobs (modpack.zip, pilot.zip) — slow over the box
+    uplink, so do it when the pack actually changes."""
+    try:
+        result = await lifecycle.publish_to_r2(server_id, heavy=heavy)
+    except LifecycleError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not result.get("published"):
+        return HTMLResponse(f"Not published: {result.get('reason')}")
+    return HTMLResponse(
+        f"Published {result.get('uploaded', 0)} objects to R2"
+        + (" (incl. modpack + pilot.zip)" if heavy else "")
     )
 
 

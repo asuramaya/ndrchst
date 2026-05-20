@@ -342,6 +342,48 @@ code, pre, .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .htmx-indicator { opacity: 0; transition: opacity var(--transition-fast); }
 .htmx-request .htmx-indicator { opacity: 1; }
 
+/* ─── System / Settings ────────────────────────────────────────────────── */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.card.stat { display: flex; flex-direction: column; gap: 0.2rem; }
+.stat-label { color: var(--text-muted); font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.stat-value { font-size: 1.5rem; font-weight: 700; line-height: 1.2; }
+.stat-sub { color: var(--text-muted); font-size: 0.8rem; }
+
+.section-title { font-size: 0.95rem; font-weight: 600; margin: 1.5rem 0 0.6rem; color: var(--text-secondary); }
+
+.kv { padding: 0; }
+.kv-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1rem;
+  padding: 0.6rem 1.1rem;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+.kv-row:last-child { border-bottom: none; }
+.kv-row > .kv-key { color: var(--text-secondary); }
+.kv-row > .kv-val { color: var(--text-primary); text-align: right; word-break: break-all; }
+.kv-desc { color: var(--text-muted); font-size: 0.78rem; margin-top: 0.15rem; }
+
+.usage { height: 6px; background: var(--bg-tertiary); border-radius: 999px; overflow: hidden; margin-top: 0.4rem; }
+.usage-fill { height: 100%; background: var(--accent); }
+
+.ok { color: var(--accent); }
+.no { color: var(--text-muted); }
+.muted { color: var(--text-muted); }
+
+table.grid { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+table.grid th, table.grid td { text-align: left; padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--border); }
+table.grid th { color: var(--text-muted); font-weight: 500; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+table.grid tr:last-child td { border-bottom: none; }
+table.grid td.center, table.grid th.center { text-align: center; }
+
 /* Inline status tag, used by auto-snapshot rows and the global assets view. */
 .badge {
   display: inline-block;

@@ -123,22 +123,22 @@ def install_client_pack(
 
     n_mods = 0
     if sync_base_url:
-        on_log("Syncing mods from server (server is source of truth)…")
-        from .sync import sync_mods_from_server
+        on_log("Syncing assets from server (server is source of truth)…")
+        from .sync import sync_assets_from_server
         try:
-            result = sync_mods_from_server(
+            result = sync_assets_from_server(
                 sync_base_url=sync_base_url,
-                mods_dir=profile_dir / "mods",
+                profile_dir=profile_dir,
                 on_log=on_log,
             )
             on_log(
-                f"Mod sync complete: +{result.added} new, "
+                f"Asset sync complete: +{result.added} new, "
                 f"~{result.replaced} updated, ={result.kept} unchanged, "
                 f"-{result.removed} removed"
             )
             n_mods = result.added + result.replaced + result.kept
         except Exception as e:
-            on_log(f"Mod sync failed: {e}")
+            on_log(f"Asset sync failed: {e}")
             raise
 
     return n_mods, n_overrides

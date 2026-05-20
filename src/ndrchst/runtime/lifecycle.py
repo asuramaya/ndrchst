@@ -392,6 +392,37 @@ class Lifecycle:
             raise LifecycleError(f"server {server_id} has no container")
         await self._docker.restart(server.container_id, timeout=timeout)
 
+    async def engine_info(self) -> dict:
+        """Docker engine summary for the System page."""
+        return await self._docker.engine_info()
+
+    async def publish_to_r2(self, server_id: str, *, heavy: bool = False) -> dict:
+        """Push this server's pilot artifacts + the public pages to R2 so
+        Cloudflare's edge serves them instead of the box. No-op (and says
+        so) when R2 isn't configured. `heavy` also pushes modpack.zip +
+        pilot.zip (slow over the box uplink; do it when the pack changes)."""
+        import asyncio
+        import os
+
+        from . import r2
+        from .pilot import PILOTS_ROOT_DEFAULT
+        from .publish import publish_server
+
+        cfg = r2.config_from_env()
+        if cfg is None:
+            return {"published": False, "reason": "R2 not configured (NDRCHST_R2_* unset)"}
+        server = self._must_get(server_id)
+        java = [s for s in srv_store.list_all(self._conn) if s.family is Family.JAVA]
+        summary = await asyncio.to_thread(
+            publish_server,
+            cfg=cfg, server=server, servers_root=self._root,
+            pilots_root=PILOTS_ROOT_DEFAULT, java_servers=java,
+            play_url=os.environ.get("NDRCHST_PLAY_URL", "/play"),
+            downloads_base=os.environ.get("NDRCHST_PILOT_DOWNLOADS_BASE", ""),
+            heavy=heavy,
+        )
+        return {"published": True, **summary}
+
     async def build_mods_index(self, server_id: str) -> int:
         """Build a cached `mods-index.json` in the server's data dir. Each
         mod gets {filename, size, sha1, url}. The URL points at CurseForge's
@@ -417,8 +448,11 @@ class Lifecycle:
         if not mods_dir.exists():
             raise LifecycleError(f"server {server_id} has no mods/ dir")
 
-        # Resolve CF CDN URLs from the staged client manifest, if present.
-        filename_to_url: dict[str, str] = {}
+        # Resolve CF CDN URLs + client target dirs from the staged client
+        # manifest, if present. resolved maps filename → {"url", "target"}
+        # where target is "mods" for jars and shaderpacks/resourcepacks/saves
+        # for non-jar CF assets.
+        resolved: dict[str, dict] = {}
         modpack_zip = PILOTS_ROOT_DEFAULT / server_id / "modpack.zip"
         if modpack_zip.exists():
             try:
@@ -427,7 +461,7 @@ class Lifecycle:
                     timeout=60.0, follow_redirects=True,
                     headers={"User-Agent": "Mozilla/5.0 (ndrchst)"},
                 ) as client:
-                    filename_to_url = await cf.resolve_manifest_urls(
+                    resolved = await cf.resolve_manifest_targets(
                         client, manifest.files,
                     )
             except cf.CurseForgeError:
@@ -443,7 +477,7 @@ class Lifecycle:
             with p.open("rb") as f:
                 for chunk in iter(lambda: f.read(64 * 1024), b""):
                     h.update(chunk)
-            url = filename_to_url.get(p.name)
+            url = (resolved.get(p.name) or {}).get("url")
             origin_url = (
                 f"{edge}/pilot/{server_id}/mods/{urllib.parse.quote(p.name, safe='')}"
                 if edge else None
@@ -459,32 +493,30 @@ class Lifecycle:
                 "origin_url": origin_url,
                 "from_cdn": url is not None,
                 "client_only": False,
+                "target": "mods",  # server mods are jars → mods/
             })
 
-        # Add the manifest's CLIENT-ONLY mods: entries the full client pack
-        # has that the server's mods/ doesn't (rendering, UI, minimaps, JEI
-        # addons). The dedicated server can't run these — they reference
-        # client classes — but the client needs them to render the world AND
-        # to match the modpack's expected mod count (Crash Assistant nags
+        # Add the manifest's CLIENT-ONLY assets: entries the full client pack
+        # has that the server's mods/ doesn't — client mods (rendering, UI,
+        # minimaps, JEI addons) AND non-jar assets (shaderpacks, resourcepacks)
+        # routed to their own client dirs. The dedicated server can't run the
+        # client mods, but the client needs them to render the world AND to
+        # match the modpack's expected mod count (Crash Assistant nags
         # otherwise). They come straight from CF's CDN; we have no local copy
         # to hash, so sha1 is null and the pilot trusts the CDN bytes.
         server_filenames = {e["filename"] for e in entries}
-        for filename, cdn_url in filename_to_url.items():
+        for filename, info in resolved.items():
             if filename in server_filenames:
-                continue
-            # Only .jar belongs in mods/. Manifests also list shaderpack /
-            # resourcepack .zips — those load from other dirs and would just
-            # litter mods/ (NeoForge ignores them at best). Skip non-jars.
-            if not filename.endswith(".jar"):
                 continue
             entries.append({
                 "filename": filename,
                 "size": None,
                 "sha1": None,
-                "url": cdn_url,
+                "url": info["url"],
                 "origin_url": None,
                 "from_cdn": True,
                 "client_only": True,
+                "target": info["target"],
             })
 
         index = {"server_id": server_id, "mods": entries}

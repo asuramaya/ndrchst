@@ -65,16 +65,25 @@ def test_list_servers_only_includes_java(tmp_path: Path, monkeypatch):
         assert body[0]["pilot_url"] == "/pilot/srvjava01/pilot.zip"
 
 
-def test_index_renders_html_with_download_link(tmp_path: Path):
+def test_landing_renders_marketing(tmp_path: Path):
     db = tmp_path / "t.db"
-    _seed_server(db, cross_play=True)
     app = create_public_app(db_path=db)
     with TestClient(app) as c:
         r = c.get("/")
         assert r.status_code == 200
+        assert "Your own Minecraft" in r.text
+        assert 'href="/play"' in r.text
+
+
+def test_play_renders_html_with_download_link(tmp_path: Path):
+    db = tmp_path / "t.db"
+    _seed_server(db, cross_play=True)
+    app = create_public_app(db_path=db)
+    with TestClient(app) as c:
+        r = c.get("/play")
+        assert r.status_code == 200
         assert "Public Test" in r.text
         assert "/pilot/srvjava01/pilot.zip" in r.text
-        assert "cross-play" in r.text
         assert "bedrock 19150/udp" in r.text
 
 
@@ -149,6 +158,6 @@ def test_empty_state_renders_friendly(tmp_path: Path):
     db = tmp_path / "t.db"
     app = create_public_app(db_path=db)
     with TestClient(app) as c:
-        r = c.get("/")
+        r = c.get("/play")
         assert r.status_code == 200
-        assert "No servers available" in r.text
+        assert "No servers are online" in r.text

@@ -1,0 +1,23 @@
+# Cloudflare Worker that serves the ndrchst public surface from R2.
+#
+#   play.ndrchst.com/*  → play page + /pilot/<sid>/* artifacts (from R2)
+#   www.ndrchst.com/*   → marketing landing
+#
+# The box publishes index.html / play.html / servers.json / pilot/<sid>/*
+# into the bucket (see src/ndrchst/runtime/publish.py); this Worker just
+# maps URLs to R2 keys. Deploy: `wrangler deploy` (from this dir).
+
+name = "ndrchst-edge"
+main = "src/worker.js"
+compatibility_date = "2024-11-01"
+
+[[r2_buckets]]
+binding = "DL"
+bucket_name = "ndrchst-dl"
+
+# Attach the public hostnames. Requires the zone `ndrchst.com` on this
+# Cloudflare account. (You can also set these in the dashboard instead.)
+routes = [
+  { pattern = "play.ndrchst.com/*", zone_name = "ndrchst.com" },
+  { pattern = "www.ndrchst.com/*", zone_name = "ndrchst.com" },
+]

@@ -101,6 +101,34 @@ class Docker:
     async def ping(self) -> bool:
         return await asyncio.to_thread(self._client.ping)
 
+    async def engine_info(self) -> dict:
+        """A flat summary of the Docker engine for the System page:
+        version, container/image counts, host kernel/OS, total memory.
+        Best-effort — returns {"error": ...} if the daemon hiccups so the
+        page degrades instead of 500ing."""
+        def _gather() -> dict:
+            ver = self._client.version()
+            info = self._client.info()
+            return {
+                "engine_version": ver.get("Version"),
+                "api_version": ver.get("ApiVersion"),
+                "containers": info.get("Containers"),
+                "containers_running": info.get("ContainersRunning"),
+                "containers_stopped": info.get("ContainersStopped"),
+                "images": info.get("Images"),
+                "driver": info.get("Driver"),
+                "kernel": info.get("KernelVersion"),
+                "os": info.get("OperatingSystem"),
+                "arch": info.get("Architecture"),
+                "ncpu": info.get("NCPU"),
+                "mem_total": info.get("MemTotal"),
+            }
+        try:
+            return await asyncio.to_thread(_gather)
+        except Exception as e:
+            # Surface the failure instead of 500ing the System page.
+            return {"error": f"{type(e).__name__}: {e}"}
+
     async def create_container(self, spec: ContainerSpec) -> str:
         """Idempotent: removes any existing container with the same name first.
 

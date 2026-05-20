@@ -113,6 +113,7 @@ def launch(
     mods_sync_url: Optional[str] = None,
     tunnel_hostname: Optional[str] = None,
     client_ram_mb: int = 8192,
+    gpu: str = "auto",
 ) -> int:
     """Install + run MC in offline mode, auto-connecting to the server.
 
@@ -206,24 +207,31 @@ def launch(
     env.jvm_args[insert_at:insert_at] = flags
     on_log(f"Client heap: -Xmx{ram_mb}m (G1GC)")
 
-    # Both GPUs work for connecting + playing — the iGPU is just slower
-    # rendering a heavy modpack world. On hybrid laptops we leave the
-    # system default (usually iGPU) unless the user opts into the
-    # discrete NVIDIA GPU via NDRCHST_PREFER_DGPU=1 (PRIME offload). Opt-in
-    # so we never override someone's working iGPU setup or break a
-    # Mesa-only machine.
+    # GPU selection. Both GPUs work for connecting + playing — the iGPU
+    # is just slower rendering a heavy modpack world. On hybrid laptops
+    # the system default is usually the iGPU. The `gpu` arg (from the
+    # launcher UI) picks explicitly; NDRCHST_PREFER_DGPU=1 stays as a
+    # headless/CLI override that "auto" honours.
+    #   - "discrete":   force PRIME render-offload to the NVIDIA dGPU
+    #   - "integrated": leave the system default (don't offload)
+    #   - "auto":       offload only if NDRCHST_PREFER_DGPU=1 is set
     import os as _os
     import platform as _pf
     import shutil as _sh
-    if (
-        _os.environ.get("NDRCHST_PREFER_DGPU") == "1"
-        and _pf.system() == "Linux"
-        and (Path("/dev/nvidia0").exists() or _sh.which("nvidia-smi"))
-    ):
-        _os.environ.setdefault("__NV_PRIME_RENDER_OFFLOAD", "1")
-        _os.environ.setdefault("__GLX_VENDOR_LIBRARY_NAME", "nvidia")
-        _os.environ.setdefault("__VK_LAYER_NV_optimus", "NVIDIA_only")
-        on_log("Requesting discrete NVIDIA GPU (PRIME offload)")
+    prefer_dgpu = gpu == "discrete" or (
+        gpu == "auto" and _os.environ.get("NDRCHST_PREFER_DGPU") == "1"
+    )
+    has_nvidia = Path("/dev/nvidia0").exists() or bool(_sh.which("nvidia-smi"))
+    if prefer_dgpu and _pf.system() == "Linux":
+        if has_nvidia:
+            _os.environ["__NV_PRIME_RENDER_OFFLOAD"] = "1"
+            _os.environ["__GLX_VENDOR_LIBRARY_NAME"] = "nvidia"
+            _os.environ["__VK_LAYER_NV_optimus"] = "NVIDIA_only"
+            on_log("GPU: requesting discrete NVIDIA GPU (PRIME offload)")
+        else:
+            on_log("GPU: discrete requested but no NVIDIA GPU found — using default")
+    elif gpu == "integrated":
+        on_log("GPU: using integrated GPU (system default)")
 
     on_log(
         f"Starting Minecraft as {username}, connecting to "

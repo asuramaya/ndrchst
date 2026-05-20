@@ -1,17 +1,24 @@
-"""Server-driven mod sync.
+"""Server-driven asset sync.
 
-The server's mods/ directory is the canonical mod set. The pilot pulls
-an index from <edge>/pilot/<sid>/mods/index.json and mirrors it locally:
+The server's index is the canonical client asset set. The pilot pulls
+it from <edge>/pilot/<sid>/mods/index.json and mirrors it locally. Each
+index entry carries a ``target`` dir (default ``mods``) telling the
+pilot where the file loads from on the client:
 
-  - download any jar missing locally
-  - replace any jar whose sha1 doesn't match the server's
-  - delete any local jar the server no longer has
+  - ``mods``        → <profile>/mods/        (jars; server-authoritative)
+  - ``shaderpacks`` → <profile>/shaderpacks/ (shader .zips)
+  - ``resourcepacks`` → <profile>/resourcepacks/
+  - ``saves``       → <profile>/saves/
 
-This replaces resolving mods from the CurseForge manifest. Upstream
-manifest rot (deleted file IDs, swapped projects) doesn't matter
-because the operator's curated set on the server is authoritative —
-substitutions made server-side propagate to every client install on
-its next sync.
+For mods/ we mirror exactly (add missing, replace on sha1 mismatch,
+prune anything the server dropped). For the cosmetic dirs we're
+additive — we ensure the pack's files are present but never delete a
+user's own shaderpacks/resourcepacks.
+
+This replaces resolving from the CurseForge manifest: upstream manifest
+rot (deleted file IDs, swapped projects) doesn't matter because the
+operator's curated set on the server is authoritative — substitutions
+made server-side propagate to every client on its next sync.
 """
 from __future__ import annotations
 
@@ -19,9 +26,14 @@ import hashlib
 import json
 import urllib.error
 import urllib.request
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+
+# Dirs we mirror exactly (prune extras). Everything else is additive —
+# we add the pack's files but leave the user's own additions alone.
+_MIRRORED_DIRS = {"mods"}
 
 
 class SyncError(RuntimeError):
@@ -75,108 +87,163 @@ def _http_download(url: str, dest: Path) -> None:
         raise
 
 
-def sync_mods_from_server(
+def sync_assets_from_server(
     *,
     sync_base_url: str,
-    mods_dir: Path,
+    profile_dir: Path,
     on_log: Callable[[str], None],
 ) -> SyncResult:
-    """Bring the local mods set in line with the server's.
+    """Bring the local client asset set in line with the server's index.
 
-    Strategy:
-      1. GET <base>/mods/index.json → the server's authoritative set
-         (filename → sha1).
-      2. If local already matches exactly, do nothing.
-      3. If anything differs, pull the whole set as one mods.zip (one
-         request runs at full tunnel bandwidth; 450 individual requests
-         are dominated by per-request overhead) and extract, then prune
-         anything the server no longer has.
+    Each index entry carries a ``target`` dir (default ``mods``). We
+    group by target and sync each into ``profile_dir/<target>/``:
+
+      - ``mods`` is mirrored exactly: add/replace by sha1, prune extras.
+      - cosmetic dirs (shaderpacks, resourcepacks, saves) are additive:
+        we ensure the pack's files are present but never prune.
+
+    Bytes come from each entry's CDN URL (edge.forgecdn.net — global,
+    fast, off the operator's uplink) with an origin fallback for the
+    handful of substitutions or CDN failures. This is what scales to
+    hundreds of users.
 
     `sync_base_url` should NOT include a trailing slash; it's typically
     `https://play.ndrchst.com/pilot/<sid>`."""
-    mods_dir.mkdir(parents=True, exist_ok=True)
     index_url = f"{sync_base_url}/mods/index.json"
-    on_log(f"Fetching server mod index from {index_url}…")
+    on_log(f"Fetching server asset index from {index_url}…")
     try:
         payload = _http_get_json(index_url)
     except SyncError as e:
-        raise SyncError(f"failed to read server mod index: {e}") from e
-    server_mods = {m["filename"]: m for m in payload.get("mods", [])}
-    on_log(f"Server has {len(server_mods)} mods")
+        raise SyncError(f"failed to read server asset index: {e}") from e
 
-    local_files = {
-        p.name: p for p in mods_dir.iterdir()
-        if p.is_file() and p.name.endswith(".jar")
-    }
+    by_target: dict[str, dict[str, dict]] = defaultdict(dict)
+    for m in payload.get("mods", []):
+        by_target[m.get("target") or "mods"][m["filename"]] = m
+    summary = ", ".join(f"{len(v)} {k}" for k, v in sorted(by_target.items()))
+    on_log(f"Server index: {summary}")
 
-    # What needs to change?
-    to_remove = [n for n in local_files if n not in server_mods]
-    to_fetch = []
-    kept = 0
-    for name, meta in server_mods.items():
-        path = mods_dir / name
-        if path.exists():
-            # Client-only mods carry no sha1 (no server-side copy to hash) —
-            # presence is enough. Server mods are sha1-verified.
-            if meta.get("sha1") is None or _sha1_file(path) == meta["sha1"]:
-                kept += 1
-                continue
-        to_fetch.append(name)
-
-    if not to_fetch and not to_remove:
-        on_log(f"Mods already in sync ({kept} unchanged)")
-        return SyncResult(added=0, replaced=0, removed=0, kept=kept)
-
-    # Prune extras first.
-    for name in to_remove:
-        on_log(f"  removing {name} (not on server)")
-        local_files[name].unlink()
-
-    # Download each mod from its URL. The index gives a CDN URL
-    # (edge.forgecdn.net) for most mods — global, fast, doesn't touch the
-    # operator's uplink — and an origin fallback (our server) for the
-    # handful of substitutions or CDN failures. This is what scales to
-    # hundreds of users.
     import urllib.parse as _up
     cdn_base = "https://edge.forgecdn.net"
-    # Origin for resolving relative URLs (the live-fallback index uses
-    # paths like "/pilot/<sid>/mods/<file>").
     parsed = _up.urlsplit(sync_base_url)
     site_origin = f"{parsed.scheme}://{parsed.netloc}"
 
     def _abs(u: str) -> str:
         return u if u.startswith("http") else _up.urljoin(site_origin, u)
 
-    added = replaced = 0
+    total = SyncResult(added=0, replaced=0, removed=0, kept=0)
+    for target, wanted in sorted(by_target.items()):
+        dest = profile_dir / target
+        dest.mkdir(parents=True, exist_ok=True)
+        mirror = target in _MIRRORED_DIRS
+        res = _sync_dir(
+            wanted=wanted, dest=dest, mirror=mirror, label=target,
+            abs_url=_abs, cdn_base=cdn_base, sync_base_url=sync_base_url,
+            on_log=on_log,
+        )
+        total = SyncResult(
+            added=total.added + res.added,
+            replaced=total.replaced + res.replaced,
+            removed=total.removed + res.removed,
+            kept=total.kept + res.kept,
+        )
+    return total
+
+
+# Back-compat alias: the function used to sync only mods/.
+sync_mods_from_server = sync_assets_from_server
+
+
+def _sync_dir(
+    *,
+    wanted: dict[str, dict],
+    dest: Path,
+    mirror: bool,
+    label: str,
+    abs_url: Callable[[str], str],
+    cdn_base: str,
+    sync_base_url: str,
+    on_log: Callable[[str], None],
+) -> SyncResult:
+    """Sync one target directory. If `mirror`, prune local files the
+    server no longer lists; otherwise leave extras alone (additive)."""
+    # Only consider files that look like the assets we manage. mods/ are
+    # jars; cosmetic dirs are zips. Pruning a user's screenshots/ would be
+    # rude, so we scope "extras" to the relevant extension.
+    exts = (".jar",) if label == "mods" else (".zip",)
+    local_files = {
+        p.name: p for p in dest.iterdir()
+        if p.is_file() and p.name.endswith(exts)
+    }
+
+    to_remove = [n for n in local_files if n not in wanted] if mirror else []
+    to_fetch = []
+    kept = 0
+    for name, meta in wanted.items():
+        path = dest / name
+        if path.exists():
+            # Client-only assets carry no sha1 (no server-side copy to
+            # hash) — presence is enough. sha1'd entries are verified.
+            if meta.get("sha1") is None or _sha1_file(path) == meta["sha1"]:
+                kept += 1
+                continue
+        to_fetch.append(name)
+
+    if not to_fetch and not to_remove:
+        on_log(f"  {label}: already in sync ({kept} unchanged)")
+        return SyncResult(added=0, replaced=0, removed=0, kept=kept)
+
+    for name in to_remove:
+        on_log(f"  {label}: removing {name} (not on server)")
+        local_files[name].unlink()
+
+    added = replaced = failed = 0
     cdn_hits = origin_hits = 0
     progress_every = max(len(to_fetch) // 10, 25)
     last_logged = 0
     for i, name in enumerate(to_fetch, start=1):
-        meta = server_mods[name]
-        target = mods_dir / name
+        meta = wanted[name]
+        target = dest / name
         existed = target.exists()
-        url = _abs(meta.get("url") or _origin_url(sync_base_url, name))
-        origin = _abs(meta.get("origin_url") or _origin_url(sync_base_url, name))
+        origin_raw = meta.get("origin_url") or _origin_url(sync_base_url, name)
+        url = abs_url(meta.get("url") or origin_raw)
+        # An origin fallback only exists when the server has its own copy
+        # (mods/ substitutions). Client-only cosmetic assets have no
+        # origin copy — the index gives origin_url=None — so don't pretend.
+        origin = abs_url(meta["origin_url"]) if meta.get("origin_url") else None
         try:
             _http_download(url, target)
             if url.startswith(cdn_base):
                 cdn_hits += 1
             else:
                 origin_hits += 1
-        except (urllib.error.URLError, OSError):
+        except (urllib.error.URLError, OSError) as exc:
             # CDN URL failed (e.g. 403 third-party-disabled) — fall back
-            # to the operator's origin copy.
-            if url != origin:
-                _http_download(origin, target)
-                origin_hits += 1
-            else:
-                raise SyncError(f"failed to download {name} from {url}")
+            # to the operator's origin copy if there is a distinct one.
+            err: Exception = exc
+            recovered = False
+            if origin and origin != url:
+                try:
+                    _http_download(origin, target)
+                    origin_hits += 1
+                    recovered = True
+                except (urllib.error.URLError, OSError) as exc2:
+                    err = exc2
+            if not recovered:
+                # mods/ is load-bearing → abort. Cosmetic dirs are
+                # optional → log and keep going so a missing shaderpack
+                # never blocks the launch.
+                if mirror:
+                    raise SyncError(f"failed to download {name} from {url}") from err
+                failed += 1
+                on_log(f"  {label}: skipping {name} (download failed: {err})")
+                continue
         replaced += 1 if existed else 0
         added += 0 if existed else 1
         if i - last_logged >= progress_every or i == len(to_fetch):
+            extra = f", {failed} failed" if failed else ""
             on_log(
-                f"  {i}/{len(to_fetch)} fetched "
-                f"({cdn_hits} from CDN, {origin_hits} from origin)"
+                f"  {label}: {i}/{len(to_fetch)} fetched "
+                f"({cdn_hits} from CDN, {origin_hits} from origin{extra})"
             )
             last_logged = i
 

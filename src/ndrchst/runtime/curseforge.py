@@ -67,6 +67,20 @@ _PAGE_RE = re.compile(
 # CDN or hitting their rate limit (anecdotal: hundreds of files/min ok).
 DEFAULT_PARALLEL = 16
 
+# A manifest's files[] mixes mod jars with non-jar assets — shaderpacks,
+# resourcepacks — that NeoForge loads from their own directories, NOT
+# mods/. Dropping a shader .zip in mods/ does nothing (best case) and
+# trips EuphoriaPatcher (worst: it can't find the base shader to patch).
+# We classify each non-jar by its CurseForge project type (via cfwidget,
+# which is the one no-auth way to read a project's type) and route it to
+# the directory the client actually loads it from.
+_CF_TYPE_TO_DIR = {
+    "shaders": "shaderpacks",
+    "resource packs": "resourcepacks",
+    "texture packs": "resourcepacks",
+    "worlds": "saves",
+}
+
 
 class CurseForgeError(RuntimeError):
     """Wraps any failure resolving / fetching a CF asset."""
@@ -409,35 +423,64 @@ async def resolve_to_server_pack(
     )
 
 
-async def resolve_manifest_urls(
+async def _classify_nonjar(client: httpx.AsyncClient, project_id: int) -> str | None:
+    """Return the client subdir a non-jar CF asset loads from
+    (shaderpacks / resourcepacks / saves), or None if we can't map its
+    type. cfwidget keyed by project id is the no-auth source of a
+    project's type; CF's own v1 project endpoint 403s for unauthed
+    clients."""
+    try:
+        r = await client.get(f"{CFWIDGET_API}/{project_id}")
+        r.raise_for_status()
+        ptype = (r.json().get("type") or "").strip().lower()
+    except (httpx.HTTPError, ValueError, KeyError):
+        return None
+    return _CF_TYPE_TO_DIR.get(ptype)
+
+
+async def resolve_manifest_targets(
     client: httpx.AsyncClient,
     entries: list[CFEntry] | tuple[CFEntry, ...],
     *,
     parallel: int = DEFAULT_PARALLEL,
     on_progress=None,
-) -> dict[str, str]:
-    """Resolve a manifest's entries to {filename: cdn_url} WITHOUT
-    downloading the jars. Used to build a per-mod download index so the
-    pilot pulls bytes from CurseForge's CDN (global, fast, free
-    bandwidth) instead of through the operator's tunnel.
+) -> dict[str, dict]:
+    """Like resolve_manifest_urls but also classifies WHERE each file
+    belongs on the client. Returns ``{filename: {"url", "target"}}``:
 
-    Entries whose file CF no longer knows are silently skipped — those
-    mods get served from the operator's server instead (substitutions).
+      - ``.jar`` → ``target="mods"``
+      - shader/resource/world packs → their matching subdir
+        (shaderpacks, resourcepacks, saves)
+
+    Non-jar files whose CF project type we can't classify are omitted —
+    we'd rather not litter the install with a file we can't place. Dead
+    files (CF 404) are skipped the same way resolve_manifest_urls does.
     """
     sem = asyncio.Semaphore(parallel)
     total = len(entries)
     done = 0
     lock = asyncio.Lock()
-    out: dict[str, str] = {}
+    out: dict[str, dict] = {}
 
     async def one(entry: CFEntry):
         nonlocal done
         async with sem:
             try:
                 filename = await fetch_filename(client, entry.project_id, entry.file_id)
-                out[filename] = _cdn_url(entry.file_id, filename)
+                if filename.endswith(".jar"):
+                    out[filename] = {
+                        "url": _cdn_url(entry.file_id, filename),
+                        "target": "mods",
+                    }
+                else:
+                    target = await _classify_nonjar(client, entry.project_id)
+                    if target is not None:
+                        out[filename] = {
+                            "url": _cdn_url(entry.file_id, filename),
+                            "target": target,
+                        }
             except CurseForgeError:
-                pass  # dead file → no CDN URL → served from origin
+                pass  # dead file → served from origin (or dropped)
             async with lock:
                 done += 1
                 if on_progress is not None:

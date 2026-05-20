@@ -21,13 +21,13 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            artifact: ndrchst-pilot-linux-x86_64
+            asset: ndrchst-pilot-linux-x86_64
             bin: ndrchst-pilot
           - os: windows-latest
-            artifact: ndrchst-pilot-windows-x86_64
+            asset: ndrchst-pilot-windows-x86_64.exe
             bin: ndrchst-pilot.exe
           - os: macos-latest
-            artifact: ndrchst-pilot-macos-arm64
+            asset: ndrchst-pilot-macos-arm64
             bin: ndrchst-pilot
     runs-on: ${{ matrix.os }}
     defaults:
@@ -45,17 +45,91 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller portablemc httpx
 
+      # Stamp the binary's __version__ from the tag (pilot-vX.Y.Z → X.Y.Z) so
+      # the self-updater compares against the version it actually shipped as.
+      - name: Stamp version
+        if: startsWith(github.ref, 'refs/tags/pilot-v')
+        shell: bash
+        run: |
+          V="${GITHUB_REF_NAME#pilot-v}"
+          sed -i.bak "s/__version__ = \"[^\"]*\"/__version__ = \"$V\"/" src/ndrchst_pilot/__init__.py
+          rm -f src/ndrchst_pilot/__init__.py.bak
+          echo "stamped version $V"
+
       - name: Build
         run: pyinstaller ndrchst-pilot.spec
 
-      - name: Rename binary
+      - name: Stage binary
         shell: bash
         run: |
           mkdir -p out
-          cp "dist/${{ matrix.bin }}" "out/${{ matrix.artifact }}"
+          cp "dist/${{ matrix.bin }}" "out/${{ matrix.asset }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: pilot-client/out/${{ matrix.artifact }}
+          name: ${{ matrix.asset }}
+          path: pilot-client/out/${{ matrix.asset }}
           if-no-files-found: error
+
+  # Publish the built binaries + an update manifest to Cloudflare R2 so
+  # clients self-update from a global CDN, not the operator's host.
+  # Opt-in: set repo variable PUBLISH_R2=true and the R2_* secrets.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/pilot-v') && vars.PUBLISH_R2 == 'true'
+    env:
+      R2_PREFIX: ${{ vars.R2_PREFIX || 'pilot' }}
+    steps:
+      - name: Download built assets
+        uses: actions/download-artifact@v4
+        with:
+          path: dl
+
+      - name: Assemble release + manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#pilot-v}"
+          mkdir -p release
+          # download-artifact nests each under <name>/<name>; flatten.
+          for f in ndrchst-pilot-linux-x86_64 ndrchst-pilot-windows-x86_64.exe ndrchst-pilot-macos-arm64; do
+            cp "dl/$f/$f" "release/$f"
+          done
+          sha() { sha256sum "release/$1" | cut -d' ' -f1; }
+          cat > release/latest.json <<JSON
+          {
+            "version": "${VERSION}",
+            "notes": "ndrchst pilot ${VERSION}",
+            "assets": {
+              "linux-x86_64":   {"file": "ndrchst-pilot-linux-x86_64",       "sha256": "$(sha ndrchst-pilot-linux-x86_64)"},
+              "windows-x86_64": {"file": "ndrchst-pilot-windows-x86_64.exe",  "sha256": "$(sha ndrchst-pilot-windows-x86_64.exe)"},
+              "macos-arm64":    {"file": "ndrchst-pilot-macos-arm64",         "sha256": "$(sha ndrchst-pilot-macos-arm64)"}
+            }
+          }
+          JSON
+          echo "--- latest.json ---"; cat release/latest.json
+
+      - name: Upload to R2 (S3 API)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Binaries are immutable per version → cache hard. The manifest
+          # must always be fresh → no-cache so clients see new releases.
+          for f in ndrchst-pilot-linux-x86_64 ndrchst-pilot-windows-x86_64.exe ndrchst-pilot-macos-arm64; do
+            aws s3 cp "release/$f" "s3://${R2_BUCKET}/${R2_PREFIX}/$f" \
+              --endpoint-url "$R2_ENDPOINT" \
+              --content-type application/octet-stream \
+              --cache-control "public, max-age=31536000, immutable"
+          done
+          aws s3 cp release/latest.json "s3://${R2_BUCKET}/${R2_PREFIX}/latest.json" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --content-type application/json \
+            --cache-control "no-cache"
+          echo "Published ${GITHUB_REF_NAME} to r2://${R2_BUCKET}/${R2_PREFIX}/"

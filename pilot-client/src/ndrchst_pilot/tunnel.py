@@ -142,7 +142,35 @@ class Tunnel:
 
     log_path: Path | None = None
 
-    def start(self, *, wait_seconds: float = 8.0) -> None:
+    def start(self, *, wait_seconds: float = 8.0, attempts: int = 3) -> None:
+        """Spawn the sidecar and block until its local listener accepts.
+
+        cloudflared occasionally exits early on a cold edge-locate (DNS /
+        Access-token fetch hiccup). We retry a couple of times with a
+        fresh port before giving up. Once the listener is up we pre-warm
+        the edge path so Minecraft's heavy mod-registry login burst rides
+        an already-established tunnel rather than paying cold-start
+        latency mid-handshake (the usual cause of the login-time reset)."""
+        last_err: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                self._spawn_once(wait_seconds=wait_seconds)
+                self._prewarm()
+                return
+            except TunnelError as e:
+                last_err = e
+                self.stop()
+                if attempt < attempts:
+                    self._on_log(
+                        f"cloudflared start attempt {attempt} failed ({e}); retrying…"
+                    )
+                    time.sleep(1.0)
+        raise TunnelError(
+            f"cloudflared sidecar failed to come up after {attempts} attempts: "
+            f"{last_err} — check your network connection to Cloudflare"
+        )
+
+    def _spawn_once(self, *, wait_seconds: float) -> None:
         self._port = _pick_free_port()
         cmd = [
             str(self._cfd_path),
@@ -182,12 +210,27 @@ class Tunnel:
                     return
             except OSError:
                 time.sleep(0.2)
-        # Timed out
-        self.stop()
         raise TunnelError(
             f"cloudflared sidecar didn't open 127.0.0.1:{self._port} within "
-            f"{wait_seconds}s — check your network connection to Cloudflare"
+            f"{wait_seconds}s"
         )
+
+    def _prewarm(self) -> None:
+        """Open and hold a throwaway connection briefly so cloudflared
+        establishes its wss session to the CF edge (DNS, TLS, Access
+        token) BEFORE Minecraft connects. Best-effort — failure here is
+        harmless; the real connection will just pay the cold-start cost."""
+        if self._port is None:
+            return
+        try:
+            with socket.create_connection(("127.0.0.1", self._port), timeout=3.0):
+                # Holding the socket open ~1.2s gives cloudflared time to
+                # dial edge and cache the session; we send no bytes so the
+                # MC handshake on the real connection is unaffected.
+                time.sleep(1.2)
+            self._on_log("Tunnel pre-warmed (edge session established)")
+        except OSError:
+            pass
 
     def stop(self) -> None:
         if self._proc is None:

@@ -15,6 +15,9 @@ Optional fields (modpack + tunnel support):
                        <MODS_SYNC_URL>/mods/index.json and individual jars.
                        Default form is "<edge_url>/pilot/<server_id>".
   TUNNEL_HOSTNAME    — Cloudflare Tunnel hostname for cloudflared access tcp
+  UPDATE_BASE_URL    — base URL for self-update (e.g. an R2 bucket fronted
+                       by a custom domain). Pilot fetches <base>/latest.json
+                       on launch; unset disables auto-update.
 """
 from __future__ import annotations
 
@@ -28,6 +31,7 @@ NEOFORGE_VERSION: str | None = None
 MODPACK_URL: str | None = None
 MODS_SYNC_URL: str | None = None
 TUNNEL_HOSTNAME: str | None = None
+UPDATE_BASE_URL: str | None = None
 
 DEFAULT_USERNAME = "Player"
 SERVER_ID = ""
