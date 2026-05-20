@@ -49,7 +49,7 @@ def publish_server(
     servers_root: Path,
     pilots_root: Path,
     java_servers,
-    play_url: str = "/play",
+    play_url: str | None = None,
     downloads_base: str = "",
 ) -> dict:
     """Upload one server's artifacts + the public pages to R2. Returns a

@@ -11,6 +11,16 @@ Two pages:
 from __future__ import annotations
 
 import html
+import os
+
+
+def _play_url() -> str:
+    """Canonical host for the app + auth flow. The session cookie is set with no
+    Domain attribute, so it scopes to whatever host the user is on; the marketing
+    landing lives on the apex but "Play" must cross over to the play host or the
+    wallet session strands on the wrong origin. Falls back to a relative path
+    only when neither the play nor edge URL is configured (dev/tests)."""
+    return os.environ.get("NDRCHST_PLAY_URL") or os.environ.get("NDRCHST_EDGE_URL") or "/play"
 
 # Per-OS pilot binary asset names produced by .github/workflows/build-pilot.yml.
 # Joined with NDRCHST_PILOT_DOWNLOADS_BASE when set so the play page can offer
@@ -254,7 +264,7 @@ def _shell(title: str, body: str, *, active: str) -> str:
         '<nav class="top">' + _BRAND +
         '<div class="links">'
         f'<a href="/"{cls("home")}>Home</a>'
-        f'<a href="/play"{cls("play")}>Play</a>'
+        f'<a href="{html.escape(_play_url(), quote=True)}"{cls("play")}>Play</a>'
         f'<a href="/ranks"{cls("ranks")}>Ranks</a>'
         '<button id="wallet-connect" class="wbtn">Connect Wallet</button>'
         '<span id="wallet-chip" class="wchip">'
@@ -280,8 +290,8 @@ _TIER_TEASER = [
 ]
 
 
-def render_landing(*, play_url: str = "/play") -> str:
-    play = html.escape(play_url, quote=True)
+def render_landing(*, play_url: str | None = None) -> str:
+    play = html.escape(play_url or _play_url(), quote=True)
     teaser = "".join(
         '<a class="feature" href="/ranks">'
         '<div class="lrow">'

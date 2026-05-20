@@ -417,7 +417,7 @@ class Lifecycle:
             publish_server,
             cfg=cfg, server=server, servers_root=self._root,
             pilots_root=PILOTS_ROOT_DEFAULT, java_servers=java,
-            play_url=os.environ.get("NDRCHST_PLAY_URL", "/play"),
+            play_url=os.environ.get("NDRCHST_PLAY_URL"),
             downloads_base=os.environ.get("NDRCHST_PILOT_DOWNLOADS_BASE", ""),
         )
         return {"published": True, **summary}

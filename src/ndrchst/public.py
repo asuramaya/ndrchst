@@ -437,8 +437,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         if host.startswith("play."):
             downloads_base = os.environ.get("NDRCHST_PILOT_DOWNLOADS_BASE", "")
             return HTMLResponse(render_play(_play_servers(), downloads_base=downloads_base))
-        play_url = os.environ.get("NDRCHST_PLAY_URL", "/play")
-        return HTMLResponse(render_landing(play_url=play_url))
+        return HTMLResponse(render_landing())
 
     @app.get("/play", response_class=HTMLResponse)
     def play() -> HTMLResponse:
