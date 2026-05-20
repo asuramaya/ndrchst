@@ -21,6 +21,9 @@ dist/
 /data/
 /logs/
 
+# Cloudflare Wrangler local state
+.wrangler/
+
 # Editor / OS
 .DS_Store
 .idea/

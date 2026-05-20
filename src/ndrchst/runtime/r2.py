@@ -23,6 +23,11 @@ _ALGO = "AWS4-HMAC-SHA256"
 _REGION = "auto"
 _SERVICE = "s3"
 
+# Bounded connect, generous read, no write cap: a large object (e.g. a ~190 MB
+# modpack) uploaded over a slow/contended residential uplink progresses for many
+# minutes; httpx's default per-chunk write timeout would trip mid-upload.
+_UPLOAD_TIMEOUT = httpx.Timeout(connect=30.0, read=300.0, write=None, pool=30.0)
+
 
 @dataclass(frozen=True, slots=True)
 class R2Config:
@@ -154,7 +159,7 @@ def put_object(
         send["Cache-Control"] = cache_control  # unsigned — S3 allows it
     url = f"https://{cfg.host}{canonical_uri}"
     owns = client is None
-    c = client or httpx.Client(timeout=120.0)
+    c = client or httpx.Client(timeout=_UPLOAD_TIMEOUT)
     try:
         r = c.put(url, content=body, headers=send)
         r.raise_for_status()
