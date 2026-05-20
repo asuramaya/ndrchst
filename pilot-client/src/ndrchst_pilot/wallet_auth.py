@@ -30,6 +30,7 @@ class WalletIdentity:
     tier: str | None
     tier_name: str | None
     holdings_pct: float
+    join_token: str  # short-lived credential the ndrchst-auth mod presents
 
 
 class WalletAuthError(Exception):
@@ -98,5 +99,6 @@ def begin(
                 tier=poll.get("tier"),
                 tier_name=poll.get("tier_name"),
                 holdings_pct=float(poll.get("holdings_pct", 0.0)),
+                join_token=poll.get("join_token", ""),
             )
     raise WalletAuthError("sign-in timed out")

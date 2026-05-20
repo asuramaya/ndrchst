@@ -145,8 +145,9 @@ def run() -> None:
         side=tk.LEFT, padx=12)
 
     # Wallet sign-in is the mandated auth path: no wallet, no Play. mc_name is
-    # the wallet-derived in-game identity set on a successful sign-in.
-    wallet_id: dict[str, str | None] = {"mc_name": None}
+    # the wallet-derived in-game identity; join_token is the credential the
+    # ndrchst-auth mod presents to the server at connect time.
+    wallet_id: dict[str, str | None] = {"mc_name": None, "join_token": None}
 
     bar = ttk.Progressbar(root, mode="determinate", maximum=len(_PHASES))
     bar.pack(fill=tk.X, padx=16, pady=(0, 6))
@@ -208,6 +209,7 @@ def run() -> None:
                     modpack_url=cfg.modpack_url,
                     mods_sync_url=cfg.mods_sync_url,
                     tunnel_hostname=cfg.tunnel_hostname,
+                    join_token=wallet_id["join_token"],
                     client_ram_mb=ram_gb * 1024,
                     gpu=gpu,
                 )
@@ -237,6 +239,7 @@ def run() -> None:
 
             def apply() -> None:
                 wallet_id["mc_name"] = ident.mc_name
+                wallet_id["join_token"] = ident.join_token
                 name_var.set(ident.mc_name)
                 tier = f"  ·  {ident.tier_name}" if ident.tier_name else "  ·  no rank"
                 wallet_status.set(f"{ident.display}{tier}")

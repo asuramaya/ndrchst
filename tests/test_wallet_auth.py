@@ -188,3 +188,27 @@ def test_approve_records_wallet_link(tmp_path, monkeypatch):
     assert link is not None
     assert link.mc_name == W.derive_mc_name(pubkey)
     assert link.tier == "silver"  # 0.7% -> silver
+
+
+def test_pilot_poll_carries_join_token_and_verifies(client):
+    """The device-flow 'approved' response carries a join token; the mod would
+    POST it to /join/verify, which returns the bound identity."""
+    pubkey, seed = _keypair(b"\x30" * 32)
+    start = client.post("/pilot/auth/start").json()
+    assert _approve(client, pubkey, seed, start["user_code"]).status_code == 200
+    poll = client.get("/pilot/auth/poll", params={"pair_id": start["pair_id"]}).json()
+    assert poll["status"] == "approved"
+    token = poll.get("join_token")
+    assert token
+
+    v = client.post("/join/verify", json={"token": token})
+    assert v.status_code == 200
+    body = v.json()
+    assert body["ok"] is True
+    assert body["wallet"] == pubkey
+    assert body["mc_name"] == W.derive_mc_name(pubkey)
+    assert body["tier"] == "silver"  # holdings_pct 0.7 -> silver
+
+
+def test_join_verify_rejects_bad_token(client):
+    assert client.post("/join/verify", json={"token": "garbage"}).status_code == 401

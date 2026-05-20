@@ -23,7 +23,7 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from .domain import auth_session, pilot_pairing, wallet
+from .domain import auth_session, join_token, pilot_pairing, wallet
 from .domain.models import Family
 from .logging_setup import configure as configure_logging
 from .runtime import solana
@@ -48,6 +48,10 @@ class _VerifyReq(BaseModel):
 
 class _PilotApproveReq(_VerifyReq):
     code: str  # the pairing user_code shown by the pilot
+
+
+class _JoinVerifyReq(BaseModel):
+    token: str  # the join token the ndrchst-auth mod received from the client
 
 
 def _cookie_secure() -> bool:
@@ -129,6 +133,15 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
     def _conn() -> sqlite3.Connection:
         return conn_holder["conn"]
 
+    def _with_join_token(ident: dict) -> dict:
+        """Attach a short-lived join token to an identity for the pilot to
+        carry — the credential the ndrchst-auth mod presents at connect time."""
+        return {
+            **ident,
+            "join_token": join_token.issue(
+                ident["wallet"], ident["mc_name"], ident.get("tier")),
+        }
+
     def _record_link(ident: dict) -> None:
         """Persist a wallet's identity + rank so the admin can sync it to game
         servers (whitelist/rank). Best-effort: never block auth on a DB hiccup."""
@@ -191,7 +204,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="unknown or expired pairing code")
         ident = _identity(req.pubkey)
         _record_link(ident)
-        return JSONResponse({"ok": True, **ident}, headers=_NO_STORE)
+        return JSONResponse({"ok": True, **_with_join_token(ident)}, headers=_NO_STORE)
 
     @app.get("/pilot/auth/poll")
     def pilot_auth_poll(pair_id: str) -> JSONResponse:
@@ -201,7 +214,30 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="unknown or expired pairing")
         if not p.pubkey:
             return JSONResponse({"status": "pending"}, headers=_NO_STORE)
-        return JSONResponse({"status": "approved", **_identity(p.pubkey)}, headers=_NO_STORE)
+        ident = _with_join_token(_identity(p.pubkey))
+        return JSONResponse({"status": "approved", **ident}, headers=_NO_STORE)
+
+    @app.post("/join/verify")
+    def join_verify(req: _JoinVerifyReq = Body(...)) -> JSONResponse:
+        """Called by the ndrchst-auth server mod at connect time: validate the
+        join token the client presented. Returns the bound identity (with a
+        live-refreshed tier) on success, 401 otherwise. This is the gate — the
+        mod rejects the connection on a non-200."""
+        claims = join_token.verify(req.token)
+        if claims is None:
+            raise HTTPException(status_code=401, detail="invalid or expired join token")
+        # Refresh the rank from current chain holdings (tier may have moved
+        # since sign-in); identity is otherwise pinned by the signed token.
+        tier = wallet.tier_for(solana.holdings_pct(claims["wallet"]))
+        return JSONResponse(
+            {
+                "ok": True,
+                "wallet": claims["wallet"],
+                "mc_name": claims["mc_name"],
+                "tier": tier.key if tier else None,
+            },
+            headers=_NO_STORE,
+        )
 
     @app.get("/me")
     def me(request: Request) -> JSONResponse:

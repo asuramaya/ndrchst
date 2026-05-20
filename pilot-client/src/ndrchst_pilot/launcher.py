@@ -112,6 +112,7 @@ def launch(
     modpack_url: str | None = None,
     mods_sync_url: str | None = None,
     tunnel_hostname: str | None = None,
+    join_token: str | None = None,
     client_ram_mb: int = 8192,
     gpu: str = "auto",
 ) -> int:
@@ -121,6 +122,16 @@ def launch(
     """
     data_dir = _data_dir(app_slug)
     ctx = Context(main_dir=data_dir)
+
+    # Drop the wallet join token where the ndrchst-auth mod reads it during the
+    # connection handshake (game dir = data_dir). Fresh per launch; cleared if
+    # we're not signed in so a stale token can't linger.
+    data_dir.mkdir(parents=True, exist_ok=True)
+    token_path = data_dir / "ndrchst-join.token"
+    if join_token:
+        token_path.write_text(join_token)
+    else:
+        token_path.unlink(missing_ok=True)
 
     version = _make_version(ctx, mc_version, neoforge_version)
     if neoforge_version:
