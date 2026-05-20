@@ -147,6 +147,14 @@ def test_cdn_url_handles_short_legacy_id():
     assert url.endswith("/0/1234/foo.jar")
 
 
+def test_cdn_url_percent_encodes_spaces():
+    # Some CF files have spaces; a raw space is an invalid URL that urllib
+    # rejects ("URL can't contain control characters").
+    url = cf._cdn_url(8082824, "Explorify v1.6.5.mod.jar")
+    assert url == "https://edge.forgecdn.net/files/8082/824/Explorify%20v1.6.5.mod.jar"
+    assert " " not in url
+
+
 # ─── fetch_filename + download_mod ──────────────────────────────────────────
 
 

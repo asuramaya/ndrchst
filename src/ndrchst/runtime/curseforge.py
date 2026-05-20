@@ -193,13 +193,19 @@ def apply_overrides(zip_path: Path, dest: Path, overrides_dir: str) -> int:
 
 
 def _cdn_url(file_id: int, filename: str) -> str:
-    """The path split CF uses for their CDN. fileId 7471280 → 7471/280."""
+    """The path split CF uses for their CDN. fileId 7471280 → 7471/280.
+
+    The filename is percent-encoded: some CF files have spaces (e.g.
+    'Explorify v1.6.5.mod.jar') and a raw space makes an invalid URL that
+    strict clients (Python urllib) reject outright. Names with only safe
+    chars pass through unchanged."""
+    fn = urllib.parse.quote(filename)
     s = str(file_id)
     if len(s) <= 4:
         # Old, pre-2018-ish fileIds — never seen in modern packs but here
         # for completeness. Split is /0/<id>.
-        return f"{CF_CDN_BASE}/0/{int(s)}/{filename}"
-    return f"{CF_CDN_BASE}/{s[:-3]}/{int(s[-3:])}/{filename}"
+        return f"{CF_CDN_BASE}/0/{int(s)}/{fn}"
+    return f"{CF_CDN_BASE}/{s[:-3]}/{int(s[-3:])}/{fn}"
 
 
 async def fetch_filename(
@@ -244,11 +250,10 @@ async def pack_cdn_url(
     """Public CF CDN URL for a *pack* file (same `_cdn_url` construction as
     mod jars — it bypasses CF's download-disabled flag). The filename is
     fetched live so the URL tracks the pack: pin the fileId, re-resolve to
-    stay synced when the pack updates. Spaces are percent-encoded so the
-    result is fetch-ready (pack filenames like "All the Mods 10-7.0.zip"
-    have spaces; mod jars don't, which is why `_cdn_url` doesn't quote)."""
+    stay synced when the pack updates. `_cdn_url` percent-encodes the name
+    (pack filenames like "All the Mods 10-7.0.zip" have spaces)."""
     filename = await fetch_filename(client, project_id, file_id)
-    return _cdn_url(file_id, urllib.parse.quote(filename))
+    return _cdn_url(file_id, filename)
 
 
 async def download_mod(
