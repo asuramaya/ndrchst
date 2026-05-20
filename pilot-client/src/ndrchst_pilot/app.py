@@ -10,11 +10,10 @@ from __future__ import annotations
 import platform
 import threading
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk
 
-from pathlib import Path
-
-from . import __version__, desktop, updater
+from . import __version__, desktop, updater, wallet_auth
 from .launcher import launch
 from .settings import load as load_config
 
@@ -124,6 +123,15 @@ def run() -> None:
     if platform.system() != "Linux":
         gpu_combo.configure(state="disabled")
 
+    # ---- Wallet sign-in -----------------------------------------------
+    wallet_row = ttk.Frame(root, padding=(16, 4))
+    wallet_row.pack(fill=tk.X)
+    wallet_btn = ttk.Button(wallet_row, text="Sign in with wallet")
+    wallet_btn.pack(side=tk.LEFT)
+    wallet_status = tk.StringVar(value="Not signed in")
+    ttk.Label(wallet_row, textvariable=wallet_status, style="Muted.TLabel").pack(
+        side=tk.LEFT, padx=12)
+
     # ---- Play + progress ----------------------------------------------
     action = ttk.Frame(root, padding=(16, 8))
     action.pack(fill=tk.X)
@@ -204,6 +212,30 @@ def run() -> None:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    # ---- Wallet sign-in handler --------------------------------------
+    def on_wallet_signin() -> None:
+        wallet_btn.config(state=tk.DISABLED, text="Check your browser…")
+        base = cfg.auth_base_url or wallet_auth.DEFAULT_BASE
+
+        def worker() -> None:
+            try:
+                ident = wallet_auth.begin(base, on_log=emit_from_worker)
+            except wallet_auth.WalletAuthError as exc:
+                emit_from_worker(f"Wallet sign-in failed: {exc}")
+                root.after(0, lambda: wallet_btn.config(
+                    state=tk.NORMAL, text="Sign in with wallet"))
+                return
+
+            def apply() -> None:
+                name_var.set(ident.mc_name)
+                name_entry.config(state=tk.DISABLED)
+                tier = f"  ·  {ident.tier_name}" if ident.tier_name else "  ·  no rank"
+                wallet_status.set(f"{ident.display}{tier}")
+                wallet_btn.config(text="Signed in", state=tk.DISABLED)
+            root.after(0, apply)
+
+        threading.Thread(target=worker, daemon=True).start()
+
     # ---- Self-update -------------------------------------------------
     def do_update(info) -> None:
         update_btn.config(state=tk.DISABLED, text="Updating…")
@@ -246,4 +278,5 @@ def run() -> None:
     ).start()
 
     launch_btn.config(command=on_launch)
+    wallet_btn.config(command=on_wallet_signin)
     root.mainloop()

@@ -40,6 +40,7 @@ class PilotConfig:
     mods_sync_url: str | None = None
     tunnel_hostname: str | None = None
     update_base_url: str | None = None
+    auth_base_url: str | None = None  # site base for wallet sign-in (/pilot/auth/*)
 
 
 def _exe_dir() -> Path:
@@ -62,6 +63,7 @@ def _from_baked() -> dict:
         "mods_sync_url": getattr(_baked, "MODS_SYNC_URL", None),
         "tunnel_hostname": getattr(_baked, "TUNNEL_HOSTNAME", None),
         "update_base_url": getattr(_baked, "UPDATE_BASE_URL", None),
+        "auth_base_url": getattr(_baked, "AUTH_BASE_URL", None),
     }
 
 
