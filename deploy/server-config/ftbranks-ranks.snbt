@@ -1,0 +1,76 @@
+// ndrchst tier ranks for FTB Ranks (ATM10). Canonical copy — deploy to
+// <server>/world/serverconfig/ftbranks/ranks.snbt and `/ftbranks reload`.
+//
+// The 6 holdings tiers have NO condition, so they're assigned manually — the
+// ndrchst-auth mod runs `ftbranks add <player> <tier>` on verified login.
+// `member` (always_active) is the baseline; `admin` is op. Power ascends so a
+// tier's prefix + perks win over `member`. Perk nodes are FTB Essentials
+// (home/back max + cooldowns, documented overridable in ftbessentials config);
+// FTB Chunks claim limits + command gating are a later pass.
+{
+	member: {
+		name: "Member"
+		power: 1
+		condition: "always_active"
+	}
+	holder: {
+		name: "Holder"
+		power: 10
+		ftbranks.name_format: "&7[Holder] &r{name}"
+		ftbessentials.home.max: 1
+		ftbessentials.home.cooldown: 30
+		ftbessentials.back.max: 3
+		ftbessentials.back.cooldown: 60
+	}
+	bronze: {
+		name: "Bronze"
+		power: 20
+		ftbranks.name_format: "&e[Bronze] &r{name}"
+		ftbessentials.home.max: 2
+		ftbessentials.home.cooldown: 20
+		ftbessentials.back.max: 5
+		ftbessentials.back.cooldown: 45
+	}
+	silver: {
+		name: "Silver"
+		power: 30
+		ftbranks.name_format: "&f[Silver] &r{name}"
+		ftbessentials.home.max: 3
+		ftbessentials.home.cooldown: 15
+		ftbessentials.back.max: 8
+		ftbessentials.back.cooldown: 30
+	}
+	gold: {
+		name: "Gold"
+		power: 40
+		ftbranks.name_format: "&6[Gold] &r{name}"
+		ftbessentials.home.max: 5
+		ftbessentials.home.cooldown: 10
+		ftbessentials.back.max: 12
+		ftbessentials.back.cooldown: 20
+	}
+	diamond: {
+		name: "Diamond"
+		power: 50
+		ftbranks.name_format: "&b[Diamond] &r{name}"
+		ftbessentials.home.max: 10
+		ftbessentials.home.cooldown: 5
+		ftbessentials.back.max: 20
+		ftbessentials.back.cooldown: 10
+	}
+	whale: {
+		name: "Whale"
+		power: 60
+		ftbranks.name_format: "&6&l[Whale] &r{name}"
+		ftbessentials.home.max: 25
+		ftbessentials.home.cooldown: 0
+		ftbessentials.back.max: 50
+		ftbessentials.back.cooldown: 5
+	}
+	admin: {
+		name: "Admin"
+		power: 1000
+		condition: "op"
+		ftbranks.name_format: "&2{name}"
+	}
+}
