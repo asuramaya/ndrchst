@@ -87,23 +87,22 @@ Notes:
 
 ### Cutover sequence (play/www → Worker)
 
-1. **Add an origin hostname on the box** so the Worker can still reach :8081.
-   The ACTIVE tunnel config is **`/etc/cloudflared/config.yml`** (root-owned; the
-   `~/.cloudflared/config.yml` copy is NOT what the systemd `cloudflared` runs).
-   The `origin.ndrchst.com → http://127.0.0.1:8081` ingress rule is **already
-   added** there (validated, cloudflared restarted). What's still MISSING is the
-   **DNS record**:
-   - `cloudflared tunnel route dns 05da0bcd-… origin.ndrchst.com` **fails with
-     "Authentication error" (code 10000)** — the box's `~/.cloudflared/cert.pem`
-     is not authenticated for the zone API. Either re-auth (`cloudflared tunnel
-     login`, interactive/browser) then re-run route dns, **or** just create it in
-     the Cloudflare dashboard: a **proxied CNAME**
-     `origin.ndrchst.com → 05da0bcd-8b7c-446a-bc55-89aa56dbf79e.cfargotunnel.com`.
-   - Verify: `curl https://origin.ndrchst.com/healthz` returns the public
-     surface JSON.
-   - Note: `www.ndrchst.com` has **no DNS record** either — its Worker route is
-     inert until you add a proxied record for it; `play.ndrchst.com` is the live
-     surface.
+1. **Add an origin hostname for the box.** ⚠️ **The tunnel is DASHBOARD-MANAGED
+   (remotely configured).** cloudflared loads creds from
+   `/etc/cloudflared/config.yml` but then pulls its **ingress from Cloudflare**
+   (`journalctl -u cloudflared` shows `Updated to new configuration … version=N`,
+   listing `play`/`mc`/404). **Editing the local `config.yml` ingress does
+   NOTHING** — and `cloudflared tunnel route dns` fails (`cert.pem` unauthed,
+   code 10000). To add `origin.ndrchst.com`:
+   - **Cloudflare Zero Trust → Networks → Tunnels → tunnel `05da0bcd-…` → Public
+     Hostnames → Add public hostname:** subdomain `origin`, domain `ndrchst.com`,
+     type **HTTP**, URL **`localhost:8081`**. This creates the ingress AND the
+     DNS record together. (If a manual `origin` DNS record already exists, delete
+     it first so the dashboard can create its own.)
+   - Verify: `curl https://origin.ndrchst.com/healthz` → public-surface JSON (200).
+   - Same applies to `www.ndrchst.com` — no DNS yet; add a public hostname (or a
+     proxied record + Worker route) when you want it live. `play.ndrchst.com` is
+     the live surface.
 2. Set `ORIGIN_BASE = "https://origin.ndrchst.com"` in `cf/worker/wrangler.toml`.
 3. `cd cf/worker && wrangler deploy` (routes uncommented → takes over play/www).
 4. **Republish pages** so R2 has the current static pages:
@@ -113,11 +112,15 @@ Notes:
 
 ## Cloudflared tunnel (on the box)
 
-- Tunnel ID `05da0bcd-8b7c-446a-bc55-89aa56dbf79e`. Config `~/.cloudflared/config.yml`;
-  creds `~/.cloudflared/05da0bcd-….json` + `cert.pem`. Runs as **system** service
-  (`sudo systemctl {status,restart} cloudflared`).
-- Current ingress: `play.ndrchst.com → http://127.0.0.1:8081`,
-  `mc.ndrchst.com → tcp://127.0.0.1:25590` (MC game traffic), fallback `404`.
+- Tunnel ID `05da0bcd-8b7c-446a-bc55-89aa56dbf79e`. Runs as **system** service
+  (`sudo systemctl {status,restart} cloudflared`), `ExecStart … --config
+  /etc/cloudflared/config.yml tunnel run`. Creds
+  `~/.cloudflared/05da0bcd-….json`.
+- **Ingress is DASHBOARD-MANAGED**, not from `config.yml` — manage public
+  hostnames in Cloudflare Zero Trust → Tunnels. Current: `play.ndrchst.com →
+  http://localhost:8081`, `mc.ndrchst.com → tcp://localhost:25590`, fallback 404.
+  The local `config.yml` only carries `tunnel:`/`credentials-file:` (its
+  `ingress:` block is ignored).
 
 ## Secrets (never in the repo)
 

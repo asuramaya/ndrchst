@@ -43,10 +43,11 @@ routes = [
 # mapping it to http://127.0.0.1:8081 on the box. Leave blank to make the auth
 # endpoints return 503 (static surface still works).
 #
-# Box ingress for origin.ndrchst.com is already wired in /etc/cloudflared/
-# config.yml. The DNS record is the last missing piece: create a PROXIED CNAME
-#   origin.ndrchst.com -> 05da0bcd-8b7c-446a-bc55-89aa56dbf79e.cfargotunnel.com
-# in the Cloudflare dashboard (or re-auth cloudflared and `tunnel route dns`).
+# origin.ndrchst.com must route to the box :8081. The tunnel is DASHBOARD-managed
+# (local cloudflared config.yml ingress is ignored), so add it as a Public
+# Hostname in Cloudflare Zero Trust → Tunnels → 05da0bcd-… (subdomain `origin`,
+# HTTP, localhost:8081) — that creates the ingress + DNS together. Verify with
+# `curl https://origin.ndrchst.com/healthz` before `wrangler deploy`.
 ORIGIN_BASE = "https://origin.ndrchst.com"
 
 [[r2_buckets]]
