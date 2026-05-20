@@ -22,6 +22,7 @@ made server-side propagate to every client on its next sync.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import urllib.error
@@ -30,6 +31,11 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+
+# Mods come from CurseForge's global CDN, which happily serves many parallel
+# connections — fetch them concurrently so the ~1.25 GB first sync saturates
+# the link instead of crawling one file at a time.
+_FETCH_WORKERS = 16
 
 # Dirs we mirror exactly (prune extras). Everything else is additive —
 # we add the pack's files but leave the user's own additions alone.
@@ -180,12 +186,14 @@ def _sync_dir(
     kept = 0
     for name, meta in wanted.items():
         path = dest / name
-        if path.exists():
-            # Client-only assets carry no sha1 (no server-side copy to
-            # hash) — presence is enough. sha1'd entries are verified.
-            if meta.get("sha1") is None or _sha1_file(path) == meta["sha1"]:
-                kept += 1
-                continue
+        # Already present + (client-only carries no sha1, else sha1 matches)
+        # → cached, keep it. This is the incremental cache: re-syncs only
+        # fetch what actually changed.
+        if path.exists() and (
+            meta.get("sha1") is None or _sha1_file(path) == meta["sha1"]
+        ):
+            kept += 1
+            continue
         to_fetch.append(name)
 
     if not to_fetch and not to_remove:
@@ -196,56 +204,59 @@ def _sync_dir(
         on_log(f"  {label}: removing {name} (not on server)")
         local_files[name].unlink()
 
-    added = replaced = failed = 0
-    cdn_hits = origin_hits = 0
-    progress_every = max(len(to_fetch) // 10, 25)
-    last_logged = 0
-    for i, name in enumerate(to_fetch, start=1):
+    def _fetch(name: str) -> tuple[str, bool, bool, bool, Exception | None]:
+        """Download one entry (CDN, with origin fallback). Returns
+        (name, ok, used_origin, existed, error). Each entry writes its own
+        .part→final file, so this is safe to run on a worker thread."""
         meta = wanted[name]
         target = dest / name
         existed = target.exists()
-        origin_raw = meta.get("origin_url") or _origin_url(sync_base_url, name)
-        url = abs_url(meta.get("url") or origin_raw)
+        url = abs_url(meta.get("url") or _origin_url(sync_base_url, name))
         # An origin fallback only exists when the server has its own copy
-        # (mods/ substitutions). Client-only cosmetic assets have no
-        # origin copy — the index gives origin_url=None — so don't pretend.
+        # (mods/ substitutions). Client-only cosmetic assets have origin_url
+        # None — don't pretend.
         origin = abs_url(meta["origin_url"]) if meta.get("origin_url") else None
         try:
             _http_download(url, target)
-            if url.startswith(cdn_base):
-                cdn_hits += 1
-            else:
-                origin_hits += 1
+            return (name, True, not url.startswith(cdn_base), existed, None)
         except (urllib.error.URLError, OSError) as exc:
-            # CDN URL failed (e.g. 403 third-party-disabled) — fall back
-            # to the operator's origin copy if there is a distinct one.
             err: Exception = exc
-            recovered = False
             if origin and origin != url:
                 try:
                     _http_download(origin, target)
-                    origin_hits += 1
-                    recovered = True
+                    return (name, True, True, existed, None)
                 except (urllib.error.URLError, OSError) as exc2:
                     err = exc2
-            if not recovered:
-                # mods/ is load-bearing → abort. Cosmetic dirs are
-                # optional → log and keep going so a missing shaderpack
-                # never blocks the launch.
-                if mirror:
-                    raise SyncError(f"failed to download {name} from {url}") from err
+            return (name, False, False, existed, err)
+
+    added = replaced = failed = cdn_hits = origin_hits = 0
+    fail_errs: list[tuple[str, Exception | None]] = []
+    progress_every = max(len(to_fetch) // 10, 25)
+    workers = max(1, min(_FETCH_WORKERS, len(to_fetch)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_fetch, n) for n in to_fetch]
+        for done, fut in enumerate(concurrent.futures.as_completed(futures), start=1):
+            name, ok, used_origin, existed, err = fut.result()
+            if ok:
+                origin_hits += used_origin
+                cdn_hits += not used_origin
+                replaced += existed
+                added += not existed
+            else:
                 failed += 1
-                on_log(f"  {label}: skipping {name} (download failed: {err})")
-                continue
-        replaced += 1 if existed else 0
-        added += 0 if existed else 1
-        if i - last_logged >= progress_every or i == len(to_fetch):
-            extra = f", {failed} failed" if failed else ""
-            on_log(
-                f"  {label}: {i}/{len(to_fetch)} fetched "
-                f"({cdn_hits} from CDN, {origin_hits} from origin{extra})"
-            )
-            last_logged = i
+                fail_errs.append((name, err))
+            if done % progress_every == 0 or done == len(to_fetch):
+                extra = f", {failed} failed" if failed else ""
+                on_log(f"  {label}: {done}/{len(to_fetch)} fetched "
+                       f"({cdn_hits} from CDN, {origin_hits} from origin{extra})")
+
+    # mods/ is load-bearing → a missing jar must abort the launch. Cosmetic
+    # dirs are optional → log and carry on so a missing shaderpack never blocks.
+    if failed and mirror:
+        name, err = fail_errs[0]
+        raise SyncError(f"failed to download {name}: {err}")
+    for name, err in fail_errs:
+        on_log(f"  {label}: skipping {name} (download failed: {err})")
 
     return SyncResult(
         added=added, replaced=replaced, removed=len(to_remove), kept=kept,
