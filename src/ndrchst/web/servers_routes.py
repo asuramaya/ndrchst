@@ -15,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 
 from ..api.deps import db, require_lifecycle, state
 from ..platforms import REGISTRY as PLATFORMS
+from ..runtime.holdings_refresh import refresh_all_holdings
 from ..runtime.lifecycle import CreateRequest, Lifecycle, LifecycleError
 from ..runtime.rcon import RCONError
 from ..runtime.whitelist_sync import sync_links_to_server
@@ -286,6 +287,22 @@ async def wallets_sync(
     return HTMLResponse(f"Synced {synced}/{len(links)} wallets to whitelist; {ranked} ranked.")
 
 
+@router.post("/wallets/refresh", response_class=HTMLResponse)
+def wallets_refresh(
+    conn: sqlite3.Connection = Depends(db),
+) -> HTMLResponse:
+    """Re-read every linked wallet's on-chain holdings and recompute its tier.
+    Run before a whitelist/rank sync so sellers lose rank and buyers gain it.
+    Reads the chain once per wallet — single-operator admin, no batching."""
+    results = refresh_all_holdings(conn)
+    if not results:
+        return HTMLResponse("No linked wallets to refresh.")
+    changed = sum(1 for r in results if r.changed)
+    return HTMLResponse(
+        f"Refreshed {len(results)} wallets; {changed} tier change(s). "
+        f"Run wallet sync to push the new ranks.")
+
+
 @router.post("/servers/{server_id}/container/recreate", response_class=HTMLResponse)
 async def container_recreate(
     request: Request,
@@ -309,15 +326,32 @@ async def regenerate_pilot(
     request: Request,
     server_id: str,
     modpack_url: str = Form(""),
+    cf_project_id: int | None = Form(None),
+    cf_file_id: int | None = Form(None),
     neoforge_version: str = Form(""),
     lifecycle: Lifecycle = Depends(require_lifecycle),
     conn: sqlite3.Connection = Depends(db),
 ) -> HTMLResponse:
     """Rebuild the pilot bundle for this server from the *current* lifespan
-    env (NDRCHST_PUBLIC_HOST + NDRCHST_EDGE_URL + NDRCHST_TUNNEL_HOSTNAME),
-    optionally with a per-server modpack client-pack URL and NeoForge
-    version pinned by the operator."""
+    env (NDRCHST_PUBLIC_HOST + NDRCHST_EDGE_URL + NDRCHST_TUNNEL_HOSTNAME).
+
+    Modpack source: pass ``cf_project_id`` + ``cf_file_id`` to pin a
+    CurseForge client pack — they're persisted and resolved to a CF CDN URL
+    at build time (the box never re-hosts the ~200MB pack). An explicit
+    ``modpack_url`` still wins as a manual override."""
     from ..runtime.pilot import PilotBuildError
+    if cf_project_id and cf_file_id:
+        lifecycle.set_modpack_pack(server_id, cf_project_id, cf_file_id)
+    if not modpack_url:
+        try:
+            resolved = await lifecycle.modpack_cdn_url(server_id)
+        except Exception as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"could not resolve CurseForge pack URL: {e}",
+            ) from e
+        if resolved:
+            modpack_url = resolved
     try:
         bundle = lifecycle.regenerate_pilot(
             server_id,
@@ -328,8 +362,10 @@ async def regenerate_pilot(
         raise HTTPException(status_code=400, detail=str(e)) from e
     except PilotBuildError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    src = f" · modpack from {modpack_url}" if modpack_url else ""
     return HTMLResponse(
-        f"Rebuilt pilot bundle ({bundle.size} bytes, sha256={bundle.sha256[:12]}…)",
+        f"Rebuilt pilot bundle ({bundle.size} bytes, "
+        f"sha256={bundle.sha256[:12]}…){src}",
     )
 
 

@@ -12,6 +12,7 @@ Distinct from the admin surface (:8080) so:
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import sqlite3
 from collections.abc import AsyncIterator
@@ -30,7 +31,7 @@ from .runtime.pilot import bundle_path as pilot_bundle_path
 from .store import servers as srv_store
 from .store import wallet_links as wl_store
 from .store.db import DEFAULT_DB_PATH, connect
-from .web.public_pages import render_landing, render_link, render_play
+from .web.public_pages import render_landing, render_link, render_play, render_ranks
 
 _SESSION_COOKIE = "ndrchst_session"
 
@@ -104,6 +105,14 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         configure_logging()
+        # Footgun guard: with a secure-cookie (prod) deploy and no signing
+        # secret, auth_session falls back to a random per-process secret —
+        # every restart silently invalidates all sessions. Warn loudly.
+        if _cookie_secure() and not os.environ.get("NDRCHST_SESSION_SECRET"):
+            logging.getLogger("ndrchst.public").warning(
+                "NDRCHST_SESSION_SECRET is unset — using a random per-process "
+                "secret; all wallet logins will drop on restart. Set it in the "
+                "service EnvironmentFile to persist sessions.")
         conn_holder["conn"] = connect(db_path or DEFAULT_DB_PATH)
         try:
             yield
@@ -242,6 +251,30 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         import os
         downloads_base = os.environ.get("NDRCHST_PILOT_DOWNLOADS_BASE", "")
         return HTMLResponse(render_play(_play_servers(), downloads_base=downloads_base))
+
+    @app.get("/ranks", response_class=HTMLResponse)
+    def ranks() -> HTMLResponse:
+        """Public rank surface: the tier ladder + a leaderboard of linked
+        holders. Reads the stored snapshot (refreshed admin-side), not live
+        chain — so loading the page never fans out RPC calls."""
+        tier_names = {t.key: t.name for t in wallet.DEFAULT_TIERS}
+        tiers = [
+            {"key": t.key, "name": t.name, "min_pct": t.min_pct}
+            for t in wallet.DEFAULT_TIERS
+        ]
+        holders = [
+            {
+                "display": wallet.abbreviate(link.wallet),
+                "mc_name": link.mc_name,
+                "tier": link.tier,
+                "tier_name": tier_names.get(link.tier) if link.tier else None,
+                "holdings_pct": link.holdings_pct,
+            }
+            for link in wl_store.list_all(_conn())
+            if link.holdings_pct and link.holdings_pct > 0
+        ]
+        holders.sort(key=lambda h: h["holdings_pct"], reverse=True)
+        return HTMLResponse(render_ranks(holders, tiers))
 
     @app.get("/servers")
     def list_servers() -> list[dict]:

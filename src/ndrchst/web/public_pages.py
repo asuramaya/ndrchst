@@ -106,6 +106,14 @@ nav.top .links a.active,nav.top .links a:hover{color:var(--fg)}
 .rankcard .row{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 .rankcard .big{font-size:1.3rem;font-weight:700}
 .rankcard .pct{color:var(--fg2);font-size:.9rem}
+.pill{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:#052e16;
+  background:var(--accent);border-radius:999px;padding:.18rem .55rem;font-weight:700;white-space:nowrap}
+.pill.none{background:var(--bg3);color:var(--fg2)}
+.ladder .feature{display:flex;align-items:baseline;justify-content:space-between;gap:.6rem}
+.ladder .feature h3{margin:0}
+.ladder .thr{color:var(--fg2);font-size:.82rem;font-family:'JetBrains Mono',ui-monospace,monospace}
+.rankno{font-family:'JetBrains Mono',ui-monospace,monospace;color:var(--muted);font-size:.9rem;
+  min-width:2.2rem;text-align:right}
 footer{padding:2.5rem 0 3rem;color:var(--muted);font-size:.82rem;border-top:1px solid var(--border)}
 """
 
@@ -188,6 +196,7 @@ def _shell(title: str, body: str, *, active: str) -> str:
         '<div class="links">'
         f'<a href="/"{cls("home")}>Home</a>'
         f'<a href="/play"{cls("play")}>Play</a>'
+        f'<a href="/ranks"{cls("ranks")}>Ranks</a>'
         '<button id="wallet-connect" class="wbtn">Connect Wallet</button>'
         '<span id="wallet-chip" class="wchip">'
         '<span id="wallet-addr" class="mono"></span>'
@@ -405,3 +414,67 @@ def render_play(servers: list[dict], *, downloads_base: str = "") -> str:
 </script>
 """
     return _shell("ndrchst — play", body, active="play")
+
+
+def _fmt_threshold(min_pct: float) -> str:
+    if min_pct <= 0:
+        return "any holdings"
+    # Trim trailing zeros: 0.10 -> 0.1, 2.50 -> 2.5
+    s = f"{min_pct:g}"
+    return f"≥ {s}% of supply"
+
+
+def render_ranks(holders: list[dict], tiers: list[dict]) -> str:
+    """tiers: list of {key, name, min_pct} ascending. holders: list of
+    {display, mc_name, tier, tier_name, holdings_pct} sorted by holdings desc."""
+    ladder = "".join(
+        '<div class="feature">'
+        f'<h3>{html.escape(t["name"])}</h3>'
+        f'<span class="thr">{_fmt_threshold(t["min_pct"])}</span>'
+        "</div>"
+        for t in reversed(tiers)  # show the top tier first
+    )
+
+    rows = []
+    if not holders:
+        rows.append(
+            '<div class="empty">No ranked holders yet — connect a wallet to be the first.</div>')
+    for i, h in enumerate(holders, start=1):
+        tier_name = h.get("tier_name") or "No rank"
+        pill_cls = "pill" if h.get("tier") else "pill none"
+        rows.append(
+            '<div class="server">'
+            '<div class="right" style="gap:.9rem">'
+            f'<span class="rankno">#{i}</span>'
+            "<div>"
+            f'<div class="name mono">{html.escape(h["display"])}</div>'
+            f'<div class="meta mono">in-game {html.escape(h["mc_name"])}</div>'
+            "</div></div>"
+            '<div class="right">'
+            f'<span class="{pill_cls}">{html.escape(tier_name)}</span>'
+            f'<span class="meta mono">{h.get("holdings_pct", 0.0):.4f}%</span>'
+            "</div></div>"
+        )
+
+    body = f"""
+<section class="hero" style="padding:3rem 0 1rem">
+  <span class="eyebrow">$NDRCHST · ranks</span>
+  <h1 style="font-size:2.1rem">Holdings are rank</h1>
+  <p class="lede">Your tier is your share of $NDRCHST supply, read straight from the chain.
+     Hold more, rank up — both here and in-game.</p>
+</section>
+
+<section class="section" style="border-top:none;padding-top:0">
+  <h2>Tiers</h2>
+  <div class="features ladder">{ladder}</div>
+</section>
+
+<section class="section">
+  <h2>Holders</h2>
+  {''.join(rows)}
+</section>
+
+<footer>Ranks track the chain. Buys and sells are reflected the next time holdings are
+  refreshed.</footer>
+"""
+    return _shell("ndrchst — ranks", body, active="ranks")

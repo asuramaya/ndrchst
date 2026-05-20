@@ -46,4 +46,9 @@ class Server:
     # User-supplied container env vars as "KEY=VALUE" lines. Merged on top of
     # the runtime-required env (EULA, LD_LIBRARY_PATH).
     env_vars: str | None = None
+    # CurseForge client-pack coordinates for modpack servers. When set, the
+    # pilot build resolves these to a CF CDN URL for the pack's overrides/
+    # instead of the box re-hosting the ~200MB pack zip.
+    cf_project_id: int | None = None
+    cf_file_id: int | None = None
     created_at: datetime = field(default_factory=_now)

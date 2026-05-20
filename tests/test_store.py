@@ -70,3 +70,16 @@ def test_delete(tmp_path: Path):
     srv_store.insert(conn, _make())
     srv_store.delete(conn, "abc")
     assert srv_store.get(conn, "abc") is None
+
+
+def test_cf_pack_pin_round_trip(tmp_path: Path):
+    conn = connect(tmp_path / "t.db")
+    srv_store.insert(conn, _make())
+    assert srv_store.get(conn, "abc").cf_project_id is None
+    srv_store.set_cf_pack(conn, "abc", 925200, 8091114)
+    s = srv_store.get(conn, "abc")
+    assert s.cf_project_id == 925200
+    assert s.cf_file_id == 8091114
+    # clearing the pin
+    srv_store.set_cf_pack(conn, "abc", None, None)
+    assert srv_store.get(conn, "abc").cf_project_id is None

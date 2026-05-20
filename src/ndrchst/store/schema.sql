@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS servers (
     container_id        TEXT,
     cross_play          INTEGER NOT NULL DEFAULT 0,
     bedrock_bridge_port INTEGER,
+    cf_project_id       INTEGER,
+    cf_file_id          INTEGER,
     created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

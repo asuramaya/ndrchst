@@ -35,6 +35,7 @@ import json
 import logging
 import re
 import shutil
+import urllib.parse
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -235,6 +236,19 @@ async def fetch_filename(
             f"the modpack manifest is out of date)"
         )
     return name
+
+
+async def pack_cdn_url(
+    client: httpx.AsyncClient, project_id: int, file_id: int,
+) -> str:
+    """Public CF CDN URL for a *pack* file (same `_cdn_url` construction as
+    mod jars — it bypasses CF's download-disabled flag). The filename is
+    fetched live so the URL tracks the pack: pin the fileId, re-resolve to
+    stay synced when the pack updates. Spaces are percent-encoded so the
+    result is fetch-ready (pack filenames like "All the Mods 10-7.0.zip"
+    have spaces; mod jars don't, which is why `_cdn_url` doesn't quote)."""
+    filename = await fetch_filename(client, project_id, file_id)
+    return _cdn_url(file_id, urllib.parse.quote(filename))
 
 
 async def download_mod(

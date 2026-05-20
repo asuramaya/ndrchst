@@ -465,6 +465,79 @@ def test_regenerate_pilot_rebuilds_bundle_with_current_env(app_with_docker, tmp_
             pilot_mod.PILOTS_ROOT_DEFAULT = original_root
 
 
+def test_regenerate_pilot_pins_cf_pack_and_bakes_cdn_url(
+    app_with_docker, tmp_path, monkeypatch,
+):
+    """Passing cf_project_id + cf_file_id pins the pack and bakes a CF CDN
+    URL into the pilot config — the box re-hosts no 200MB pack zip. The
+    filename is resolved live (mocked here) so the URL stays synced."""
+    async def fake_fetch_filename(client, pid, fid):
+        assert (pid, fid) == (925200, 8091114)
+        return "All the Mods 10-7.0.zip"
+    monkeypatch.setattr(
+        "ndrchst.runtime.curseforge.fetch_filename", fake_fetch_filename)
+
+    with TestClient(app_with_docker) as client:
+        st: AppState = app_with_docker.state.ndrchst
+        pilots_root = tmp_path / "pilots"
+        st.lifecycle = Lifecycle(
+            Docker(client=FakeClient()), st.conn,
+            servers_root=tmp_path / "servers",
+            public_host="mc.ndrchst.com", edge_url="https://play.ndrchst.com",
+        )
+        import ndrchst.runtime.pilot as pilot_mod
+        original_root = pilot_mod.PILOTS_ROOT_DEFAULT
+        pilot_mod.PILOTS_ROOT_DEFAULT = pilots_root
+        try:
+            r = client.post("/servers", data={
+                "name": "Packed", "platform_id": "paper",
+                "version": "1.21.1", "port": "25572", "memory_mb": "4096",
+            }, headers={"HX-Request": "true"})
+            assert r.status_code == 200, r.text
+            sid = next(s["id"] for s in client.get("/api/servers").json()
+                       if s["name"] == "Packed")
+
+            r = client.post(f"/servers/{sid}/pilot/regenerate", data={
+                "cf_project_id": "925200", "cf_file_id": "8091114"})
+            assert r.status_code == 200, r.text
+
+            import json
+            cfg = json.loads((pilots_root / sid / "config.json").read_text())
+            assert cfg["modpack_url"] == (
+                "https://edge.forgecdn.net/files/8091/114/"
+                "All%20the%20Mods%2010-7.0.zip"
+            )
+            # IDs are persisted so a later rebuild re-resolves (stays synced).
+            from ndrchst.store import servers as srv_store
+            s = srv_store.get(st.conn, sid)
+            assert s.cf_project_id == 925200
+            assert s.cf_file_id == 8091114
+        finally:
+            pilot_mod.PILOTS_ROOT_DEFAULT = original_root
+
+
+def test_wallets_refresh_recomputes_tiers(app_with_docker, monkeypatch):
+    """POST /wallets/refresh re-reads holdings (stubbed) and recomputes tiers
+    for every linked wallet, persisting the new rank."""
+    from ndrchst.store import wallet_links as wl
+    monkeypatch.setattr(
+        "ndrchst.runtime.solana.holdings_pct", lambda w, **k: 0.2)  # -> bronze
+    with TestClient(app_with_docker) as client:
+        conn = app_with_docker.state.ndrchst.conn
+        wl.upsert(conn, "WALLETA", "WALLET_A", "whale", 6.0)
+        r = client.post("/wallets/refresh")
+        assert r.status_code == 200
+        assert "1 tier change" in r.text
+        assert wl.get(conn, "WALLETA").tier == "bronze"
+
+
+def test_wallets_refresh_empty(app_with_docker):
+    with TestClient(app_with_docker) as client:
+        r = client.post("/wallets/refresh")
+        assert r.status_code == 200
+        assert "No linked wallets" in r.text
+
+
 def test_regenerate_pilot_bedrock_rejected(app_with_docker, tmp_path):
     """Bedrock servers have no pilot bundle; the route must 400."""
     with TestClient(app_with_docker) as client:

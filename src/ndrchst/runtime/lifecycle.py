@@ -618,6 +618,35 @@ class Lifecycle:
         server.status = ServerStatus.STOPPED
         return server
 
+    def set_modpack_pack(
+        self, server_id: str, project_id: int | None, file_id: int | None,
+    ) -> None:
+        """Pin (or clear) this server's CurseForge client-pack coordinates.
+        The pilot build resolves these to a CF CDN URL so the box never
+        re-hosts the ~200MB pack zip."""
+        self._must_get(server_id)
+        srv_store.set_cf_pack(self._conn, server_id, project_id, file_id)
+
+    async def modpack_cdn_url(self, server_id: str) -> str | None:
+        """Resolve the CF CDN URL for this server's pinned client pack, or
+        None if no pack is pinned. The filename is fetched live from CF so
+        the URL tracks the pack — re-resolve (rebuild the pilot) to stay
+        synced when the operator bumps the pinned fileId."""
+        import httpx
+
+        from . import curseforge as cf
+
+        server = self._must_get(server_id)
+        if server.cf_project_id is None or server.cf_file_id is None:
+            return None
+        async with httpx.AsyncClient(
+            timeout=30.0, follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (ndrchst)"},
+        ) as client:
+            return await cf.pack_cdn_url(
+                client, server.cf_project_id, server.cf_file_id,
+            )
+
     def regenerate_pilot(
         self,
         server_id: str,

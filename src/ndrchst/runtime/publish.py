@@ -1,15 +1,20 @@
 """Push a server's pilot artifacts + the public pages to Cloudflare R2.
 
 This moves distribution off the residential box: once published, clients
-fetch config/manifest/mod-index/modpack/pilot.zip and the play/landing
-pages from Cloudflare's edge instead of the box's uplink. The box only
-does the one-time outbound upload per change.
+fetch config/manifest/mod-index/pilot.zip and the play/landing pages from
+Cloudflare's edge instead of the box's uplink. The box only does the
+one-time outbound upload per change.
+
+The big modpack pack zip (~200MB of static overrides art) is NOT hosted by
+us — the pilot pulls it straight from CurseForge's CDN (see
+Lifecycle.modpack_cdn_url). That kept the box's residential uplink from
+choking on a 200MB atomic PUT.
 
 Two modes:
   - light (default): the small, frequently-changing pieces — mods index,
     per-server json, the substitution jars, and the rendered pages.
-  - heavy: also the big blobs (modpack.zip, pilot.zip), which change
-    rarely and are slow to push over the box's uplink.
+  - heavy: also pilot.zip, which changes rarely and is slow to push over
+    the box's uplink.
 """
 from __future__ import annotations
 
@@ -99,7 +104,11 @@ def publish_server(
             missing.append(str(idx))
 
         if heavy:
-            put_file(pdir / "modpack.zip", f"pilot/{sid}/modpack.zip", "application/zip", _NO_CACHE)
+            # NOTE: the per-server modpack.zip is intentionally NOT pushed.
+            # It's ~200MB of static ATM10 overrides art that the pilot now
+            # pulls straight from CurseForge's CDN (see modpack_cdn_url); the
+            # box hosting it was the wrong shape (residential uplink, repeated
+            # WriteTimeouts). pilot.zip is small and changes with the source.
             from .pilot import bundle_path
             bp = bundle_path(sid)
             if bp is not None:

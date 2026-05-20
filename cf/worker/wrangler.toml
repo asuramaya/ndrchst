@@ -1,11 +1,14 @@
-# Cloudflare Worker that serves the ndrchst public surface from R2.
+# Cloudflare Worker that serves the ndrchst public surface from R2 and proxies
+# the dynamic auth/pairing endpoints back to the box.
 #
 #   play.ndrchst.com/*  → play page + /pilot/<sid>/* artifacts (from R2)
-#   www.ndrchst.com/*   → marketing landing
+#   www.ndrchst.com/*   → marketing landing (from R2)
+#   /auth/* /me /pilot/auth/* /link → proxied to ORIGIN_BASE (the box)
 #
 # The box publishes index.html / play.html / servers.json / pilot/<sid>/*
-# into the bucket (see src/ndrchst/runtime/publish.py); this Worker just
-# maps URLs to R2 keys. Deploy: `wrangler deploy` (from this dir).
+# into the bucket (see src/ndrchst/runtime/publish.py); this Worker maps
+# static URLs to R2 keys and forwards the dynamic endpoints to the box's own
+# tunnel hostname. Deploy: `wrangler deploy` (from this dir).
 #
 # Top-level keys (incl. `routes`) MUST come before the [[r2_buckets]] table —
 # TOML otherwise parses them as fields of that table.
@@ -15,13 +18,31 @@ main = "src/worker.js"
 compatibility_date = "2024-11-01"
 
 # Public hostnames. Requires the zone `ndrchst.com` on this Cloudflare account.
-# CUT OVER ONLY AFTER modpack.zip is published to R2 — a premature cutover
-# would 404 client first-installs. Until then, `wrangler deploy` lands on the
-# workers.dev URL; comment these out for a no-cutover validation deploy.
+#
+# CUTOVER PRECONDITIONS (both now satisfiable):
+#   1. The static pages + per-server artifacts are in R2 (light publish). The
+#      big modpack.zip is intentionally NOT in R2 anymore — the pilot pulls the
+#      pack from CurseForge's CDN (see Lifecycle.modpack_cdn_url), so it's no
+#      longer a cutover blocker.
+#   2. ORIGIN_BASE below points at a tunnel hostname that still routes to the
+#      box's public app (:8081), SEPARATE from play/www (which now hit this
+#      Worker). Without it the dynamic auth endpoints 503.
+#
+# Until ready, comment these two routes out: `wrangler deploy` then lands only
+# on the workers.dev URL for a no-cutover validation deploy.
 routes = [
   { pattern = "play.ndrchst.com/*", zone_name = "ndrchst.com" },
   { pattern = "www.ndrchst.com/*", zone_name = "ndrchst.com" },
 ]
+
+[vars]
+# Box origin for the DYNAMIC endpoints (wallet auth + pilot pairing). Set this
+# to the Cloudflare Tunnel hostname that fronts the box's public app on :8081 —
+# e.g. "https://origin.ndrchst.com". This MUST be a different hostname from
+# play/www (those resolve to this Worker now); create a tunnel ingress rule
+# mapping it to http://127.0.0.1:8081 on the box. Leave blank to make the auth
+# endpoints return 503 (static surface still works).
+ORIGIN_BASE = ""
 
 [[r2_buckets]]
 binding = "DL"

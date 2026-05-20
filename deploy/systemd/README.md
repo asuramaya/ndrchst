@@ -39,6 +39,25 @@ sudo systemctl restart user@$(id -u).service
   - `NDRCHST_EDGE_URL` — HTTPS base of the public surface (e.g.
     `https://play.ndrchst.com`). Surfaced in the pilot bundle README.
 
+`ndrchst-public.service` reads `~/.config/ndrchst/public.env` (optional, chmod
+600 — secrets never live in the repo or the unit file). Set at least:
+
+  - `NDRCHST_SESSION_SECRET` — HMAC key for wallet session cookies. **If unset,
+    a random per-process secret is used and every restart logs out all wallets.**
+    Generate once and persist:
+
+    ```bash
+    install -m 700 -d ~/.config/ndrchst
+    printf 'NDRCHST_SESSION_SECRET=%s\n' "$(openssl rand -hex 32)" \
+      > ~/.config/ndrchst/public.env
+    chmod 600 ~/.config/ndrchst/public.env
+    systemctl --user restart ndrchst-public.service
+    ```
+
+  Optional in the same file: `NDRCHST_SOLANA_RPC` (custom RPC endpoint),
+  `NDRCHST_TOKEN_MINT` (override the $NDRCHST mint), `NDRCHST_RANK_CMD`
+  (RCON rank template, e.g. `lp user {name} parent set {tier}`).
+
 To change them: edit the unit, `daemon-reload`, then restart. Existing
 pilot bundles can be regenerated without recreating the server:
 

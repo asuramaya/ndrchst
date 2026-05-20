@@ -206,6 +206,20 @@ async def test_fetch_filename_404_raises():
     await client.aclose()
 
 
+async def test_pack_cdn_url_resolves_and_encodes_spaces():
+    # ATM10: project 925200, file 8091114 → filename has spaces, which must
+    # be percent-encoded so the URL is fetch-ready from CF's CDN.
+    h = _cf_handler(names={(925200, 8091114): "All the Mods 10-7.0.zip"},
+                    jars={})
+    client = httpx.AsyncClient(transport=httpx.MockTransport(h))
+    url = await cf.pack_cdn_url(client, 925200, 8091114)
+    assert url == (
+        "https://edge.forgecdn.net/files/8091/114/"
+        "All%20the%20Mods%2010-7.0.zip"
+    )
+    await client.aclose()
+
+
 async def test_download_mod_writes_jar(tmp_path: Path):
     h = _cf_handler(
         names={(100, 7471280): "kotlinforforge-5.11.0-all.jar"},

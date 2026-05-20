@@ -43,6 +43,8 @@ _ADDITIVE_COLUMNS = (
     ("servers", "rcon_password", "TEXT"),
     ("servers", "extra_jvm_flags", "TEXT"),
     ("servers", "env_vars", "TEXT"),
+    ("servers", "cf_project_id", "INTEGER"),
+    ("servers", "cf_file_id", "INTEGER"),
 )
 
 

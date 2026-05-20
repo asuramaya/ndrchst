@@ -89,6 +89,30 @@ def test_play_renders_html_with_download_link(tmp_path: Path):
         assert "bedrock 19150/udp" in r.text
 
 
+def test_ranks_renders_ladder_and_holders(tmp_path: Path):
+    from ndrchst.store import wallet_links as wl
+    db = tmp_path / "t.db"
+    conn = connect(db)
+    wl.upsert(conn, "EUr2QnpmavMw51JiFYeTRnUywY7mPAtouzyY2P21pump",
+              "EUr2Qn_pump", "gold", 1.25)
+    wl.upsert(conn, "SoMeOtherWalletAddrxxxxxxxxxxxxxxxxxxxxxx",
+              "SoMeOt_xxxx", None, 0.0)  # no holdings → excluded from board
+    conn.close()
+
+    app = create_public_app(db_path=db)
+    with TestClient(app) as c:
+        r = c.get("/ranks")
+        assert r.status_code == 200
+        # Tier ladder is always present.
+        for name in ("Holder", "Bronze", "Silver", "Gold", "Diamond", "Whale"):
+            assert name in r.text
+        # The gold holder shows up; the zero-holdings wallet does not.
+        assert "EUr2…pump" in r.text
+        assert "1.2500%" in r.text
+        assert "SoMeOt_xxxx" not in r.text
+        assert 'href="/ranks"' in r.text  # nav link present
+
+
 def test_download_pilot_404_when_no_bundle(tmp_path: Path):
     db = tmp_path / "t.db"
     _seed_server(db)

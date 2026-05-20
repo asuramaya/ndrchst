@@ -14,6 +14,8 @@ def _row_to_server(r: sqlite3.Row) -> Server:
     rcon_password = None
     extra_jvm_flags = None
     env_vars = None
+    cf_project_id = None
+    cf_file_id = None
     with contextlib.suppress(IndexError, KeyError):
         bedrock_bridge = r["bedrock_bridge_port"]
     with contextlib.suppress(IndexError, KeyError):
@@ -24,6 +26,10 @@ def _row_to_server(r: sqlite3.Row) -> Server:
         extra_jvm_flags = r["extra_jvm_flags"]
     with contextlib.suppress(IndexError, KeyError):
         env_vars = r["env_vars"]
+    with contextlib.suppress(IndexError, KeyError):
+        cf_project_id = r["cf_project_id"]
+    with contextlib.suppress(IndexError, KeyError):
+        cf_file_id = r["cf_file_id"]
     return Server(
         id=r["id"],
         name=r["name"],
@@ -40,6 +46,8 @@ def _row_to_server(r: sqlite3.Row) -> Server:
         rcon_password=rcon_password,
         extra_jvm_flags=extra_jvm_flags,
         env_vars=env_vars,
+        cf_project_id=cf_project_id,
+        cf_file_id=cf_file_id,
         created_at=datetime.fromisoformat(r["created_at"]),
     )
 
@@ -50,8 +58,8 @@ def insert(conn: sqlite3.Connection, s: Server) -> None:
             (id, name, platform_id, family, version, port, memory_mb,
              status, container_id, cross_play, bedrock_bridge_port,
              rcon_port, rcon_password, extra_jvm_flags, env_vars,
-             created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             cf_project_id, cf_file_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             s.id,
             s.name,
@@ -68,6 +76,8 @@ def insert(conn: sqlite3.Connection, s: Server) -> None:
             s.rcon_password,
             s.extra_jvm_flags,
             s.env_vars,
+            s.cf_project_id,
+            s.cf_file_id,
             s.created_at.isoformat(),
         ),
     )
@@ -113,6 +123,20 @@ def update_config(
         "UPDATE servers SET memory_mb = ?, extra_jvm_flags = ?, env_vars = ? "
         "WHERE id = ?",
         (memory_mb, extra_jvm_flags, env_vars, server_id),
+    )
+
+
+def set_cf_pack(
+    conn: sqlite3.Connection,
+    server_id: str,
+    project_id: int | None,
+    file_id: int | None,
+) -> None:
+    """Pin (or clear) the CurseForge client-pack coordinates used to build
+    the pilot's modpack CDN URL."""
+    conn.execute(
+        "UPDATE servers SET cf_project_id = ?, cf_file_id = ? WHERE id = ?",
+        (project_id, file_id, server_id),
     )
 
 
