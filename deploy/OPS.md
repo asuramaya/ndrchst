@@ -64,6 +64,17 @@ Notes:
 - **DB migrations auto-apply on restart** (`store/db.py:_apply_additive_migrations`,
   additive `ALTER TABLE ADD COLUMN`). No manual migration step. Just ship
   `db.py` + `schema.sql` and restart.
+- **`regenerate` + `r2-publish` are ADMIN (:8080) endpoints.** So changes to
+  `runtime/pilot.py` (bundle build), `runtime/publish.py`, or anything those
+  import only take effect after **`ndrchst-admin`** is restarted — restarting
+  only `ndrchst-public` will run the *old* code and silently ship a stale
+  bundle. Restart both, then regenerate + publish. (Got bitten: a themed-asset
+  bundle came out missing its assets because admin still had old `pilot.py`.)
+- **Game/UI assets are gitignored.** `src/ndrchst/web/static/game/` and
+  `pilot-client/src/ndrchst_pilot/assets/` are built by
+  `scripts/build_game_assets.py` (not committed). rsync both dirs to the box;
+  the box serves `/game` (StaticFiles) and `publish.py` uploads them to R2,
+  and `build_bundle` folds the pilot assets into `pilot.zip`.
 - **Pilot-client drift:** the box's `pilot-client/` can lag dev. Pilot *bundles*
   are built from the box's copy, so if you need fresh bundles, rsync
   `pilot-client/` too and regenerate (below).

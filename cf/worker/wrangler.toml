@@ -33,6 +33,7 @@ compatibility_date = "2024-11-01"
 routes = [
   { pattern = "play.ndrchst.com/*", zone_name = "ndrchst.com" },
   { pattern = "www.ndrchst.com/*", zone_name = "ndrchst.com" },
+  { pattern = "ndrchst.com/*", zone_name = "ndrchst.com" },
 ]
 
 [vars]

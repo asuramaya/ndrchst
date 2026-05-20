@@ -45,6 +45,13 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // Canonical marketing host is the apex (ndrchst.com); www 301s to it so we
+    // don't serve duplicate landings. play.ndrchst.com stays the app + the
+    // pilot's API/cookie host (never redirected).
+    if (url.hostname === "www.ndrchst.com") {
+      return Response.redirect("https://ndrchst.com" + path + url.search, 301);
+    }
+
     if (path === "/healthz") {
       return new Response("ok", { headers: { "content-type": "text/plain" } });
     }

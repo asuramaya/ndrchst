@@ -76,6 +76,8 @@ nav.top .links a.active,nav.top .links a:hover{color:var(--fg)}
   border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;
   backdrop-filter:blur(3px);transition:border-color .15s,box-shadow .15s}
 .feature:hover{border-color:rgba(153,69,255,.55);box-shadow:0 0 24px rgba(153,69,255,.14)}
+a.feature{color:var(--fg);text-decoration:none;display:block}
+a.feature:hover{color:var(--fg)}
 .feature h3{margin:0 0 .5rem;font-size:1.02rem}
 .feature p{margin:0;color:var(--fg2);font-size:.9rem;line-height:1.5}
 .section{padding:2.5rem 0;border-top:1px solid var(--border)}
@@ -267,16 +269,37 @@ def _shell(title: str, body: str, *, active: str) -> str:
     )
 
 
+# Tiers teaser for the landing — one representative reward icon per tier.
+_TIER_TEASER = [
+    ("Holder", "diamond", "any holdings"),
+    ("Bronze", "inferium_essence", "≥ 0.1%"),
+    ("Silver", "allthemodium_ingot", "≥ 0.5%"),
+    ("Gold", "vibranium_ingot", "≥ 1%"),
+    ("Diamond", "unobtainium_ingot", "≥ 2.5%"),
+    ("Whale", "nether_star", "≥ 5%"),
+]
+
+
 def render_landing(*, play_url: str = "/play") -> str:
     play = html.escape(play_url, quote=True)
+    teaser = "".join(
+        '<a class="feature" href="/ranks">'
+        '<div class="lrow">'
+        f'<h3>{name}</h3><span class="thr">{thr}</span></div>'
+        f'<div class="drops"><img class="pixel" src="/game/items/{icon}.png" alt=""></div>'
+        "</a>"
+        for name, icon, thr in _TIER_TEASER
+    )
     body = f"""
 <section class="hero">
   <img class="hero-orb" src="/game/decor/end_crystal.png" alt="">
-  <span class="eyebrow">$NDRCHST · on Solana</span>
-  <h1>Connect your wallet. Play. Rank up.</h1>
-  <p class="lede">A Minecraft server where your wallet is your login and your holdings
-     are your rank.</p>
+  <span class="eyebrow">$NDRCHST · modded Minecraft on Solana</span>
+  <h1>Your wallet is your login.<br>Your holdings are your rank.</h1>
+  <p class="lede">A modded Minecraft server gated by $NDRCHST. Sign in with your Solana
+     wallet, grab a launcher that's already linked, and press Play — your tier, ranks
+     and daily rewards follow you straight in-game.</p>
   <a class="cta" href="{play}">Play now →</a>
+  <a class="cta ghost" href="/ranks">Explore the ranks</a>
 </section>
 
 <div id="rankcard" class="rankcard">
@@ -285,21 +308,49 @@ def render_landing(*, play_url: str = "/play") -> str:
     In-game name <span class="mono" id="rc-name" style="color:var(--fg)"></span></p>
 </div>
 
-<div class="features">
-  <div class="feature"><h3>One wallet, everywhere</h3>
-    <p>Sign in once. The same identity carries the site, the launcher, and the server.</p></div>
-  <div class="feature"><h3>Holdings are rank</h3>
-    <p>Your tier is your share of $NDRCHST supply — read from the chain, both ways.</p></div>
-  <div class="feature"><h3>A stack you own</h3>
-    <p>Custom launcher, private edge, your server. The token sits on real infrastructure.</p></div>
-</div>
+<section class="section" style="border-top:none;padding-top:1rem">
+  <h2>How it works</h2>
+  <div class="features">
+    <div class="feature"><div class="num">STEP 01</div><h3>Connect your wallet</h3>
+      <p>Sign one message in Phantom or Solflare. No seed phrase leaves your wallet,
+         no deposit, no account to make.</p></div>
+    <div class="feature"><div class="num">STEP 02</div><h3>Download your pilot</h3>
+      <p>The launcher arrives already linked to your wallet. It installs the modpack
+         and keeps it in sync — you never touch a config file.</p></div>
+    <div class="feature"><div class="num">STEP 03</div><h3>Press Play</h3>
+      <p>A cryptographic gate verifies your wallet at connect time and drops you in at
+         your rank, with your perks and <code>/daily</code> ready.</p></div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="row" style="display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap">
+    <h2 style="margin:0">Six tiers, read from the chain</h2>
+    <a href="/ranks">See the full ladder →</a>
+  </div>
+  <div class="features ladder" style="margin-top:1.2rem">{teaser}</div>
+</section>
+
+<section class="section">
+  <h2>A stack you actually own</h2>
+  <div class="features">
+    <div class="feature"><h3>One wallet, everywhere</h3>
+      <p>The same identity carries the site, the launcher and the server. Sign in once.</p></div>
+    <div class="feature"><h3>Holdings are rank — both ways</h3>
+      <p>Your tier is your share of $NDRCHST supply, read live from Solana and pushed
+         into the game. Buy in, rank up; the chain is the source of truth.</p></div>
+    <div class="feature"><h3>Open and self-hosted</h3>
+      <p>Custom launcher, private edge, our own server — all open source. No third-party
+         account stands between you and the world.</p></div>
+  </div>
+</section>
 
 <p class="disclaimer">$NDRCHST powers identity and in-game rank. It is not an investment,
    a security, or a promise of financial return.</p>
 
 <footer>ndrchst — on-chain identity and rank for Minecraft.</footer>
 """
-    return _shell("ndrchst — connect your wallet, play, rank up", body, active="home")
+    return _shell("ndrchst — your wallet is your rank in Minecraft", body, active="home")
 
 
 def render_link(*, code: str = "") -> str:
