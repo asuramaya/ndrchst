@@ -333,10 +333,14 @@ async def regenerate_pilot(
     Modpack source: pass ``cf_project_id`` + ``cf_file_id`` to pin a
     CurseForge client pack — they're persisted and resolved to a CF CDN URL
     at build time (the box never re-hosts the ~200MB pack). An explicit
-    ``modpack_url`` still wins as a manual override."""
+    ``modpack_url`` still wins as a manual override. ``neoforge_version`` is
+    likewise persisted, so a later bare regenerate keeps the modloader instead
+    of reverting to vanilla."""
     from ..runtime.pilot import PilotBuildError
     if cf_project_id and cf_file_id:
         lifecycle.set_modpack_pack(server_id, cf_project_id, cf_file_id)
+    if neoforge_version:
+        lifecycle.set_neoforge_version(server_id, neoforge_version)
     if not modpack_url:
         try:
             resolved = await lifecycle.modpack_cdn_url(server_id)

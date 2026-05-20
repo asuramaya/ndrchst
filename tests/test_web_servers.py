@@ -538,6 +538,42 @@ def test_wallets_refresh_empty(app_with_docker):
         assert "No linked wallets" in r.text
 
 
+def test_regenerate_pilot_persists_neoforge_version(app_with_docker, tmp_path):
+    """neoforge_version is persisted, so a later BARE regenerate keeps the
+    modloader baked in (a regression that would otherwise install vanilla)."""
+    with TestClient(app_with_docker) as client:
+        st: AppState = app_with_docker.state.ndrchst
+        pilots_root = tmp_path / "pilots"
+        st.lifecycle = Lifecycle(
+            Docker(client=FakeClient()), st.conn,
+            servers_root=tmp_path / "servers", public_host="mc.ndrchst.com",
+        )
+        import ndrchst.runtime.pilot as pilot_mod
+        original_root = pilot_mod.PILOTS_ROOT_DEFAULT
+        pilot_mod.PILOTS_ROOT_DEFAULT = pilots_root
+        try:
+            r = client.post("/servers", data={
+                "name": "Forged", "platform_id": "paper",
+                "version": "1.21.1", "port": "25573", "memory_mb": "4096",
+            }, headers={"HX-Request": "true"})
+            assert r.status_code == 200, r.text
+            sid = next(s["id"] for s in client.get("/api/servers").json()
+                       if s["name"] == "Forged")
+
+            import json
+            assert client.post(f"/servers/{sid}/pilot/regenerate",
+                               data={"neoforge_version": "21.1.228"}).status_code == 200
+            cfg = json.loads((pilots_root / sid / "config.json").read_text())
+            assert cfg["neoforge_version"] == "21.1.228"
+
+            # Bare regenerate — must NOT drop the modloader.
+            assert client.post(f"/servers/{sid}/pilot/regenerate").status_code == 200
+            cfg = json.loads((pilots_root / sid / "config.json").read_text())
+            assert cfg["neoforge_version"] == "21.1.228"
+        finally:
+            pilot_mod.PILOTS_ROOT_DEFAULT = original_root
+
+
 def test_regenerate_pilot_bedrock_rejected(app_with_docker, tmp_path):
     """Bedrock servers have no pilot bundle; the route must 400."""
     with TestClient(app_with_docker) as client:

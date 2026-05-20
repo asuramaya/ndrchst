@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS servers (
     bedrock_bridge_port INTEGER,
     cf_project_id       INTEGER,
     cf_file_id          INTEGER,
+    neoforge_version    TEXT,
     created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

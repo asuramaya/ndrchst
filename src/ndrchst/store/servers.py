@@ -16,6 +16,7 @@ def _row_to_server(r: sqlite3.Row) -> Server:
     env_vars = None
     cf_project_id = None
     cf_file_id = None
+    neoforge_version = None
     with contextlib.suppress(IndexError, KeyError):
         bedrock_bridge = r["bedrock_bridge_port"]
     with contextlib.suppress(IndexError, KeyError):
@@ -30,6 +31,8 @@ def _row_to_server(r: sqlite3.Row) -> Server:
         cf_project_id = r["cf_project_id"]
     with contextlib.suppress(IndexError, KeyError):
         cf_file_id = r["cf_file_id"]
+    with contextlib.suppress(IndexError, KeyError):
+        neoforge_version = r["neoforge_version"]
     return Server(
         id=r["id"],
         name=r["name"],
@@ -48,6 +51,7 @@ def _row_to_server(r: sqlite3.Row) -> Server:
         env_vars=env_vars,
         cf_project_id=cf_project_id,
         cf_file_id=cf_file_id,
+        neoforge_version=neoforge_version,
         created_at=datetime.fromisoformat(r["created_at"]),
     )
 
@@ -58,8 +62,8 @@ def insert(conn: sqlite3.Connection, s: Server) -> None:
             (id, name, platform_id, family, version, port, memory_mb,
              status, container_id, cross_play, bedrock_bridge_port,
              rcon_port, rcon_password, extra_jvm_flags, env_vars,
-             cf_project_id, cf_file_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             cf_project_id, cf_file_id, neoforge_version, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             s.id,
             s.name,
@@ -78,6 +82,7 @@ def insert(conn: sqlite3.Connection, s: Server) -> None:
             s.env_vars,
             s.cf_project_id,
             s.cf_file_id,
+            s.neoforge_version,
             s.created_at.isoformat(),
         ),
     )
@@ -137,6 +142,16 @@ def set_cf_pack(
     conn.execute(
         "UPDATE servers SET cf_project_id = ?, cf_file_id = ? WHERE id = ?",
         (project_id, file_id, server_id),
+    )
+
+
+def set_neoforge_version(
+    conn: sqlite3.Connection, server_id: str, version: str | None
+) -> None:
+    """Pin (or clear) the NeoForge version the pilot installs for this server."""
+    conn.execute(
+        "UPDATE servers SET neoforge_version = ? WHERE id = ?",
+        (version, server_id),
     )
 
 

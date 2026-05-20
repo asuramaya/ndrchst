@@ -51,4 +51,8 @@ class Server:
     # instead of the box re-hosting the ~200MB pack zip.
     cf_project_id: int | None = None
     cf_file_id: int | None = None
+    # NeoForge version the modpack targets (e.g. "21.1.228"). Persisted so a
+    # pilot rebuild keeps installing the modloader — a bare regenerate without
+    # it would silently fall back to vanilla and fail to join the modded server.
+    neoforge_version: str | None = None
     created_at: datetime = field(default_factory=_now)

@@ -626,6 +626,13 @@ class Lifecycle:
         self._must_get(server_id)
         srv_store.set_cf_pack(self._conn, server_id, project_id, file_id)
 
+    def set_neoforge_version(self, server_id: str, version: str | None) -> None:
+        """Pin (or clear) the NeoForge version the pilot installs. Persisted so
+        a later bare regenerate keeps the modloader instead of reverting to
+        vanilla."""
+        self._must_get(server_id)
+        srv_store.set_neoforge_version(self._conn, server_id, version)
+
     async def modpack_cdn_url(self, server_id: str) -> str | None:
         """Resolve the CF CDN URL for this server's pinned client pack, or
         None if no pack is pinned. The filename is fetched live from CF so
@@ -660,7 +667,9 @@ class Lifecycle:
         ``modpack_url`` and ``neoforge_version`` let callers pin a
         client-side modpack and modloader version for the pilot that may
         not be derivable from the server record alone (server holds the
-        server-pack URL; client wants the client-pack URL)."""
+        server-pack URL; client wants the client-pack URL). When
+        ``neoforge_version`` is empty it falls back to the value persisted on
+        the server, so a bare regenerate keeps installing the modloader."""
         server = self._must_get(server_id)
         if server.family is not Family.JAVA:
             raise LifecycleError("pilot bundles are Java-only")
@@ -670,7 +679,7 @@ class Lifecycle:
             edge_url=self._edge_url,
             tunnel_hostname=self._tunnel_hostname,
             modpack_url=modpack_url,
-            neoforge_version=neoforge_version,
+            neoforge_version=neoforge_version or (server.neoforge_version or ""),
         )
 
     async def stats(self, server_id: str):

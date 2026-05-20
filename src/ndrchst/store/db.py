@@ -45,6 +45,7 @@ _ADDITIVE_COLUMNS = (
     ("servers", "env_vars", "TEXT"),
     ("servers", "cf_project_id", "INTEGER"),
     ("servers", "cf_file_id", "INTEGER"),
+    ("servers", "neoforge_version", "TEXT"),
 )
 
 

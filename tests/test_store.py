@@ -83,3 +83,11 @@ def test_cf_pack_pin_round_trip(tmp_path: Path):
     # clearing the pin
     srv_store.set_cf_pack(conn, "abc", None, None)
     assert srv_store.get(conn, "abc").cf_project_id is None
+
+
+def test_neoforge_version_round_trip(tmp_path: Path):
+    conn = connect(tmp_path / "t.db")
+    srv_store.insert(conn, _make())
+    assert srv_store.get(conn, "abc").neoforge_version is None
+    srv_store.set_neoforge_version(conn, "abc", "21.1.228")
+    assert srv_store.get(conn, "abc").neoforge_version == "21.1.228"
