@@ -8,13 +8,9 @@ one-time outbound upload per change.
 The big modpack pack zip (~200MB of static overrides art) is NOT hosted by
 us — the pilot pulls it straight from CurseForge's CDN (see
 Lifecycle.modpack_cdn_url). That kept the box's residential uplink from
-choking on a 200MB atomic PUT.
-
-Two modes:
-  - light (default): the small, frequently-changing pieces — mods index,
-    per-server json, the substitution jars, and the rendered pages.
-  - heavy: also pilot.zip, which changes rarely and is slow to push over
-    the box's uplink.
+choking on a 200MB atomic PUT. Everything else (pages, per-server json, mods
+index + substitution jars, and the small pilot.zip bundle) ships on every
+publish — none of it is large now that the modpack lives on the CDN.
 """
 from __future__ import annotations
 
@@ -54,7 +50,6 @@ def publish_server(
     java_servers,
     play_url: str = "/play",
     downloads_base: str = "",
-    heavy: bool = False,
 ) -> dict:
     """Upload one server's artifacts + the public pages to R2. Returns a
     summary {uploaded, keys, skipped_missing}."""
@@ -103,16 +98,16 @@ def publish_server(
         else:
             missing.append(str(idx))
 
-        if heavy:
-            # NOTE: the per-server modpack.zip is intentionally NOT pushed.
-            # It's ~200MB of static ATM10 overrides art that the pilot now
-            # pulls straight from CurseForge's CDN (see modpack_cdn_url); the
-            # box hosting it was the wrong shape (residential uplink, repeated
-            # WriteTimeouts). pilot.zip is small and changes with the source.
-            from .pilot import bundle_path
-            bp = bundle_path(sid)
-            if bp is not None:
-                put_file(Path(bp), f"pilot/{sid}/pilot.zip", "application/zip", _NO_CACHE)
+        # Pilot bundle — the launcher source zip the "Download pilot" button
+        # serves. Small now that the modpack comes from CurseForge's CDN (the
+        # ~200MB modpack.zip is intentionally never pushed), so it ships on
+        # every publish rather than being gated behind a "heavy" flag.
+        from .pilot import bundle_path
+        bp = bundle_path(sid)
+        if bp is not None:
+            put_file(Path(bp), f"pilot/{sid}/pilot.zip", "application/zip", _NO_CACHE)
+        else:
+            missing.append(f"{pdir}/pilot.zip")
 
         # Public pages + a machine-readable server list (single source of
         # truth: the same renderers the box's public app uses).

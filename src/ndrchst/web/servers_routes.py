@@ -226,7 +226,7 @@ async def build_mods_index(
     # edge reflects the new index immediately. Best-effort — never fail the
     # rebuild on a publish hiccup.
     try:
-        pub = await lifecycle.publish_to_r2(server_id, heavy=False)
+        pub = await lifecycle.publish_to_r2(server_id)
         if pub.get("published"):
             msg += f" · published {pub.get('uploaded', 0)} objects to R2"
     except Exception as e:
@@ -238,22 +238,17 @@ async def build_mods_index(
 async def r2_publish(
     request: Request,
     server_id: str,
-    heavy: bool = False,
     lifecycle: Lifecycle = Depends(require_lifecycle),
 ) -> HTMLResponse:
-    """Publish pilot artifacts + public pages to Cloudflare R2. `?heavy=true`
-    also pushes the big blobs (modpack.zip, pilot.zip) — slow over the box
-    uplink, so do it when the pack actually changes."""
+    """Publish pilot artifacts (incl. pilot.zip) + public pages to Cloudflare
+    R2. The big modpack is never pushed — the pilot pulls it from CF's CDN."""
     try:
-        result = await lifecycle.publish_to_r2(server_id, heavy=heavy)
+        result = await lifecycle.publish_to_r2(server_id)
     except LifecycleError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     if not result.get("published"):
         return HTMLResponse(f"Not published: {result.get('reason')}")
-    return HTMLResponse(
-        f"Published {result.get('uploaded', 0)} objects to R2"
-        + (" (incl. modpack + pilot.zip)" if heavy else "")
-    )
+    return HTMLResponse(f"Published {result.get('uploaded', 0)} objects to R2")
 
 
 @router.post("/servers/{server_id}/wallets/sync", response_class=HTMLResponse)

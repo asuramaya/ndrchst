@@ -396,11 +396,11 @@ class Lifecycle:
         """Docker engine summary for the System page."""
         return await self._docker.engine_info()
 
-    async def publish_to_r2(self, server_id: str, *, heavy: bool = False) -> dict:
-        """Push this server's pilot artifacts + the public pages to R2 so
-        Cloudflare's edge serves them instead of the box. No-op (and says
-        so) when R2 isn't configured. `heavy` also pushes modpack.zip +
-        pilot.zip (slow over the box uplink; do it when the pack changes)."""
+    async def publish_to_r2(self, server_id: str) -> dict:
+        """Push this server's pilot artifacts (incl. the small pilot.zip) + the
+        public pages to R2 so Cloudflare's edge serves them instead of the box.
+        No-op (and says so) when R2 isn't configured. The big modpack is never
+        pushed — the pilot pulls it from CurseForge's CDN."""
         import asyncio
         import os
 
@@ -419,7 +419,6 @@ class Lifecycle:
             pilots_root=PILOTS_ROOT_DEFAULT, java_servers=java,
             play_url=os.environ.get("NDRCHST_PLAY_URL", "/play"),
             downloads_base=os.environ.get("NDRCHST_PILOT_DOWNLOADS_BASE", ""),
-            heavy=heavy,
         )
         return {"published": True, **summary}
 
