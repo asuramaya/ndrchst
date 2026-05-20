@@ -154,8 +154,9 @@ class Tier:
 
 
 # Rank ladder by % of total supply, ordered ascending; the top tier caps at
-# 5% (holding ≥5% is the highest rank). Override per-deployment via env if
-# the tokenomics change.
+# 5% (holding ≥5% is the highest rank). The floor (`holder`, 0.0) is the base
+# tier everyone lands in — just showing up earns the base daily; tiers climb
+# from there. Override per-deployment via env if the tokenomics change.
 DEFAULT_TIERS: tuple[Tier, ...] = (
     Tier("holder", "Holder", 0.0),
     Tier("bronze", "Bronze", 0.1),
@@ -167,9 +168,10 @@ DEFAULT_TIERS: tuple[Tier, ...] = (
 
 
 def tier_for(pct: float, tiers: tuple[Tier, ...] = DEFAULT_TIERS) -> Tier | None:
-    """Highest tier whose threshold `pct` meets. None if not a holder (pct<=0)."""
-    if pct <= 0:
-        return None
+    """Highest tier whose threshold `pct` meets. Floored at the base tier
+    (`holder`, 0.0), so even a zero-balance wallet gets it — entry is open and
+    everyone earns the base reward. Returns None only if the ladder has no
+    0.0-threshold tier (defensive; the default ladder always does)."""
     chosen: Tier | None = None
     for t in tiers:
         if pct >= t.min_pct:

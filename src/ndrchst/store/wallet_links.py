@@ -14,6 +14,9 @@ class WalletLink:
     mc_name: str
     tier: str | None
     holdings_pct: float
+    snapshot_tier: str | None
+    snapshot_pct: float | None
+    snapshot_at: str | None
     linked_at: str
     synced_at: str | None
 
@@ -21,7 +24,10 @@ class WalletLink:
 def _row(r: sqlite3.Row) -> WalletLink:
     return WalletLink(
         wallet=r["wallet"], mc_name=r["mc_name"], tier=r["tier"],
-        holdings_pct=r["holdings_pct"], linked_at=r["linked_at"], synced_at=r["synced_at"],
+        holdings_pct=r["holdings_pct"],
+        snapshot_tier=r["snapshot_tier"], snapshot_pct=r["snapshot_pct"],
+        snapshot_at=r["snapshot_at"],
+        linked_at=r["linked_at"], synced_at=r["synced_at"],
     )
 
 
@@ -35,6 +41,19 @@ def upsert(conn: sqlite3.Connection, wallet: str, mc_name: str,
              mc_name=excluded.mc_name, tier=excluded.tier,
              holdings_pct=excluded.holdings_pct""",
         (wallet, mc_name, tier, holdings_pct),
+    )
+
+
+def set_snapshot(conn: sqlite3.Connection, wallet: str,
+                 snapshot_tier: str | None, snapshot_pct: float) -> None:
+    """Record the hourly holdings snapshot for a wallet. Distinct from `upsert`
+    (which writes the on-demand latest values) so daily rewards read a tier the
+    user can't refresh on demand — only the hourly job calls this."""
+    conn.execute(
+        """UPDATE wallet_links
+           SET snapshot_tier = ?, snapshot_pct = ?, snapshot_at = CURRENT_TIMESTAMP
+           WHERE wallet = ?""",
+        (snapshot_tier, snapshot_pct, wallet),
     )
 
 

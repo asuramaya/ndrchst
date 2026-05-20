@@ -29,7 +29,7 @@ def test_wallet_links_crud(tmp_path: Path):
 
 
 def _link(wallet: str, name: str, tier: str | None) -> WalletLink:
-    return WalletLink(wallet, name, tier, 0.5, "now", None)
+    return WalletLink(wallet, name, tier, 0.5, tier, 0.5, "now", "now", None)
 
 
 async def test_sync_whitelists_and_ranks():

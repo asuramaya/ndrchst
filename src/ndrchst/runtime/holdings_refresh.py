@@ -53,7 +53,11 @@ def refresh_all_holdings(
             pct = fn(link.wallet)
             tier = wallet.tier_for(pct)
             new_key = tier.key if tier else None
+            # Latest values (display + join-gate rank) AND the hourly snapshot
+            # (the carousel-proof basis for daily rewards) move together here —
+            # this job is the only writer of the snapshot.
             wl.upsert(conn, link.wallet, link.mc_name, new_key, pct)
+            wl.set_snapshot(conn, link.wallet, new_key, pct)
             results.append(RefreshResult(link.wallet, link.tier, new_key, pct))
     finally:
         if client is not None:

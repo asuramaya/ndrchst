@@ -68,8 +68,9 @@ public final class NdrchstAuth {
         if (!(event.getEntity() instanceof ServerPlayer player)) {
             return;
         }
-        // Remember the tier for /daily (in-memory v1).
-        DailyCommand.TIER.put(player.getUUID(), res.tier());
+        // Stash the verified wallet so /daily can ask the box (authoritative
+        // cooldown + snapshot tier); the box, not the mod, holds claim state.
+        DailyCommand.WALLET.put(player.getUUID(), res.wallet());
         try {
             Ranks.apply(player, res.tier());
             LOG.info("[ndrchst-auth] rank {} -> {}", res.tier(),

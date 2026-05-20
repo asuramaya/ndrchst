@@ -11,7 +11,9 @@ Distinct from the admin surface (:8080) so:
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import ipaddress
 import logging
 import os
 import sqlite3
@@ -27,11 +29,15 @@ from .domain import auth_session, device_token, join_token, pilot_pairing, walle
 from .domain.models import Family
 from .logging_setup import configure as configure_logging
 from .runtime import solana
+from .runtime.holdings_refresh import refresh_all_holdings
 from .runtime.pilot import bundle_path as pilot_bundle_path
+from .store import daily_claims as dc_store
 from .store import servers as srv_store
 from .store import wallet_links as wl_store
 from .store.db import DEFAULT_DB_PATH, connect
 from .web.public_pages import render_landing, render_link, render_play, render_ranks
+
+_SNAPSHOT_INTERVAL = int(os.environ.get("NDRCHST_SNAPSHOT_INTERVAL", "3600"))
 
 _SESSION_COOKIE = "ndrchst_session"
 
@@ -58,8 +64,35 @@ class _DeviceExchangeReq(BaseModel):
     device_token: str  # the pilot's long-lived credential
 
 
+class _DailyClaimReq(BaseModel):
+    wallet: str  # the verified wallet the mod stashed at login
+
+
+class _DailyResetReq(BaseModel):
+    wallet: str
+
+
 def _cookie_secure() -> bool:
     return os.environ.get("NDRCHST_COOKIE_SECURE", "1") != "0"
+
+
+def _is_internal_caller(request: Request) -> bool:
+    """True iff the request came from the box's own container network (the
+    ndrchst-auth mod), not the public internet.
+
+    `origin.ndrchst.com` is a catch-all tunnel to this app, so /join/verify and
+    /daily/* are reachable from the internet. The mod, however, calls in from
+    its Docker container — source IP in the private bridge range (172.16/12,
+    10/8, 192.168/16). The public tunnel arrives via cloudflared on the host →
+    loopback. Holder wallets are public on-chain, so an unauthenticated
+    /daily/claim would let anyone burn every holder's cooldown; gate it to the
+    bridge. Non-IP clients (TestClient) are treated as internal for tests."""
+    host = request.client.host if request.client else ""
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return True  # e.g. TestClient "testclient" — not a public route
+    return ip.is_private and not ip.is_loopback
 
 
 def _site_base() -> str:
@@ -91,6 +124,16 @@ def _verify_signed_or_raise(pubkey: str, message: str, signature_b64: str) -> No
         raise HTTPException(status_code=401, detail="signature verification failed")
 
 
+def _run_snapshot(db_path: Path) -> int:
+    """Refresh + persist the holdings snapshot for every linked wallet on a
+    short-lived connection (called from a worker thread). Returns the count."""
+    conn = connect(db_path)
+    try:
+        return len(refresh_all_holdings(conn))
+    finally:
+        conn.close()
+
+
 def _identity(pubkey: str) -> dict:
     """Public identity view for a wallet: display handle, derived MC name,
     holdings %, and rank tier. Holdings is a live RPC read (0.0 on any miss)."""
@@ -109,6 +152,22 @@ def _identity(pubkey: str) -> dict:
 def create_public_app(*, db_path: Path | None = None) -> FastAPI:
     """Factory. The public app keeps its own SQLite connection (read-only)."""
     conn_holder: dict[str, sqlite3.Connection] = {}
+    _db_path = db_path or DEFAULT_DB_PATH
+    _log = logging.getLogger("ndrchst.public")
+
+    async def _snapshot_loop() -> None:
+        """Re-read every linked wallet's chain holdings on a fixed cadence and
+        persist the hourly snapshot daily rewards read from. Runs on its own
+        connection (the blocking RPC + writes go through to_thread so the event
+        loop isn't stalled)."""
+        while True:
+            await asyncio.sleep(_SNAPSHOT_INTERVAL)
+            try:
+                n = await asyncio.to_thread(_run_snapshot, _db_path)
+                _log.info("holdings snapshot: refreshed %d wallet(s)", n)
+            except Exception:
+                # A flaky RPC or transient DB error must not kill the loop.
+                _log.exception("holdings snapshot failed")
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -117,14 +176,19 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         # secret, auth_session falls back to a random per-process secret —
         # every restart silently invalidates all sessions. Warn loudly.
         if _cookie_secure() and not os.environ.get("NDRCHST_SESSION_SECRET"):
-            logging.getLogger("ndrchst.public").warning(
+            _log.warning(
                 "NDRCHST_SESSION_SECRET is unset — using a random per-process "
                 "secret; all wallet logins will drop on restart. Set it in the "
                 "service EnvironmentFile to persist sessions.")
-        conn_holder["conn"] = connect(db_path or DEFAULT_DB_PATH)
+        conn_holder["conn"] = connect(_db_path)
+        task = asyncio.create_task(_snapshot_loop()) if _SNAPSHOT_INTERVAL > 0 else None
         try:
             yield
         finally:
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
             conn_holder["conn"].close()
             conn_holder.clear()
 
@@ -222,23 +286,27 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         return JSONResponse({"status": "approved", **ident}, headers=_NO_STORE)
 
     @app.post("/join/verify")
-    def join_verify(req: _JoinVerifyReq = Body(...)) -> JSONResponse:
+    def join_verify(request: Request, req: _JoinVerifyReq = Body(...)) -> JSONResponse:
         """Called by the ndrchst-auth server mod at connect time: validate the
-        join token the client presented. Returns the bound identity (with a
-        live-refreshed tier) on success, 401 otherwise. This is the gate — the
-        mod rejects the connection on a non-200."""
+        join token the client presented. Returns the bound identity + rank on
+        success, 401 otherwise. This is the gate — the mod rejects the
+        connection on a non-200. Mod-only (bridge); not a public route."""
+        if not _is_internal_caller(request):
+            raise HTTPException(status_code=403, detail="not an internal caller")
         claims = join_token.verify(req.token)
         if claims is None:
             raise HTTPException(status_code=401, detail="invalid or expired join token")
-        # Refresh the rank from current chain holdings (tier may have moved
-        # since sign-in); identity is otherwise pinned by the signed token.
-        tier = wallet.tier_for(solana.holdings_pct(claims["wallet"]))
+        # Rank from the latest known tier (refreshed at sign-in + hourly), not a
+        # live RPC on the connect path. Identity is pinned by the signed token;
+        # floor to the base tier so a linked wallet is never rankless.
+        link = wl_store.get(_conn(), claims["wallet"])
+        tier_key = link.tier if (link and link.tier) else "holder"
         return JSONResponse(
             {
                 "ok": True,
                 "wallet": claims["wallet"],
                 "mc_name": claims["mc_name"],
-                "tier": tier.key if tier else None,
+                "tier": tier_key,
             },
             headers=_NO_STORE,
         )
@@ -254,6 +322,42 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         ident = _identity(wallet_pk)
         _record_link(ident)
         return JSONResponse(_with_join_token(ident), headers=_NO_STORE)
+
+    @app.post("/daily/claim")
+    def daily_claim(request: Request, req: _DailyClaimReq = Body(...)) -> JSONResponse:
+        """Called by the mod's /daily: enforce the durable 24h cooldown and
+        return the reward tier (the hourly SNAPSHOT tier — not the on-demand
+        latest — so it can't be refreshed mid-session to farm the carousel).
+        Mod-only (bridge); the cooldown is the mutable state we must protect
+        from the public tunnel since holder wallets are on-chain-visible."""
+        if not _is_internal_caller(request):
+            raise HTTPException(status_code=403, detail="not an internal caller")
+        # Snapshot tier, floored to the base so even a brand-new / not-yet-
+        # snapshotted wallet still earns the base daily ("just showing up").
+        link = wl_store.get(_conn(), req.wallet)
+        tier_key = link.snapshot_tier if (link and link.snapshot_tier) else "holder"
+        conn = connect(_db_path)
+        try:
+            ok, seconds_left = dc_store.try_claim(conn, req.wallet)
+        finally:
+            conn.close()
+        return JSONResponse(
+            {"ok": ok, "tier": tier_key, "seconds_left": seconds_left},
+            headers=_NO_STORE,
+        )
+
+    @app.post("/daily/reset")
+    def daily_reset(request: Request, req: _DailyResetReq = Body(...)) -> JSONResponse:
+        """Op escape hatch (mod `/ndrchst daily reset`): clear a wallet's
+        cooldown. Mod-only (bridge)."""
+        if not _is_internal_caller(request):
+            raise HTTPException(status_code=403, detail="not an internal caller")
+        conn = connect(_db_path)
+        try:
+            dc_store.reset(conn, req.wallet)
+        finally:
+            conn.close()
+        return JSONResponse({"ok": True}, headers=_NO_STORE)
 
     @app.get("/me/pilot/{server_id}")
     def me_pilot(server_id: str, request: Request) -> Response:

@@ -35,8 +35,13 @@ def test_refresh_drops_rank_when_sold_out(tmp_path: Path):
     conn = connect(tmp_path / "t.db")
     wl.upsert(conn, "EXHOLDER", "Ex_name", "silver", 0.7)
     results = refresh_all_holdings(conn, holdings_fn=lambda w: 0.0)
-    assert results[0].new_tier is None  # no holdings -> not a holder
-    assert wl.get(conn, "EXHOLDER").tier is None
+    # Selling out drops to the base 'holder' floor, not off the ladder.
+    assert results[0].new_tier == "holder"
+    link = wl.get(conn, "EXHOLDER")
+    assert link.tier == "holder"
+    # The hourly job also writes the carousel-proof snapshot.
+    assert link.snapshot_tier == "holder"
+    assert link.snapshot_at is not None
 
 
 def test_refresh_empty_is_noop(tmp_path: Path):

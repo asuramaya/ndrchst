@@ -100,8 +100,10 @@ def test_abbreviate_and_mc_name():
 
 
 def test_tier_for():
-    assert tier_for(0.0) is None
-    assert tier_for(-1) is None
+    # Floored at the base tier: entry is open, so even 0 holdings earns the
+    # base 'holder' daily; tiers climb from there.
+    assert tier_for(0.0).key == "holder"
+    assert tier_for(-1) is None             # negatives never occur (holdings >= 0)
     assert tier_for(0.05).key == "holder"   # >0 but below bronze
     assert tier_for(0.2).key == "bronze"    # >=0.1
     assert tier_for(0.7).key == "silver"    # >=0.5

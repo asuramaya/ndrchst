@@ -144,6 +144,78 @@ def test_me_pilot_bakes_device_token_into_bundle(tmp_path: Path, monkeypatch):
         assert device_token.verify(baked) == "WALLETxyz"
 
 
+def test_internal_caller_guard():
+    """Public-tunnel traffic (loopback via cloudflared) is rejected; the mod's
+    Docker-bridge traffic (and TestClient) is allowed."""
+    from types import SimpleNamespace
+
+    from ndrchst.public import _is_internal_caller
+
+    def req(host):
+        return SimpleNamespace(client=SimpleNamespace(host=host))
+
+    assert _is_internal_caller(req("172.17.0.5")) is True   # docker bridge
+    assert _is_internal_caller(req("10.0.0.4")) is True      # private
+    assert _is_internal_caller(req("testclient")) is True    # TestClient
+    assert _is_internal_caller(req("127.0.0.1")) is False    # tunnel/loopback
+    assert _is_internal_caller(req("8.8.8.8")) is False       # public internet
+
+
+def test_join_verify_uses_snapshot_floor_tier(tmp_path: Path):
+    from ndrchst.domain import join_token
+    from ndrchst.store import wallet_links as wl
+    db = tmp_path / "t.db"
+    conn = connect(db)
+    wl.upsert(conn, "GOLDWALLET", "Gold_name", "gold", 1.2)
+    conn.close()
+    app = create_public_app(db_path=db)
+    with TestClient(app) as c:
+        tok = join_token.issue("GOLDWALLET", "Gold_name", "gold")
+        r = c.post("/join/verify", json={"token": tok})
+        assert r.status_code == 200
+        assert r.json()["tier"] == "gold"     # from the stored link, not a live RPC
+        # An unknown (but validly-signed) wallet floors to the base tier.
+        tok2 = join_token.issue("NOLINK", "NoLink_x", None)
+        assert c.post("/join/verify", json={"token": tok2}).json()["tier"] == "holder"
+        # A garbage token is still rejected.
+        assert c.post("/join/verify", json={"token": "nope"}).status_code == 401
+
+
+def test_daily_claim_cooldown_and_snapshot_tier(tmp_path: Path):
+    from ndrchst.store import wallet_links as wl
+    db = tmp_path / "t.db"
+    conn = connect(db)
+    wl.upsert(conn, "WHALEW", "Whale_w", "whale", 6.0)
+    wl.set_snapshot(conn, "WHALEW", "whale", 6.0)  # the hourly snapshot the daily reads
+    conn.close()
+    app = create_public_app(db_path=db)
+    with TestClient(app) as c:
+        r = c.post("/daily/claim", json={"wallet": "WHALEW"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["tier"] == "whale"
+        # Second claim is on cooldown.
+        r2 = c.post("/daily/claim", json={"wallet": "WHALEW"})
+        assert r2.json()["ok"] is False
+        assert r2.json()["seconds_left"] > 0
+        # Op reset clears it.
+        assert c.post("/daily/reset", json={"wallet": "WHALEW"}).status_code == 200
+        assert c.post("/daily/claim", json={"wallet": "WHALEW"}).json()["ok"] is True
+
+
+def test_daily_claim_floors_to_base_without_snapshot(tmp_path: Path):
+    """A wallet that signed in but hasn't been snapshotted yet still earns the
+    base daily — just showing up is rewarded."""
+    db = tmp_path / "t.db"
+    app = create_public_app(db_path=db)
+    with TestClient(app) as c:
+        r = c.post("/daily/claim", json={"wallet": "FRESHWALLET"})
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+        assert r.json()["tier"] == "holder"
+
+
 def test_download_pilot_404_when_no_bundle(tmp_path: Path):
     db = tmp_path / "t.db"
     _seed_server(db)

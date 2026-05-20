@@ -2,8 +2,6 @@ package com.ndrchst.auth;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.context.CommandContext;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -15,20 +13,22 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
 /**
- * `/daily` — explicit, once-per-24h tier reward. Dispenses the player's tier
- * loot table (ndrchst:daily/&lt;tier&gt;) via the vanilla `/loot` command, so the
- * rewards are pure datapack (no economy mod). `/ndrchst daily reset &lt;player&gt;`
- * is the op escape hatch.
+ * `/daily` — explicit, once-per-24h tier reward, dispensed via the vanilla
+ * `/loot` command from the per-tier datapack table (ndrchst:daily/&lt;tier&gt;).
  *
- * v1 keeps the tier + cooldown in memory (set on verified login); they reset on
- * a server restart — fine for v1, persist via SavedData later.
+ * The box is authoritative: it enforces the cooldown (durable across restarts,
+ * keyed by wallet) and returns the reward tier from the hourly holdings
+ * snapshot — so the cooldown survives reboots and the tier can't be refreshed
+ * mid-session to farm a transfer carousel. The mod only stashes each player's
+ * verified wallet at login and asks the box at claim time.
+ *
+ * `/ndrchst daily reset &lt;player&gt;` is the op escape hatch.
  */
 final class DailyCommand {
     private DailyCommand() {}
 
-    static final Map<UUID, String> TIER = new ConcurrentHashMap<>();
-    private static final Map<UUID, Instant> LAST = new ConcurrentHashMap<>();
-    private static final long COOLDOWN_HOURS = 24;
+    /** Verified wallet per player UUID, set at login (NdrchstAuth.onPlayerLogin). */
+    static final Map<UUID, String> WALLET = new ConcurrentHashMap<>();
 
     static void register(CommandDispatcher<CommandSourceStack> d) {
         d.register(Commands.literal("daily").executes(DailyCommand::claim));
@@ -46,30 +46,33 @@ final class DailyCommand {
             src.sendFailure(Component.literal("Only players can claim a daily."));
             return 0;
         }
-        String tier = TIER.get(p.getUUID());
-        if (tier == null) {
+        String wallet = WALLET.get(p.getUUID());
+        if (wallet == null) {
             src.sendFailure(Component.literal(
-                    "ndrchst — hold $NDRCHST and sign in through the launcher to claim a daily."));
+                    "ndrchst — sign in through the launcher to claim a daily."));
             return 0;
         }
-        Instant last = LAST.get(p.getUUID());
-        if (last != null) {
-            long minsLeft = COOLDOWN_HOURS * 60 - Duration.between(last, Instant.now()).toMinutes();
-            if (minsLeft > 0) {
-                long h = minsLeft / 60, m = minsLeft % 60;
-                src.sendSuccess(() -> Component.literal(
-                        "Daily already claimed — come back in " + h + "h " + m + "m."), false);
-                return 0;
-            }
+        DailyClient.ClaimResult r = DailyClient.claim(wallet);
+        if (r == null) {
+            src.sendFailure(Component.literal(
+                    "ndrchst — couldn't reach the server, try again in a moment."));
+            return 0;
+        }
+        if (!r.ok()) {
+            long mins = r.secondsLeft() / 60;
+            long h = mins / 60, m = mins % 60;
+            src.sendSuccess(() -> Component.literal(
+                    "Daily already claimed — come back in " + h + "h " + m + "m."), false);
+            return 0;
         }
         MinecraftServer server = p.getServer();
         if (server == null) {
             return 0;
         }
+        String tier = r.tier();
         server.getCommands().performPrefixedCommand(
                 server.createCommandSourceStack().withSuppressedOutput().withPermission(4),
                 "loot give " + p.getGameProfile().getName() + " loot ndrchst:daily/" + tier);
-        LAST.put(p.getUUID(), Instant.now());
         src.sendSuccess(() -> Component.literal("Claimed your " + tier + " daily reward!"), false);
         return 1;
     }
@@ -77,10 +80,21 @@ final class DailyCommand {
     private static int reset(CommandContext<CommandSourceStack> ctx) {
         try {
             ServerPlayer target = EntityArgument.getPlayer(ctx, "player");
-            LAST.remove(target.getUUID());
-            ctx.getSource().sendSuccess(() -> Component.literal(
-                    "Reset daily cooldown for " + target.getGameProfile().getName()), true);
-            return 1;
+            String wallet = WALLET.get(target.getUUID());
+            if (wallet == null) {
+                ctx.getSource().sendFailure(Component.literal(
+                        "ndrchst — that player hasn't signed in this session."));
+                return 0;
+            }
+            String name = target.getGameProfile().getName();
+            if (DailyClient.reset(wallet)) {
+                ctx.getSource().sendSuccess(() -> Component.literal(
+                        "Reset daily cooldown for " + name), true);
+                return 1;
+            }
+            ctx.getSource().sendFailure(Component.literal(
+                    "ndrchst — reset failed (couldn't reach the server)."));
+            return 0;
         } catch (Exception e) {
             ctx.getSource().sendFailure(Component.literal("Player not found."));
             return 0;
