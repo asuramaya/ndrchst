@@ -43,3 +43,9 @@ secrets.*
 *.pem
 *.key
 id_rsa*
+
+# Generated game-asset set (ripped textures, not committed — rebuilt by scripts/build_game_assets.py, staged to box + R2)
+src/ndrchst/web/static/game/
+
+# Generated pilot UI assets (rebuilt by scripts/build_game_assets.py)
+pilot-client/src/ndrchst_pilot/assets/

@@ -23,41 +23,66 @@ PILOT_ASSETS = [
 
 _CSS = """
 :root{
-  --bg:#09090b;--bg2:#18181b;--bg3:#27272a;--fg:#fafafa;--fg2:#a1a1aa;
-  --muted:#71717a;--accent:#22c55e;--accent2:#16a34a;--border:#27272a;
-  --radius:14px;--radius-sm:9px;
+  --bg:#0a0613;--bg2:#161029;--bg3:#241a40;--fg:#f4f0ff;--fg2:#a99fc7;
+  --muted:#6f6794;--accent:#14f195;--accent2:#0fbd75;--purple:#9945ff;
+  --border:#2a2150;--ink:#04130c;--radius:14px;--radius-sm:9px;
 }
 *{box-sizing:border-box}
-html,body{margin:0;background:var(--bg);color:var(--fg);
+html,body{margin:0;background:var(--bg);color:var(--fg);min-height:100%;
   font-family:'Space Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
   -webkit-font-smoothing:antialiased}
-a{color:var(--accent);text-decoration:none}a:hover{color:var(--accent2)}
+/* Drifting End-void starfield (real end_sky texture), darkened for legibility. */
+body::before{content:"";position:fixed;inset:-20%;z-index:-2;
+  background:url(/game/decor/end_sky.png);background-size:256px;
+  image-rendering:pixelated;opacity:.42;animation:drift 120s linear infinite}
+body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(153,69,255,.22), transparent 60%),
+    radial-gradient(90% 60% at 50% 112%, rgba(20,241,149,.12), transparent 55%),
+    linear-gradient(180deg, rgba(10,6,19,.45), rgba(10,6,19,.94))}
+@keyframes drift{from{background-position:0 0}to{background-position:512px 256px}}
+a{color:var(--accent);text-decoration:none}a:hover{color:#5ffbbd}
 .mono{font-family:'JetBrains Mono',ui-monospace,monospace}
-.wrap{max-width:960px;margin:0 auto;padding:0 1.25rem}
+.wrap{max-width:960px;margin:0 auto;padding:0 1.25rem;position:relative}
+.pixel{image-rendering:pixelated;image-rendering:crisp-edges}
 nav.top{display:flex;align-items:center;justify-content:space-between;
   padding:1.1rem 0;border-bottom:1px solid var(--border)}
-nav.top .brand{font-weight:700;letter-spacing:.02em;font-size:1.1rem;color:var(--fg)}
+nav.top .brand{display:inline-flex;align-items:center;gap:.55rem;font-weight:700;
+  letter-spacing:.02em;font-size:1.1rem;color:var(--fg)}
+nav.top .brand img{width:22px;height:22px;image-rendering:pixelated;
+  filter:drop-shadow(0 0 5px rgba(20,241,149,.5))}
+nav.top .links{display:flex;align-items:center}
 nav.top .links a{color:var(--fg2);margin-left:1.25rem;font-size:.92rem}
 nav.top .links a.active,nav.top .links a:hover{color:var(--fg)}
-.hero{padding:4.5rem 0 3rem}
-.hero h1{font-size:2.7rem;line-height:1.08;letter-spacing:-.02em;margin:0 0 1rem;font-weight:700}
+.hero{padding:4.5rem 0 3rem;position:relative}
+.hero-orb{position:absolute;top:2.2rem;right:0;width:128px;height:128px;image-rendering:pixelated;
+  filter:drop-shadow(0 0 22px rgba(153,69,255,.6));animation:float 6s ease-in-out infinite;
+  pointer-events:none;opacity:.95}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-14px)}}
+@media(max-width:640px){.hero-orb{display:none}}
+.hero h1{font-size:2.7rem;line-height:1.08;letter-spacing:-.02em;margin:0 0 1rem;font-weight:700;
+  text-shadow:0 0 30px rgba(153,69,255,.35)}
 .hero p.lede{font-size:1.15rem;color:var(--fg2);max-width:38rem;margin:0 0 1.8rem;line-height:1.5}
 .cta{display:inline-flex;align-items:center;gap:.5rem;background:var(--accent);
-  color:#052e16;font-weight:600;padding:.7rem 1.3rem;border-radius:var(--radius-sm);
-  font-size:1rem}
-.cta:hover{background:var(--accent2);color:#052e16}
-.cta.ghost{background:transparent;color:var(--fg2);border:1px solid var(--border);margin-left:.6rem}
-.cta.ghost:hover{color:var(--fg);border-color:var(--bg3)}
+  color:var(--ink);font-weight:600;padding:.7rem 1.3rem;border-radius:var(--radius-sm);
+  font-size:1rem;box-shadow:0 0 0 1px rgba(20,241,149,.4),0 8px 28px rgba(20,241,149,.18)}
+.cta:hover{background:#2bf7a3;color:var(--ink)}
+.cta.ghost{background:transparent;color:var(--fg2);border:1px solid var(--border);
+  margin-left:.6rem;box-shadow:none}
+.cta.ghost:hover{color:var(--fg);border-color:var(--purple)}
 .features{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
   gap:1rem;padding:1rem 0 3.5rem}
-.feature{background:linear-gradient(135deg,#18181b,#1f1f23);border:1px solid var(--border);
-  border-radius:var(--radius);padding:1.25rem}
+.feature{background:linear-gradient(135deg,rgba(36,26,64,.55),rgba(22,16,41,.55));
+  border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;
+  backdrop-filter:blur(3px);transition:border-color .15s,box-shadow .15s}
+.feature:hover{border-color:rgba(153,69,255,.55);box-shadow:0 0 24px rgba(153,69,255,.14)}
 .feature h3{margin:0 0 .5rem;font-size:1.02rem}
 .feature p{margin:0;color:var(--fg2);font-size:.9rem;line-height:1.5}
 .section{padding:2.5rem 0;border-top:1px solid var(--border)}
 .section h2{font-size:1.4rem;margin:0 0 1.2rem;letter-spacing:-.01em}
 .server{display:flex;align-items:center;justify-content:space-between;gap:1rem;
-  background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);
+  background:linear-gradient(135deg,rgba(36,26,64,.5),rgba(22,16,41,.5));
+  border:1px solid var(--border);border-radius:var(--radius);backdrop-filter:blur(3px);
   padding:1rem 1.2rem;margin-bottom:.75rem;flex-wrap:wrap}
 .server .name{font-weight:600;font-size:1.05rem}
 .server .meta{color:var(--muted);font-size:.82rem;margin-top:.2rem}
@@ -65,57 +90,75 @@ nav.top .links a.active,nav.top .links a:hover{color:var(--fg)}
 .dot{display:inline-flex;align-items:center;gap:.35rem;font-size:.74rem;text-transform:uppercase;
   letter-spacing:.05em;color:var(--muted)}
 .dot::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--muted)}
-.dot.running{color:var(--accent)}.dot.running::before{background:var(--accent);box-shadow:0 0 6px rgba(34,197,94,.4)}
+.dot.running{color:var(--accent)}.dot.running::before{background:var(--accent);box-shadow:0 0 8px rgba(20,241,149,.6)}
 .dot.starting,.dot.stopping{color:#eab308}.dot.starting::before,.dot.stopping::before{background:#eab308}
 .btn{display:inline-block;padding:.5rem .9rem;border-radius:var(--radius-sm);font-size:.88rem;
-  background:var(--accent);color:#052e16;font-weight:600}
-.btn:hover{background:var(--accent2);color:#052e16}
+  background:var(--accent);color:var(--ink);font-weight:600}
+.btn:hover{background:#2bf7a3;color:var(--ink)}
 .btn.ghost{background:transparent;border:1px solid var(--border);color:var(--fg2);font-weight:400}
-.btn.ghost:hover{color:var(--fg);border-color:var(--bg3)}
+.btn.ghost:hover{color:var(--fg);border-color:var(--purple)}
+.btn:disabled{opacity:.6;cursor:default}
 .os-tabs{display:flex;gap:.4rem;margin-bottom:1rem;flex-wrap:wrap}
 .os-tab{padding:.45rem .9rem;border:1px solid var(--border);border-radius:999px;
-  font-size:.85rem;color:var(--fg2);cursor:pointer;background:var(--bg2)}
-.os-tab.active{color:var(--accent);border-color:rgba(34,197,94,.4)}
-.os-panel{display:none;background:var(--bg2);border:1px solid var(--border);
+  font-size:.85rem;color:var(--fg2);cursor:pointer;background:rgba(22,16,41,.6)}
+.os-tab.active{color:var(--accent);border-color:rgba(20,241,149,.5)}
+.os-panel{display:none;background:rgba(22,16,41,.6);border:1px solid var(--border);
   border-radius:var(--radius);padding:1.1rem 1.3rem}
 .os-panel.active{display:block}
 .os-panel ol{margin:.3rem 0 0;padding-left:1.2rem;color:var(--fg2);line-height:1.7;font-size:.92rem}
 .os-panel code{background:var(--bg3);padding:.1rem .35rem;border-radius:4px;font-size:.85em}
 .empty{color:var(--muted);text-align:center;padding:2.5rem 1rem;border:1px dashed var(--border);border-radius:var(--radius)}
 .eyebrow{display:inline-block;font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;
-  color:var(--accent);border:1px solid rgba(34,197,94,.32);border-radius:999px;
+  color:var(--accent);border:1px solid rgba(20,241,149,.4);border-radius:999px;
   padding:.32rem .75rem;margin-bottom:1.1rem}
 .feature .num{font-family:'JetBrains Mono',ui-monospace,monospace;color:var(--accent);
   font-size:.8rem;letter-spacing:.05em}
-.callout{background:linear-gradient(135deg,#101411,#16181b);border:1px solid var(--border);
-  border-radius:var(--radius);padding:1.3rem 1.4rem;color:var(--fg2);font-size:.95rem;line-height:1.65}
+.callout{background:linear-gradient(135deg,rgba(36,26,64,.6),rgba(22,16,41,.6));
+  border:1px solid var(--border);border-radius:var(--radius);padding:1.3rem 1.4rem;
+  color:var(--fg2);font-size:.95rem;line-height:1.65;backdrop-filter:blur(3px)}
 .callout strong{color:var(--fg)}
 .disclaimer{color:var(--muted);font-size:.78rem;line-height:1.65;margin-top:1.4rem}
 .disclaimer .status{color:var(--fg2)}
-.wbtn{font:inherit;cursor:pointer;border:1px solid rgba(34,197,94,.4);background:rgba(34,197,94,.08);
+.wbtn{font:inherit;cursor:pointer;border:1px solid rgba(20,241,149,.5);background:rgba(20,241,149,.1);
   color:var(--accent);border-radius:999px;padding:.4rem .9rem;font-size:.85rem;font-weight:600}
-.wbtn:hover{background:rgba(34,197,94,.16)}
-.wchip{display:none;align-items:center;gap:.5rem;border:1px solid var(--border);background:var(--bg2);
+.wbtn:hover{background:rgba(20,241,149,.2)}
+.wchip{display:none;align-items:center;gap:.5rem;border:1px solid var(--border);background:rgba(22,16,41,.7);
   border-radius:999px;padding:.32rem .4rem .32rem .8rem;font-size:.84rem;color:var(--fg)}
-.wchip .tier{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:#052e16;
+.wchip .tier{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink);
   background:var(--accent);border-radius:999px;padding:.15rem .5rem;font-weight:700}
 .wchip .tier.none{background:var(--bg3);color:var(--fg2)}
 .wchip button{font:inherit;cursor:pointer;background:none;border:none;color:var(--muted);font-size:.9rem;padding:0 .2rem}
-.rankcard{display:none;background:linear-gradient(135deg,#101411,#16181b);border:1px solid var(--border);
-  border-radius:var(--radius);padding:1.2rem 1.4rem;margin:0 0 2rem}
+.rankcard{display:none;background:linear-gradient(135deg,rgba(36,26,64,.6),rgba(22,16,41,.6));
+  border:1px solid var(--border);border-radius:var(--radius);padding:1.2rem 1.4rem;margin:0 0 2rem;
+  backdrop-filter:blur(3px)}
 .rankcard .row{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 .rankcard .big{font-size:1.3rem;font-weight:700}
 .rankcard .pct{color:var(--fg2);font-size:.9rem}
-.pill{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:#052e16;
+.pill{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink);
   background:var(--accent);border-radius:999px;padding:.18rem .55rem;font-weight:700;white-space:nowrap}
 .pill.none{background:var(--bg3);color:var(--fg2)}
-.ladder .feature{display:flex;align-items:baseline;justify-content:space-between;gap:.6rem}
+.ladder .feature{display:block}
+.ladder .feature .lrow{display:flex;align-items:baseline;justify-content:space-between;gap:.6rem}
 .ladder .feature h3{margin:0}
 .ladder .thr{color:var(--fg2);font-size:.82rem;font-family:'JetBrains Mono',ui-monospace,monospace}
+.drops{display:flex;align-items:center;gap:.35rem;margin-top:.7rem;flex-wrap:wrap}
+.drops img{width:30px;height:30px;image-rendering:pixelated;
+  background:rgba(10,6,19,.5);border:1px solid var(--border);border-radius:6px;padding:2px}
 .rankno{font-family:'JetBrains Mono',ui-monospace,monospace;color:var(--muted);font-size:.9rem;
   min-width:2.2rem;text-align:right}
 footer{padding:2.5rem 0 3rem;color:var(--muted);font-size:.82rem;border-top:1px solid var(--border)}
 """
+
+# Per-tier daily reward icons (mirrors deploy/datapacks loot tables) — surfaced
+# on /ranks so holders see exactly what each tier drops. Files under /game/items.
+TIER_DROPS = {
+    "holder": ["diamond", "gold_ingot", "experience_bottle"],
+    "bronze": ["diamond", "inferium_essence", "netherite_scrap", "experience_bottle"],
+    "silver": ["prudentium_essence", "diamond", "allthemodium_ingot", "netherite_scrap"],
+    "gold": ["tertium_essence", "netherite_ingot", "vibranium_ingot", "allthemodium_ingot"],
+    "diamond": ["imperium_essence", "ancient_debris_side", "unobtainium_ingot", "vibranium_ingot"],
+    "whale": ["supremium_essence", "nether_star", "unobtainium_ingot", "vibranium_ingot"],
+}
 
 # Vanilla wallet connect — no npm, no framework. Talks to the injected
 # Phantom / Solflare provider, signs the server's challenge, posts to
@@ -193,16 +236,20 @@ _WALLET_JS = """
 _HEAD = """<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
+<link rel="icon" type="image/png" href="/game/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>{css}</style></head><body><div class="wrap">"""
+
+# Brand mark: the ender-eye glyph + wordmark, shared by every page's nav.
+_BRAND = '<a class="brand" href="/"><img class="pixel" src="/game/decor/brand.png" alt="">ndrchst</a>'
 
 
 def _shell(title: str, body: str, *, active: str) -> str:
     def cls(name: str) -> str:
         return ' class="active"' if name == active else ""
     nav = (
-        '<nav class="top"><a class="brand" href="/">ndrchst</a>'
+        '<nav class="top">' + _BRAND +
         '<div class="links">'
         f'<a href="/"{cls("home")}>Home</a>'
         f'<a href="/play"{cls("play")}>Play</a>'
@@ -224,6 +271,7 @@ def render_landing(*, play_url: str = "/play") -> str:
     play = html.escape(play_url, quote=True)
     body = f"""
 <section class="hero">
+  <img class="hero-orb" src="/game/decor/end_crystal.png" alt="">
   <span class="eyebrow">$NDRCHST · on Solana</span>
   <h1>Connect your wallet. Play. Rank up.</h1>
   <p class="lede">A Minecraft server where your wallet is your login and your holdings
@@ -317,7 +365,7 @@ def render_link(*, code: str = "") -> str:
 </script>
 """
     return _HEAD.format(title=html.escape("ndrchst — link your launcher"), css=_CSS) \
-        + '<nav class="top"><a class="brand" href="/">ndrchst</a></nav>' \
+        + '<nav class="top">' + _BRAND + '</nav>' \
         + '<div class="wrap-inner">' + body + "</div></div></body></html>"
 
 
@@ -438,10 +486,24 @@ def _fmt_threshold(min_pct: float) -> str:
 def render_ranks(holders: list[dict], tiers: list[dict]) -> str:
     """tiers: list of {key, name, min_pct} ascending. holders: list of
     {display, mc_name, tier, tier_name, holdings_pct} sorted by holdings desc."""
+    def _drops(key: str) -> str:
+        items = TIER_DROPS.get(key, [])
+        if not items:
+            return ""
+        icons = "".join(
+            f'<img class="pixel" src="/game/items/{i}.png" alt="" '
+            f'title="{html.escape(i.replace("_side", "").replace("_", " "))}">'
+            for i in items
+        )
+        return f'<div class="drops">{icons}</div>'
+
     ladder = "".join(
         '<div class="feature">'
+        '<div class="lrow">'
         f'<h3>{html.escape(t["name"])}</h3>'
         f'<span class="thr">{_fmt_threshold(t["min_pct"])}</span>'
+        "</div>"
+        f'{_drops(t["key"])}'
         "</div>"
         for t in reversed(tiers)  # show the top tier first
     )

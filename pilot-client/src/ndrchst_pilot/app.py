@@ -19,12 +19,32 @@ from .settings import load as load_config
 
 APP_SLUG = "ndrchst-pilot"
 
-# Dark palette so the launcher matches the ndrchst web surfaces.
-_BG = "#0f1115"
-_PANEL = "#1a1d24"
-_FG = "#e4e6eb"
-_MUTED = "#97a0b0"
-_ACCENT = "#4d7cfe"
+# End × Solana palette — matches the web surfaces (void purple + ender green).
+_BG = "#0a0613"
+_PANEL = "#161029"
+_FG = "#f4f0ff"
+_MUTED = "#a99fc7"
+_ACCENT = "#14f195"  # ender green / Solana green
+_PURPLE = "#9945ff"  # Solana purple
+_INK = "#04130c"     # dark text on the green accent
+
+# Themed UI assets (banner GIF + brand glyph), bundled into the pilot zip.
+_ASSETS = Path(__file__).resolve().parent / "assets"
+
+
+def _load_gif_frames(root: "tk.Tk", path: Path) -> list:
+    """Read every frame of an animated GIF as a PhotoImage (Tk has no native
+    animation — we cycle frames ourselves)."""
+    frames = []
+    i = 0
+    while True:
+        try:
+            frames.append(tk.PhotoImage(master=root, file=str(path),
+                                        format=f"gif -index {i}"))
+            i += 1
+        except tk.TclError:
+            break
+    return frames
 
 # Phases the backend walks through, in order, for the progress bar's
 # coarse position. The backend emits free-text logs; we match a few
@@ -67,13 +87,47 @@ def run() -> None:
     style.configure("Muted.TLabel", background=_BG, foreground=_MUTED)
     style.configure("Title.TLabel", background=_BG, foreground=_FG,
                     font=("", 16, "bold"))
-    style.configure("Accent.TButton", font=("", 11, "bold"))
-    style.configure("TProgressbar", background=_ACCENT, troughcolor=_PANEL)
+    style.configure("Brand.TLabel", background=_BG)
+    # Default buttons: purpur panel; accent button: ender green.
+    style.configure("TButton", background=_PANEL, foreground=_FG, borderwidth=0,
+                    focuscolor=_PANEL, padding=(10, 5))
+    style.map("TButton", background=[("active", _BG3 := "#241a40"), ("disabled", _PANEL)],
+              foreground=[("disabled", _MUTED)])
+    style.configure("Accent.TButton", font=("", 11, "bold"), background=_ACCENT,
+                    foreground=_INK, borderwidth=0, padding=(14, 6))
+    style.map("Accent.TButton", background=[("active", "#2bf7a3"), ("disabled", _PANEL)],
+              foreground=[("disabled", _MUTED)])
+    style.configure("TProgressbar", background=_ACCENT, troughcolor=_PANEL,
+                    borderwidth=0)
+    style.configure("TSpinbox", fieldbackground=_PANEL, foreground=_FG,
+                    background=_PANEL, arrowcolor=_FG, borderwidth=0)
+    style.configure("TCombobox", fieldbackground=_PANEL, foreground=_FG,
+                    background=_PANEL, arrowcolor=_FG, borderwidth=0)
+
+    # ---- Animated End-void banner -------------------------------------
+    banner_path = _ASSETS / "end_banner.gif"
+    if banner_path.exists():
+        banner_frames = _load_gif_frames(root, banner_path)
+        if banner_frames:
+            banner = tk.Label(root, bg=_BG, bd=0)
+            banner.pack(fill=tk.X)
+
+            def _cycle(i: int = 0) -> None:
+                banner.configure(image=banner_frames[i])
+                root.after(110, _cycle, (i + 1) % len(banner_frames))
+            _cycle()
 
     # ---- Header: server identity --------------------------------------
     info = ttk.Frame(root, padding=(16, 14, 16, 8))
     info.pack(fill=tk.X)
-    ttk.Label(info, text=cfg.app_name, style="Title.TLabel").pack(anchor="w")
+    titlebar = ttk.Frame(info)
+    titlebar.pack(anchor="w")
+    brand_path = _ASSETS / "brand.png"
+    if brand_path.exists():
+        root._brand_img = tk.PhotoImage(master=root, file=str(brand_path))  # keep ref
+        ttk.Label(titlebar, image=root._brand_img, style="Brand.TLabel").pack(
+            side=tk.LEFT, padx=(0, 8))
+    ttk.Label(titlebar, text=cfg.app_name, style="Title.TLabel").pack(side=tk.LEFT)
     target = cfg.tunnel_hostname or f"{cfg.server_host}:{cfg.server_port}"
     ttk.Label(info, text=f"Server  {target}", style="Muted.TLabel").pack(anchor="w")
     sub = f"Minecraft {cfg.mc_version}"

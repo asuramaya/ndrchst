@@ -150,6 +150,15 @@ def build_bundle(
             arc = "ndrchst_pilot/" + str(path.relative_to(src))
             zf.writestr(arc, path.read_text())
 
+        # 2b. Bundle the End-themed UI assets (banner GIF + brand glyph) so the
+        # launcher is decorated offline. Binary, so read_bytes (not read_text).
+        assets = src / "assets"
+        if assets.is_dir():
+            for path in sorted(assets.rglob("*")):
+                if path.is_file():
+                    arc = "ndrchst_pilot/" + str(path.relative_to(src))
+                    zf.writestr(arc, path.read_bytes())
+
         # 3. requirements.txt — portablemc for the launcher core, httpx
         # for the curseforge resolver (used by modpack install path).
         zf.writestr("requirements.txt", "portablemc>=4.4\nhttpx>=0.27\n")

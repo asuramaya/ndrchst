@@ -23,6 +23,7 @@ from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .domain import auth_session, device_token, join_token, pilot_pairing, wallet
@@ -38,6 +39,9 @@ from .store.db import DEFAULT_DB_PATH, connect
 from .web.public_pages import render_landing, render_link, render_play, render_ranks
 
 _SNAPSHOT_INTERVAL = int(os.environ.get("NDRCHST_SNAPSHOT_INTERVAL", "3600"))
+# End-themed game assets (gitignored; staged to the box + R2). Served at /game
+# for origin/local; the edge Worker serves the same keys from R2.
+_GAME_DIR = Path(__file__).resolve().parent / "web" / "static" / "game"
 
 _SESSION_COOKIE = "ndrchst_session"
 
@@ -197,6 +201,9 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         docs_url=None, redoc_url=None,
         lifespan=lifespan,
     )
+
+    if _GAME_DIR.is_dir():
+        app.mount("/game", StaticFiles(directory=_GAME_DIR), name="game")
 
     def _conn() -> sqlite3.Connection:
         return conn_holder["conn"]

@@ -110,6 +110,15 @@ def publish_server(
         else:
             missing.append(f"{pdir}/pilot.zip")
 
+        # End-themed game assets (icons, decor, favicon, banner) → R2 under
+        # game/, the same keys the box serves at /game and the pages reference.
+        game_dir = Path(__file__).resolve().parent.parent / "web" / "static" / "game"
+        _ct = {".png": "image/png", ".gif": "image/gif"}
+        for f in sorted(game_dir.rglob("*")):
+            if f.is_file():
+                key = "game/" + f.relative_to(game_dir).as_posix()
+                put(key, f.read_bytes(), _ct.get(f.suffix, "application/octet-stream"), _IMMUTABLE)
+
         # Public pages + a machine-readable server list (single source of
         # truth: the same renderers the box's public app uses).
         play_servers = _play_server_dicts(java_servers)
