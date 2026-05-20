@@ -212,3 +212,27 @@ def test_pilot_poll_carries_join_token_and_verifies(client):
 
 def test_join_verify_rejects_bad_token(client):
     assert client.post("/join/verify", json={"token": "garbage"}).status_code == 401
+
+
+def test_device_exchange_returns_fresh_join_token(client):
+    """The pilot trades its device token for a fresh join token at Play."""
+    from ndrchst.domain import device_token as dt
+    wallet = "EUr2QnpmavMw51JiFYeTRnUywY7mPAtouzyY2P21pump"
+    r = client.post("/device/exchange", json={"device_token": dt.issue(wallet)})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["wallet"] == wallet
+    assert body["tier"] == "silver"  # holdings_pct 0.7 -> silver
+    assert body["join_token"]
+    # …and that fresh join token verifies for the gate.
+    v = client.post("/join/verify", json={"token": body["join_token"]})
+    assert v.status_code == 200
+    assert v.json()["mc_name"] == W.derive_mc_name(wallet)
+
+
+def test_device_exchange_rejects_bad_token(client):
+    assert client.post("/device/exchange", json={"device_token": "nope"}).status_code == 401
+
+
+def test_me_pilot_requires_session(client):
+    assert client.get("/me/pilot/anyserver").status_code == 401

@@ -20,10 +20,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-from .domain import auth_session, join_token, pilot_pairing, wallet
+from .domain import auth_session, device_token, join_token, pilot_pairing, wallet
 from .domain.models import Family
 from .logging_setup import configure as configure_logging
 from .runtime import solana
@@ -52,6 +52,10 @@ class _PilotApproveReq(_VerifyReq):
 
 class _JoinVerifyReq(BaseModel):
     token: str  # the join token the ndrchst-auth mod received from the client
+
+
+class _DeviceExchangeReq(BaseModel):
+    device_token: str  # the pilot's long-lived credential
 
 
 def _cookie_secure() -> bool:
@@ -237,6 +241,48 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
                 "tier": tier.key if tier else None,
             },
             headers=_NO_STORE,
+        )
+
+    @app.post("/device/exchange")
+    def device_exchange(req: _DeviceExchangeReq = Body(...)) -> JSONResponse:
+        """The pilot trades its long-lived device token for a FRESH short-lived
+        join token (tier re-read from chain) at Play — so the gate credential
+        is never stale and there's no in-launcher device-flow round-trip."""
+        wallet_pk = device_token.verify(req.device_token)
+        if not wallet_pk:
+            raise HTTPException(status_code=401, detail="invalid or expired device token")
+        ident = _identity(wallet_pk)
+        _record_link(ident)
+        return JSONResponse(_with_join_token(ident), headers=_NO_STORE)
+
+    @app.get("/me/pilot/{server_id}")
+    def me_pilot(server_id: str, request: Request) -> Response:
+        """Authenticated, personalized pilot download: requires a wallet session
+        (sign in on the play page first) and bakes a device token into the
+        bundle so the launcher is already linked — no separate sign-in step."""
+        import io
+        import zipfile
+
+        wallet_pk = auth_session.verify_session(request.cookies.get(_SESSION_COOKIE))
+        if not wallet_pk:
+            raise HTTPException(status_code=401, detail="sign in with your wallet to download")
+        server = srv_store.get(_conn(), server_id)
+        if server is None:
+            raise HTTPException(status_code=404, detail="server not found")
+        base = pilot_bundle_path(server_id)
+        if base is None:
+            raise HTTPException(status_code=404, detail="pilot bundle not built for this server")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(base) as src, \
+                zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as out:
+            for item in src.infolist():
+                out.writestr(item, src.read(item.filename))
+            out.writestr("ndrchst-device.token", device_token.issue(wallet_pk))
+        fname = f"ndrchst-pilot-{server.name.replace(' ', '_')}.zip"
+        return Response(
+            content=buf.getvalue(),
+            media_type="application/zip",
+            headers={**_NO_STORE, "Content-Disposition": f'attachment; filename="{fname}"'},
         )
 
     @app.get("/me")

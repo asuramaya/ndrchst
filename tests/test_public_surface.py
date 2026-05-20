@@ -113,6 +113,34 @@ def test_ranks_renders_ladder_and_holders(tmp_path: Path):
         assert 'href="/ranks"' in r.text  # nav link present
 
 
+def test_me_pilot_bakes_device_token_into_bundle(tmp_path: Path, monkeypatch):
+    import io
+    import zipfile
+
+    from ndrchst.domain import auth_session, device_token
+    monkeypatch.setenv("NDRCHST_COOKIE_SECURE", "0")
+    pilots_root = tmp_path / "pilots"
+    monkeypatch.setattr(pilot, "PILOTS_ROOT_DEFAULT", pilots_root)
+    db = tmp_path / "t.db"
+    s = _seed_server(db)
+    pilot.build_bundle(s, public_host="mc.x", pilots_root=pilots_root)
+
+    app = create_public_app(db_path=db)
+    with TestClient(app) as c:
+        # no session -> 401
+        assert c.get(f"/me/pilot/{s.id}").status_code == 401
+        # with a wallet session -> personalized bundle carrying a device token
+        c.cookies.set("ndrchst_session", auth_session.sign_session("WALLETxyz"))
+        r = c.get(f"/me/pilot/{s.id}")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "application/zip"
+        zf = zipfile.ZipFile(io.BytesIO(r.content))
+        assert "ndrchst-device.token" in zf.namelist()
+        assert "ndrchst_pilot/config.py" in zf.namelist()  # the real bundle, intact
+        baked = zf.read("ndrchst-device.token").decode()
+        assert device_token.verify(baked) == "WALLETxyz"
+
+
 def test_download_pilot_404_when_no_bundle(tmp_path: Path):
     db = tmp_path / "t.db"
     _seed_server(db)
