@@ -45,6 +45,12 @@ var generateModMetadata = tasks.register("generateModMetadata", ProcessResources
 sourceSets.main.resources.srcDir generateModMetadata
 neoForge.ideSyncTask generateModMetadata
 
+dependencies {
+    // LuckPerms API for rank assignment. compileOnly — the LuckPerms mod
+    // itself provides the implementation at runtime (bundled in the modset).
+    compileOnly 'net.luckperms:api:5.4'
+}
+
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
