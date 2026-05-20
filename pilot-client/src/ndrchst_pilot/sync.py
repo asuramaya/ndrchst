@@ -27,9 +27,9 @@ import json
 import urllib.error
 import urllib.request
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 # Dirs we mirror exactly (prune extras). Everything else is additive —
 # we add the pack's files but leave the user's own additions alone.

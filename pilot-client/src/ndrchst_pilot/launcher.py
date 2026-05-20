@@ -16,8 +16,8 @@ of SERVER_HOST:SERVER_PORT. Origin IP stays hidden behind CF edge.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 from uuid import uuid4
 
 from portablemc.forge import _NeoForgeVersion
@@ -91,7 +91,7 @@ class _GuiWatcher(Watcher):
 
 
 def _make_version(
-    ctx: Context, mc_version: str, neoforge_version: Optional[str],
+    ctx: Context, mc_version: str, neoforge_version: str | None,
 ):
     """Pick the right portablemc Version subclass: NeoForge if a
     neoforge version is pinned, otherwise vanilla."""
@@ -108,10 +108,10 @@ def launch(
     server_host: str,
     server_port: int,
     on_log: Callable[[str], None],
-    neoforge_version: Optional[str] = None,
-    modpack_url: Optional[str] = None,
-    mods_sync_url: Optional[str] = None,
-    tunnel_hostname: Optional[str] = None,
+    neoforge_version: str | None = None,
+    modpack_url: str | None = None,
+    mods_sync_url: str | None = None,
+    tunnel_hostname: str | None = None,
     client_ram_mb: int = 8192,
     gpu: str = "auto",
 ) -> int:

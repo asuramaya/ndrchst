@@ -19,7 +19,6 @@ from __future__ import annotations
 import platform as _platform
 import socket
 import subprocess
-import sys
 import time
 import urllib.request
 from pathlib import Path
@@ -246,7 +245,7 @@ class Tunnel:
         self._proc = None
         self._port = None
 
-    def __enter__(self) -> "Tunnel":
+    def __enter__(self) -> Tunnel:
         self.start()
         return self
 

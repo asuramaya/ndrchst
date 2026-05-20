@@ -20,8 +20,8 @@ from __future__ import annotations
 
 import logging
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from . import curseforge as cf
 

@@ -31,11 +31,10 @@ import os
 import platform
 import subprocess
 import sys
-import tempfile
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from . import __version__
 
