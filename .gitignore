@@ -27,6 +27,16 @@ dist/
 .vscode/
 *.swp
 
-# Env
+# Env / secrets — never commit credentials. Real secrets live outside the
+# repo: systemd EnvironmentFile (~/.config/ndrchst/r2.env on the host),
+# GitHub Actions secrets, or the operator's shell env. See SECURITY.md.
 .env
 .env.local
+*.env
+r2.env
+*.secret
+*.secrets
+secrets.*
+*.pem
+*.key
+id_rsa*
