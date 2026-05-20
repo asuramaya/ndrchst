@@ -87,14 +87,23 @@ Notes:
 
 ### Cutover sequence (play/www → Worker)
 
-1. **Add an origin hostname on the box** so the Worker can still reach :8081:
-   edit `~/.cloudflared/config.yml`, add under `ingress:` (before the 404):
-   ```yaml
-     - hostname: origin.ndrchst.com
-       service: http://127.0.0.1:8081
-   ```
-   then `cloudflared tunnel route dns 05da0bcd-8b7c-446a-bc55-89aa56dbf79e origin.ndrchst.com`
-   and `sudo systemctl restart cloudflared`.
+1. **Add an origin hostname on the box** so the Worker can still reach :8081.
+   The ACTIVE tunnel config is **`/etc/cloudflared/config.yml`** (root-owned; the
+   `~/.cloudflared/config.yml` copy is NOT what the systemd `cloudflared` runs).
+   The `origin.ndrchst.com → http://127.0.0.1:8081` ingress rule is **already
+   added** there (validated, cloudflared restarted). What's still MISSING is the
+   **DNS record**:
+   - `cloudflared tunnel route dns 05da0bcd-… origin.ndrchst.com` **fails with
+     "Authentication error" (code 10000)** — the box's `~/.cloudflared/cert.pem`
+     is not authenticated for the zone API. Either re-auth (`cloudflared tunnel
+     login`, interactive/browser) then re-run route dns, **or** just create it in
+     the Cloudflare dashboard: a **proxied CNAME**
+     `origin.ndrchst.com → 05da0bcd-8b7c-446a-bc55-89aa56dbf79e.cfargotunnel.com`.
+   - Verify: `curl https://origin.ndrchst.com/healthz` returns the public
+     surface JSON.
+   - Note: `www.ndrchst.com` has **no DNS record** either — its Worker route is
+     inert until you add a proxied record for it; `play.ndrchst.com` is the live
+     surface.
 2. Set `ORIGIN_BASE = "https://origin.ndrchst.com"` in `cf/worker/wrangler.toml`.
 3. `cd cf/worker && wrangler deploy` (routes uncommented → takes over play/www).
 4. **Republish pages** so R2 has the current static pages:

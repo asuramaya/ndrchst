@@ -42,7 +42,12 @@ routes = [
 # play/www (those resolve to this Worker now); create a tunnel ingress rule
 # mapping it to http://127.0.0.1:8081 on the box. Leave blank to make the auth
 # endpoints return 503 (static surface still works).
-ORIGIN_BASE = ""
+#
+# Box ingress for origin.ndrchst.com is already wired in /etc/cloudflared/
+# config.yml. The DNS record is the last missing piece: create a PROXIED CNAME
+#   origin.ndrchst.com -> 05da0bcd-8b7c-446a-bc55-89aa56dbf79e.cfargotunnel.com
+# in the Cloudflare dashboard (or re-auth cloudflared and `tunnel route dns`).
+ORIGIN_BASE = "https://origin.ndrchst.com"
 
 [[r2_buckets]]
 binding = "DL"
