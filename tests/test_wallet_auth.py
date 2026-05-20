@@ -124,3 +124,48 @@ def test_challenge_rejects_bad_pubkey(client):
 
 def test_me_requires_session(client):
     assert client.get("/me").status_code == 401
+
+
+def _approve(client, pubkey, seed, code):
+    msg = client.post("/auth/challenge", json={"pubkey": pubkey}).json()["message"]
+    sig = base64.b64encode(_sign(seed, msg.encode())).decode()
+    return client.post("/pilot/auth/approve",
+                       json={"code": code, "pubkey": pubkey, "message": msg, "signature": sig})
+
+
+def test_pilot_pairing_full_flow(client):
+    pubkey, seed = _keypair(b"\x10" * 32)
+    start = client.post("/pilot/auth/start").json()
+    assert start["user_code"] and start["pair_id"]
+    assert start["verify_url"].endswith("/link?code=" + start["user_code"])
+
+    # before approval -> pending
+    poll = client.get("/pilot/auth/poll", params={"pair_id": start["pair_id"]})
+    assert poll.status_code == 200 and poll.json()["status"] == "pending"
+
+    # user connects wallet on /link and approves
+    a = _approve(client, pubkey, seed, start["user_code"])
+    assert a.status_code == 200 and a.json()["wallet"] == pubkey
+
+    # pilot poll now sees the bound wallet + derived in-game name
+    poll2 = client.get("/pilot/auth/poll", params={"pair_id": start["pair_id"]}).json()
+    assert poll2["status"] == "approved"
+    assert poll2["wallet"] == pubkey
+    assert poll2["mc_name"] == W.derive_mc_name(pubkey)
+
+
+def test_pilot_approve_rejects_unknown_code(client):
+    pubkey, seed = _keypair(b"\x11" * 32)
+    a = _approve(client, pubkey, seed, "ZZZZ-9999")
+    assert a.status_code == 404
+
+
+def test_pilot_poll_unknown_pair(client):
+    assert client.get("/pilot/auth/poll", params={"pair_id": "nope"}).status_code == 404
+
+
+def test_link_page_renders(client):
+    r = client.get("/link", params={"code": "ABCD-2345"})
+    assert r.status_code == 200
+    assert "ABCD-2345" in r.text
+    assert "Connect Wallet" in r.text

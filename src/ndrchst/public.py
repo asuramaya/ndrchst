@@ -21,14 +21,14 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from .domain import auth_session, wallet
+from .domain import auth_session, pilot_pairing, wallet
 from .domain.models import Family
 from .logging_setup import configure as configure_logging
 from .runtime import solana
 from .runtime.pilot import bundle_path as pilot_bundle_path
 from .store import servers as srv_store
 from .store.db import DEFAULT_DB_PATH, connect
-from .web.public_pages import render_landing, render_play
+from .web.public_pages import render_landing, render_link, render_play
 
 _SESSION_COOKIE = "ndrchst_session"
 
@@ -43,8 +43,41 @@ class _VerifyReq(BaseModel):
     signature: str  # base64 of the raw ed25519 signature bytes
 
 
+class _PilotApproveReq(_VerifyReq):
+    code: str  # the pairing user_code shown by the pilot
+
+
 def _cookie_secure() -> bool:
     return os.environ.get("NDRCHST_COOKIE_SECURE", "1") != "0"
+
+
+def _site_base() -> str:
+    return os.environ.get("NDRCHST_SITE_BASE", "https://play.ndrchst.com").rstrip("/")
+
+
+def _verify_signed_or_raise(pubkey: str, message: str, signature_b64: str) -> None:
+    """Shared SIWS check used by /auth/verify and /pilot/auth/approve: the
+    message must carry a server-issued single-use nonce and be exactly the
+    challenge we'd build, and the signature must verify for the wallet."""
+    import base64
+
+    if not wallet.is_valid_pubkey(pubkey):
+        raise HTTPException(status_code=400, detail="invalid wallet address")
+    nonce = ""
+    for line in message.splitlines():
+        if line.startswith("Nonce: "):
+            nonce = line[len("Nonce: "):].strip()
+            break
+    if not nonce or not auth_session.consume_nonce(nonce):
+        raise HTTPException(status_code=401, detail="challenge expired or unknown")
+    if message != auth_session.build_message(pubkey, nonce):
+        raise HTTPException(status_code=401, detail="challenge mismatch")
+    try:
+        sig = base64.b64decode(signature_b64)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail="bad signature encoding") from e
+    if not wallet.verify_signature(pubkey, message.encode(), sig):
+        raise HTTPException(status_code=401, detail="signature verification failed")
 
 
 def _identity(pubkey: str) -> dict:
@@ -102,29 +135,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
     @app.post("/auth/verify")
     def auth_verify(req: _VerifyReq = Body(...)) -> JSONResponse:
         """Verify the signed challenge, then set a session cookie."""
-        import base64
-
-        if not wallet.is_valid_pubkey(req.pubkey):
-            raise HTTPException(status_code=400, detail="invalid wallet address")
-        # The nonce in the message must be one we issued (single-use), and the
-        # message must be exactly the challenge we'd build — pins the signed
-        # bytes to our domain + statement, not arbitrary attacker text.
-        nonce = ""
-        for line in req.message.splitlines():
-            if line.startswith("Nonce: "):
-                nonce = line[len("Nonce: "):].strip()
-                break
-        if not nonce or not auth_session.consume_nonce(nonce):
-            raise HTTPException(status_code=401, detail="challenge expired or unknown")
-        if req.message != auth_session.build_message(req.pubkey, nonce):
-            raise HTTPException(status_code=401, detail="challenge mismatch")
-        try:
-            sig = base64.b64decode(req.signature)
-        except (ValueError, TypeError) as e:
-            raise HTTPException(status_code=400, detail="bad signature encoding") from e
-        if not wallet.verify_signature(req.pubkey, req.message.encode(), sig):
-            raise HTTPException(status_code=401, detail="signature verification failed")
-
+        _verify_signed_or_raise(req.pubkey, req.message, req.signature)
         token = auth_session.sign_session(req.pubkey)
         resp = JSONResponse(_identity(req.pubkey), headers=_NO_STORE)
         resp.set_cookie(
@@ -132,6 +143,43 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             samesite="lax", secure=_cookie_secure(), path="/",
         )
         return resp
+
+    # --- desktop pilot pairing (OAuth device-flow shape) ---------------------
+    @app.post("/pilot/auth/start")
+    def pilot_auth_start() -> JSONResponse:
+        """The pilot begins a pairing; it opens verify_url in a browser and
+        polls with pair_id until a wallet is bound."""
+        pair_id, user_code = pilot_pairing.start()
+        return JSONResponse({
+            "pair_id": pair_id,
+            "user_code": user_code,
+            "verify_url": f"{_site_base()}/link?code={user_code}",
+            "interval": 2,
+            "expires_in": 600,
+        }, headers=_NO_STORE)
+
+    @app.get("/link", response_class=HTMLResponse)
+    def link_page(code: str = "") -> HTMLResponse:
+        """Web page where the user connects a wallet to approve a pilot."""
+        return HTMLResponse(render_link(code=code))
+
+    @app.post("/pilot/auth/approve")
+    def pilot_auth_approve(req: _PilotApproveReq = Body(...)) -> JSONResponse:
+        """Verify the wallet signature and bind it to the pairing code."""
+        _verify_signed_or_raise(req.pubkey, req.message, req.signature)
+        if not pilot_pairing.approve(req.code, req.pubkey):
+            raise HTTPException(status_code=404, detail="unknown or expired pairing code")
+        return JSONResponse({"ok": True, **_identity(req.pubkey)}, headers=_NO_STORE)
+
+    @app.get("/pilot/auth/poll")
+    def pilot_auth_poll(pair_id: str) -> JSONResponse:
+        """The pilot polls until its pairing is approved."""
+        p = pilot_pairing.poll(pair_id)
+        if p is None:
+            raise HTTPException(status_code=404, detail="unknown or expired pairing")
+        if not p.pubkey:
+            return JSONResponse({"status": "pending"}, headers=_NO_STORE)
+        return JSONResponse({"status": "approved", **_identity(p.pubkey)}, headers=_NO_STORE)
 
     @app.get("/me")
     def me(request: Request) -> JSONResponse:

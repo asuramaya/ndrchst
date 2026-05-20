@@ -235,6 +235,73 @@ def render_landing(*, play_url: str = "/play") -> str:
     return _shell("ndrchst — connect your wallet, play, rank up", body, active="home")
 
 
+def render_link(*, code: str = "") -> str:
+    """Pairing page: the pilot opens this with ?code=…; the user connects a
+    wallet and signs to bind it to the launcher session."""
+    safe_code = html.escape(code, quote=True)
+    body = f"""
+<section class="hero" style="padding:3.5rem 0 1rem;text-align:center">
+  <span class="eyebrow">Link your launcher</span>
+  <h1 style="font-size:1.9rem">Sign in to play</h1>
+  <p class="lede" style="margin-left:auto;margin-right:auto">Connect your Solana wallet to
+     link this device. Your wallet is your identity and your rank in-game.</p>
+</section>
+<div style="max-width:30rem;margin:0 auto">
+  <div class="callout" style="text-align:center">
+    Pairing code <strong class="mono" id="code">{safe_code or '—'}</strong>
+  </div>
+  <div style="text-align:center;margin:1.4rem 0">
+    <button id="link-connect" class="cta">Connect Wallet</button>
+  </div>
+  <div id="link-status" class="callout" style="display:none;text-align:center"></div>
+</div>
+<script>
+(function(){{
+  var API = window.NDRCHST_API || '';
+  var code = {('"' + safe_code + '"') if code else '""'};
+  function provider(){{
+    if(window.phantom&&window.phantom.solana) return window.phantom.solana;
+    if(window.solana) return window.solana;
+    if(window.solflare) return window.solflare;
+    return null;
+  }}
+  function status(msg, ok){{
+    var el=document.getElementById('link-status');
+    el.style.display='block'; el.textContent=msg;
+    el.style.borderColor = ok?'rgba(34,197,94,.4)':'var(--border)';
+  }}
+  async function connect(){{
+    var p=provider();
+    if(!p){{ status('No Solana wallet found. Install Phantom to continue.',false); return; }}
+    if(!code){{ status('Missing pairing code — reopen the link from your launcher.',false); return; }}
+    try{{
+      var res=await p.connect(); var pk=(res&&res.publicKey?res.publicKey:p.publicKey).toString();
+      var ch=await fetch(API+'/auth/challenge',{{method:'POST',
+        headers:{{'content-type':'application/json'}},body:JSON.stringify({{pubkey:pk}})}});
+      var msg=(await ch.json()).message;
+      var signed=await p.signMessage(new TextEncoder().encode(msg),'utf8');
+      var sig=signed.signature||signed;
+      var b64=btoa(String.fromCharCode.apply(null,new Uint8Array(sig)));
+      var v=await fetch(API+'/pilot/auth/approve',{{method:'POST',
+        headers:{{'content-type':'application/json'}},
+        body:JSON.stringify({{code:code,pubkey:pk,message:msg,signature:b64}})}});
+      if(v.ok){{ var d=await v.json();
+        document.getElementById('link-connect').style.display='none';
+        status('Linked as '+d.display+(d.tier_name?(' · '+d.tier_name):'')+'. Return to your launcher.',true);
+      }} else {{ status('Could not link this device. The code may have expired.',false); }}
+    }}catch(e){{ console.error(e); status('Wallet sign-in was cancelled.',false); }}
+  }}
+  document.addEventListener('DOMContentLoaded',function(){{
+    document.getElementById('link-connect').addEventListener('click',connect);
+  }});
+}})();
+</script>
+"""
+    return _HEAD.format(title=html.escape("ndrchst — link your launcher"), css=_CSS) \
+        + '<nav class="top"><a class="brand" href="/">ndrchst</a></nav>' \
+        + '<div class="wrap-inner">' + body + "</div></div></body></html>"
+
+
 def _status_class(status: str) -> str:
     return status if status in ("running", "starting", "stopping") else ""
 
