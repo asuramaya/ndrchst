@@ -11,6 +11,7 @@ Distinct from the admin surface (:8080) so:
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import sqlite3
 from collections.abc import AsyncIterator
@@ -27,6 +28,7 @@ from .logging_setup import configure as configure_logging
 from .runtime import solana
 from .runtime.pilot import bundle_path as pilot_bundle_path
 from .store import servers as srv_store
+from .store import wallet_links as wl_store
 from .store.db import DEFAULT_DB_PATH, connect
 from .web.public_pages import render_landing, render_link, render_play
 
@@ -118,6 +120,13 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
     def _conn() -> sqlite3.Connection:
         return conn_holder["conn"]
 
+    def _record_link(ident: dict) -> None:
+        """Persist a wallet's identity + rank so the admin can sync it to game
+        servers (whitelist/rank). Best-effort: never block auth on a DB hiccup."""
+        with contextlib.suppress(sqlite3.Error):
+            wl_store.upsert(_conn(), ident["wallet"], ident["mc_name"],
+                            ident.get("tier"), ident.get("holdings_pct", 0.0))
+
     @app.get("/healthz")
     def healthz() -> dict:
         return {"status": "ok", "surface": "public"}
@@ -136,8 +145,10 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
     def auth_verify(req: _VerifyReq = Body(...)) -> JSONResponse:
         """Verify the signed challenge, then set a session cookie."""
         _verify_signed_or_raise(req.pubkey, req.message, req.signature)
+        ident = _identity(req.pubkey)
+        _record_link(ident)
         token = auth_session.sign_session(req.pubkey)
-        resp = JSONResponse(_identity(req.pubkey), headers=_NO_STORE)
+        resp = JSONResponse(ident, headers=_NO_STORE)
         resp.set_cookie(
             _SESSION_COOKIE, token, max_age=7 * 24 * 3600, httponly=True,
             samesite="lax", secure=_cookie_secure(), path="/",
@@ -169,7 +180,9 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         _verify_signed_or_raise(req.pubkey, req.message, req.signature)
         if not pilot_pairing.approve(req.code, req.pubkey):
             raise HTTPException(status_code=404, detail="unknown or expired pairing code")
-        return JSONResponse({"ok": True, **_identity(req.pubkey)}, headers=_NO_STORE)
+        ident = _identity(req.pubkey)
+        _record_link(ident)
+        return JSONResponse({"ok": True, **ident}, headers=_NO_STORE)
 
     @app.get("/pilot/auth/poll")
     def pilot_auth_poll(pair_id: str) -> JSONResponse:

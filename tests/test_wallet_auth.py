@@ -169,3 +169,22 @@ def test_link_page_renders(client):
     assert r.status_code == 200
     assert "ABCD-2345" in r.text
     assert "Connect Wallet" in r.text
+
+
+def test_approve_records_wallet_link(tmp_path, monkeypatch):
+    from ndrchst.store import wallet_links as wl
+    from ndrchst.store.db import connect
+
+    monkeypatch.setenv("NDRCHST_COOKIE_SECURE", "0")
+    monkeypatch.setattr("ndrchst.runtime.solana.holdings_pct", lambda *a, **k: 0.7)
+    db = tmp_path / "t.db"
+    app = create_public_app(db_path=db)
+    with TestClient(app) as c:
+        pubkey, seed = _keypair(b"\x20" * 32)
+        start = c.post("/pilot/auth/start").json()
+        assert _approve(c, pubkey, seed, start["user_code"]).status_code == 200
+
+    link = wl.get(connect(db), pubkey)
+    assert link is not None
+    assert link.mc_name == W.derive_mc_name(pubkey)
+    assert link.tier == "silver"  # 0.7% -> silver
