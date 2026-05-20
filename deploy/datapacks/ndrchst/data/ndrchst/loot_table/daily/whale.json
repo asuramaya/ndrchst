@@ -1,0 +1,23 @@
+{
+  "type": "minecraft:generic",
+  "pools": [
+    {
+      "rolls": 1,
+      "entries": [
+        { "type": "minecraft:item", "name": "mysticalagriculture:supremium_essence", "weight": 6,
+          "functions": [{ "function": "minecraft:set_count", "count": { "type": "minecraft:uniform", "min": 16, "max": 32 } }] },
+        { "type": "minecraft:item", "name": "minecraft:nether_star", "weight": 2,
+          "functions": [{ "function": "minecraft:set_count", "count": { "type": "minecraft:uniform", "min": 1, "max": 1 } }] }
+      ]
+    },
+    {
+      "rolls": 2,
+      "entries": [
+        { "type": "minecraft:item", "name": "allthemodium:unobtainium_ingot", "weight": 4,
+          "functions": [{ "function": "minecraft:set_count", "count": { "type": "minecraft:uniform", "min": 2, "max": 4 } }] },
+        { "type": "minecraft:item", "name": "allthemodium:vibranium_ingot", "weight": 5,
+          "functions": [{ "function": "minecraft:set_count", "count": { "type": "minecraft:uniform", "min": 3, "max": 6 } }] }
+      ]
+    }
+  ]
+}
