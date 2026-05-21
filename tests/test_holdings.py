@@ -60,6 +60,41 @@ def test_identity_known_wallet_does_no_live_rpc(tmp_path: Path, monkeypatch):
     assert calls["n"] == 1
 
 
+def test_refresh_holdings_if_stale_refreshes_then_throttles(tmp_path: Path, monkeypatch):
+    """On launch/join the gate tier is re-read from chain, but at most once per
+    cooldown per wallet so a crash-relaunch loop can't drain the RPC."""
+    public._last_refresh.clear()
+    monkeypatch.setattr(public, "_REFRESH_COOLDOWN", 300.0)
+    calls = {"n": 0}
+
+    def _read(*_a, **_k):
+        calls["n"] += 1
+        return 1.2  # → gold (>=1.0, <2.5)
+
+    monkeypatch.setattr(solana, "try_holdings_pct", _read)
+    conn = connect(tmp_path / "t.db")
+    wl.upsert(conn, "WX", "wx", "holder", 0.0)  # stale gate tier
+
+    public._refresh_holdings_if_stale("WX", conn)
+    assert calls["n"] == 1
+    assert wl.get(conn, "WX").holdings_pct == 1.2
+    assert wl.get(conn, "WX").tier == "gold"          # gate tier refreshed
+    assert wl.get(conn, "WX").snapshot_pct is None    # /daily snapshot untouched
+
+    public._refresh_holdings_if_stale("WX", conn)     # within cooldown
+    assert calls["n"] == 1                            # → no second RPC
+
+
+def test_refresh_holdings_flaky_keeps_db_value(tmp_path: Path, monkeypatch):
+    public._last_refresh.clear()
+    monkeypatch.setattr(public, "_REFRESH_COOLDOWN", 0.0)  # cooldown off
+    monkeypatch.setattr(solana, "try_holdings_pct", lambda *_a, **_k: None)
+    conn = connect(tmp_path / "t.db")
+    wl.upsert(conn, "WY", "wy", "gold", 1.2)
+    public._refresh_holdings_if_stale("WY", conn)
+    assert wl.get(conn, "WY").holdings_pct == 1.2     # flaky read keeps the value
+
+
 def test_token_supply_is_cached(monkeypatch):
     solana._supply_cache.clear()
     calls = {"n": 0}

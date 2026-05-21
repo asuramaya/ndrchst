@@ -17,6 +17,8 @@ import ipaddress
 import logging
 import os
 import sqlite3
+import threading
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -221,6 +223,37 @@ def _identity(pubkey: str, *, conn: sqlite3.Connection | None = None,
     }
 
 
+# On a launch/join we want the join token to carry the player's CURRENT tier
+# (the "refresh lag" gap: DB-first reads are otherwise only as fresh as the
+# hourly loop). So those paths force a live read — but throttled per wallet so a
+# crash-relaunch loop, or connect→approve→play in quick succession, can't drain
+# the metered RPC. This updates the display/gate value (upsert) only; the hourly
+# snapshot stays the carousel-proof basis for /daily rewards (don't write it here
+# or a flash-borrow at launch could mint a high-tier daily).
+_REFRESH_COOLDOWN = float(os.environ.get("NDRCHST_REFRESH_COOLDOWN", "300"))
+_last_refresh: dict[str, float] = {}
+_refresh_lock = threading.Lock()
+
+
+def _refresh_holdings_if_stale(pubkey: str, conn: sqlite3.Connection) -> None:
+    """Re-read holdings from chain and persist the gate/display tier, at most
+    once per `_REFRESH_COOLDOWN` per wallet. No-op if disabled or within the
+    cooldown; a flaky read keeps the existing DB value."""
+    if _REFRESH_COOLDOWN > 0:
+        now = time.monotonic()
+        with _refresh_lock:
+            if now - _last_refresh.get(pubkey, 0.0) < _REFRESH_COOLDOWN:
+                return
+            _last_refresh[pubkey] = now  # claim the slot up front so failures throttle too
+    pct = solana.try_holdings_pct(pubkey)
+    if pct is None:
+        return
+    link = wl_store.get(conn, pubkey)
+    mc_name = link.mc_name if link is not None else wallet.derive_mc_name(pubkey)
+    tier = wallet.tier_for(pct)
+    wl_store.upsert(conn, pubkey, mc_name, tier.key if tier else None, pct)
+
+
 def create_public_app(*, db_path: Path | None = None) -> FastAPI:
     """Factory. The public app keeps its own SQLite connection (read-only)."""
     conn_holder: dict[str, sqlite3.Connection] = {}
@@ -310,6 +343,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
     def auth_verify(req: _VerifyReq = Body(...)) -> JSONResponse:
         """Verify the signed challenge, then set a session cookie."""
         _verify_signed_or_raise(req.pubkey, req.message, req.signature)
+        _refresh_holdings_if_stale(req.pubkey, _conn())
         ident = _identity(req.pubkey, conn=_conn())
         _record_link(ident)
         token = auth_session.sign_session(req.pubkey)
@@ -345,6 +379,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         _verify_signed_or_raise(req.pubkey, req.message, req.signature)
         if not client_pairing.approve(req.code, req.pubkey):
             raise HTTPException(status_code=404, detail="unknown or expired pairing code")
+        _refresh_holdings_if_stale(req.pubkey, _conn())
         ident = _identity(req.pubkey, conn=_conn())
         _record_link(ident)
         return JSONResponse({"ok": True, **_with_join_token(ident)}, headers=_NO_STORE)
@@ -396,6 +431,8 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         wallet_pk = device_token.verify(req.device_token)
         if not wallet_pk:
             raise HTTPException(status_code=401, detail="invalid or expired device token")
+        # Re-read tier from chain at Play (throttled) so the join token is current.
+        _refresh_holdings_if_stale(wallet_pk, _conn())
         ident = _identity(wallet_pk, conn=_conn())
         _record_link(ident)
         return JSONResponse(_with_join_token(ident), headers=_NO_STORE)
@@ -455,6 +492,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         wallet_pk = client_handoff.redeem(req.code)
         if not wallet_pk:
             raise HTTPException(status_code=404, detail="invalid or expired handoff code")
+        _refresh_holdings_if_stale(wallet_pk, _conn())
         ident = _identity(wallet_pk, conn=_conn())
         _record_link(ident)
         return JSONResponse(
