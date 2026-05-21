@@ -6,6 +6,7 @@ forwarder with temp paths — no display, no frozen binary needed.
 """
 from __future__ import annotations
 
+import json
 import sys
 import threading
 from pathlib import Path
@@ -13,6 +14,41 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "client" / "src"))
 
 from ndrchst_client import deeplink
+
+
+class _FakeResp:
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self) -> _FakeResp:
+        return self
+
+    def __exit__(self, *_a) -> bool:
+        return False
+
+
+def test_list_servers_fetches_static_catalog(monkeypatch):
+    catalog = [{"id": "b757b2ea9cea", "name": "ATM10", "status": "running",
+                "config_url": "/client/b757b2ea9cea/config.json"}]
+    seen: dict[str, str] = {}
+
+    def _open(req, timeout=0):
+        seen["url"] = req.full_url
+        return _FakeResp(json.dumps(catalog).encode())
+
+    monkeypatch.setattr("urllib.request.urlopen", _open)
+    out = deeplink.list_servers("https://play.ndrchst.com/")  # trailing slash
+    assert out == catalog
+    assert seen["url"] == "https://play.ndrchst.com/servers.json"
+
+
+def test_list_servers_non_list_is_empty(monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen",
+                        lambda req, timeout=0: _FakeResp(b'{"not": "a list"}'))
+    assert deeplink.list_servers("https://e") == []
 
 
 def test_parse_launch_with_params():

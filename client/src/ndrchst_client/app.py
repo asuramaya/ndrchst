@@ -565,6 +565,34 @@ def run() -> None:
 
     threading.Thread(target=_try_device_signin, daemon=True).start()
 
+    # Discovery: a generic build with no pinned server (downloaded directly, not
+    # via a play-page deep link) finds the server from the public catalog
+    # (servers.json on the edge) and pins it, so it can Play without a browser
+    # round-trip. Catalog metadata only — the join gate still runs through wallet
+    # auth. Skipped when already pinned, or when a deep link will pin one.
+    def _try_discover_server() -> None:
+        if (cfg.server_id and cfg.server_host) or initial_url:
+            return
+        base = cfg.auth_base_url or wallet_auth.DEFAULT_BASE
+        try:
+            servers = deeplink.list_servers(base)
+        except (OSError, ValueError) as exc:
+            emit_from_worker(f"(couldn't discover servers: {exc})")
+            return
+        pick = next((s for s in servers if s.get("status") == "running"),
+                    servers[0] if servers else None)
+        sid = pick.get("id") if pick else None
+        if not sid:
+            return
+        try:
+            deeplink.fetch_server_config(base, sid)
+            emit_from_worker(f"Discovered server {pick.get('name') or sid}.")
+            root.after(0, reload_config)
+        except (OSError, ValueError) as exc:
+            emit_from_worker(f"(couldn't load discovered server config: {exc})")
+
+    threading.Thread(target=_try_discover_server, daemon=True).start()
+
     # Single-instance + deep links: become the URL handler, and if the OS
     # launched us WITH a ndrchst:// URL (and no other instance grabbed it
     # above), act on it once the window is up.

@@ -75,6 +75,19 @@ def url_from_argv(argv: list[str]) -> str | None:
     return None
 
 
+def list_servers(base_url: str) -> list[dict]:
+    """Fetch the public server catalog — the static ``servers.json`` the edge
+    serves from R2 — so a generic build can discover and pin a server WITHOUT a
+    deep link. This is catalog metadata only (id, name, status, config_url); it
+    carries nothing that bypasses the join gate, which still runs through wallet
+    auth. Raises on network/parse failure."""
+    url = f"{base_url.rstrip('/')}/servers.json"
+    req = urllib.request.Request(url, headers={"user-agent": _UA})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        data = json.loads(r.read())
+    return data if isinstance(data, list) else []
+
+
 def fetch_server_config(base_url: str, server_id: str) -> str:
     """Pull a server's published ``config.json`` and write it where settings.load
     will pick it up (via ``NDRCHST_CLIENT_CONFIG``), pinning a generic build to
