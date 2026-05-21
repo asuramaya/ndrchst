@@ -291,6 +291,24 @@ html.signed-in .wchip{display:inline-flex}
 .inherit{margin-top:.55rem;font-size:.8rem;color:var(--fg2);border-left:2px solid rgba(20,241,149,.5);
   padding:.35rem .6rem;background:rgba(20,241,149,.06);border-radius:0 7px 7px 0}
 .inherit strong{color:var(--accent)}
+/* Nested tier card (ranks): identity + holder count header, demonstration
+   (icons + odds), compact chips, and a highlighted "your rank" state. */
+.tc-head{display:flex;align-items:flex-start;justify-content:space-between;gap:.6rem}
+.tc-id{display:flex;flex-direction:column;gap:.15rem}
+.tc-id h3{margin:0}
+.tc-count{flex:none;font-size:.72rem;color:var(--fg2);background:var(--bg3);
+  padding:.2rem .55rem;border-radius:999px;white-space:nowrap}
+.tc-you{display:none;margin:.5rem 0 0;font-size:.72rem;font-weight:700;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--accent)}
+.tier-card.me{outline:2px solid var(--accent);outline-offset:2px;
+  box-shadow:0 0 0 1px rgba(20,241,149,.35),0 10px 34px rgba(20,241,149,.14)}
+.tier-card.me .tc-you{display:block}
+.tier-card.me .tc-count{background:rgba(20,241,149,.16);color:var(--accent)}
+.tc-chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.7rem}
+.tc-chip{font-size:.74rem;color:var(--fg2);background:var(--bg3);border:1px solid var(--border);
+  padding:.18rem .55rem;border-radius:999px}
+.soon{border:1px dashed var(--border);border-radius:var(--radius-sm);padding:.9rem 1.1rem;
+  color:var(--fg2);font-size:.9rem;text-align:center;margin-top:.2rem}
 /* Profile popover anchored to the wallet chip (skin + identity, every page). */
 .wprofile{position:relative}
 .wchip{cursor:pointer;gap:.45rem;padding-left:.4rem}
@@ -528,8 +546,8 @@ _WALLET_JS = """
       d.disabled=false;
       d.textContent = me ? (d.dataset.labelIn||'Download the client')
                          : (d.dataset.labelOut||'Sign in to download'); });
-    // Highlight the signed-in player's row on the ranks ladder.
-    document.querySelectorAll('.server.me').forEach(function(r){r.classList.remove('me');});
+    // Highlight the signed-in player's row + their tier card on the ranks page.
+    document.querySelectorAll('.server.me,.tier-card.me').forEach(function(r){r.classList.remove('me');});
     if(!me) return;
     var t=$('wallet-tier');
     if(t){ $('wallet-addr').textContent=me.display;
@@ -542,6 +560,9 @@ _WALLET_JS = """
     if(me.mc_name){ var mine=document.querySelector('.server[data-mc="'+
       (window.CSS&&CSS.escape?CSS.escape(me.mc_name):me.mc_name)+'"]');
       if(mine) mine.classList.add('me'); }
+    if(me.tier){ var tc=document.querySelector('.tier-card[data-tier="'+
+      (window.CSS&&CSS.escape?CSS.escape(me.tier):me.tier)+'"]');
+      if(tc) tc.classList.add('me'); }
     // Paint every skin face (the chip avatar + the profile-pop face). Only
     // touch background-image when the URL actually changes — re-setting it each
     // render (the old ?t=Date.now() pattern) reloaded the image and flickered.
@@ -802,6 +823,7 @@ def _nav(active: str) -> str:
         f'<a href="{html.escape(_home_url(), quote=True)}"{cls("home")}>Home</a>'
         f'<a href="{html.escape(_play_url(), quote=True)}"{cls("play")}>Play</a>'
         f'<a href="/ranks"{cls("ranks")}>Ranks</a>'
+        '<a href="https://t.me/ndrchst" target="_blank" rel="noopener">Telegram</a>'
         + _wallet_ctl() +
         "</div></nav>"
     )
@@ -1078,7 +1100,13 @@ def render_play(servers: list[dict], *, downloads_base: str = "") -> str:
   </p>
 </section>
 
-<section class="section" style="border-top:none;padding-top:.4rem">
+<section class="section" id="servers" style="border-top:none;padding-top:.4rem">
+  <h2>Servers</h2>
+  {''.join(rows)}
+  <div class="soon">More servers coming soon</div>
+</section>
+
+<section class="section">
   <h2 style="font-size:1.2rem">Run the client</h2>
   <div class="os-tabs">
     <div class="os-tab" data-os="win">Windows</div>
@@ -1107,12 +1135,7 @@ def render_play(servers: list[dict], *, downloads_base: str = "") -> str:
     </ol>
   </div>
   <p class="meta when-in" style="margin-top:1rem">Prefer a self-contained folder? Each server's
-    <span class="mono">.zip</span> below bundles the client pinned to that server (Python required).</p>
-</section>
-
-<section class="section" id="servers">
-  <h2>Servers</h2>
-  {''.join(rows)}
+    <span class="mono">.zip</span> above bundles the client pinned to that server (Python required).</p>
 </section>
 
 <footer>The client is an offline launcher pinned to each server. It mirrors the server's
@@ -1178,101 +1201,76 @@ def _rolls_html(rolls: list[list[dict]]) -> str:
 
 def render_ranks(holders: list[dict], tiers: list[dict]) -> str:
     """tiers: list of {key, name, min_pct} ascending. holders: list of
-    {display, mc_name, tier, tier_name, holdings_pct} sorted by holdings desc."""
-    def _rolls(key: str, lower_names: list[str]) -> str:
-        """A tier's OWN weighted rolls (each item, amount range and exact odds,
-        from _tier_loot) plus an inheritance note: tiers are additive, so a tier
-        also rolls every lower tier's table each day (see the daily datapack)."""
-        rolls = _tier_loot().get(key, [])
-        nr = len(rolls)
-        own = (f'{_rolls_html(rolls)}'
-               f'<div class="drop-note">{nr} own roll{"" if nr == 1 else "s"} per day '
-               "· one item per roll, picked by weight</div>") if rolls else ""
-        treas = _tier_treasure(key)
-        bonus = ""
-        if treas:
-            bonus = ('<div class="inherit">+ a random treasure pull from '
-                     f'<strong>{html.escape(", ".join(treas))}</strong></div>')
-        inherit = ""
-        if lower_names:
-            names = ", ".join(reversed(lower_names))  # highest-lower first
-            inherit = (f'<div class="inherit">+ everything <strong>{html.escape(names)}</strong> '
-                       "get, every day</div>")
-        return own + bonus + inherit
+    {display, mc_name, tier, tier_name, holdings_pct}.
 
-    # Build ascending (so bands see the next tier + lower tiers for the additive
-    # note), display top-first.
+    The ladder IS the page: each tier is one self-explanatory nested card —
+    name + supply band, how many holders sit in it, and a demonstration of its
+    real daily crate (item icons + exact odds). The signed-in wallet's own card
+    is highlighted client-side. No separate leaderboard: a tier's name already
+    says what its holders are, so we show a per-tier count, not a roster."""
+    counts: dict[str, int] = {}
+    for h in holders:
+        if h.get("tier"):
+            counts[h["tier"]] = counts.get(h["tier"], 0) + 1
+
+    def _count_label(key: str) -> str:
+        n = counts.get(key, 0)
+        return f"{n} holder{'' if n == 1 else 's'}" if n else "no holders yet"
+
+    def _demo(key: str, has_lower: bool) -> str:
+        """Show, don't tell: the tier's own weighted rolls (icons + odds), then
+        compact chips for the additive lower tiers and the treasure pull."""
+        rolls = _tier_loot().get(key, [])
+        demo = _rolls_html(rolls) if rolls else ""
+        chips = []
+        if has_lower:
+            chips.append('<span class="tc-chip">+ every lower tier, daily</span>')
+        treas = _tier_treasure(key)
+        if treas:
+            chips.append('<span class="tc-chip">+ treasure: '
+                         f'{html.escape(treas[-1])}</span>')
+        chip_html = f'<div class="tc-chips">{"".join(chips)}</div>' if chips else ""
+        return demo + chip_html
+
+    # Ascending so each card sees its band; rendered top-tier first.
     cards = [
-        '<div class="feature tier-card">'
-        '<div class="lrow">'
-        f'<h3>{html.escape(t["name"])}</h3>'
-        f'<span class="thr">{_tier_band(tiers, i)}</span>'
+        f'<article class="feature tier-card" data-tier="{html.escape(t["key"], quote=True)}">'
+        '<div class="tc-head">'
+        f'<div class="tc-id"><h3>{html.escape(t["name"])}</h3>'
+        f'<span class="thr">{_tier_band(tiers, i)}</span></div>'
+        f'<span class="tc-count">{_count_label(t["key"])}</span>'
         "</div>"
-        f'{_rolls(t["key"], [lt["name"] for lt in tiers[:i]])}'
-        "</div>"
+        '<div class="tc-you">★ Your rank</div>'
+        f'{_demo(t["key"], i > 0)}'
+        "</article>"
         for i, t in enumerate(tiers)
     ]
     ladder = "".join(reversed(cards))
-
-    rows = []
-    if not holders:
-        rows.append(
-            '<div class="empty">No ranked holders yet — connect a wallet to be the first.</div>')
-    for i, h in enumerate(holders, start=1):
-        tier_name = h.get("tier_name") or "No rank"
-        pill_cls = "pill" if h.get("tier") else "pill none"
-        rows.append(
-            f'<div class="server" data-mc="{html.escape(h["mc_name"], quote=True)}">'
-            '<div class="right" style="gap:.9rem">'
-            f'<span class="rankno">#{i}</span>'
-            "<div>"
-            f'<div class="name mono">{html.escape(h["display"])}'
-            '<span class="youtag">you</span></div>'
-            f'<div class="meta mono">in-game {html.escape(h["mc_name"])}</div>'
-            "</div></div>"
-            '<div class="right">'
-            f'<span class="{pill_cls}">{html.escape(tier_name)}</span>'
-            f'<span class="meta mono">{h.get("holdings_pct", 0.0):.4f}%</span>'
-            "</div></div>"
-        )
 
     play = html.escape(_play_url(), quote=True)
     body = f"""
 <section class="hero" style="padding:3rem 0 1rem">
   <span class="eyebrow">$NDRCHST · ranks</span>
   <h1 style="font-size:2.1rem">Holdings are rank</h1>
-  <p class="lede">Your tier is your share of $NDRCHST supply, read straight from the chain.
-     Hold more, rank up — both here and in-game.</p>
-  <p class="when-in" style="color:var(--accent);font-size:.92rem;margin:.2rem 0 0">
+  <p class="lede">Your tier is your share of $NDRCHST supply, read from the chain. Each tier opens a
+     bigger daily crate — and it's additive, so you also get every tier below.</p>
+  <p class="when-in" style="color:var(--accent);font-size:.95rem;margin:.2rem 0 0">
     You're <span class="mono rc-tier" style="color:var(--fg)"></span> ·
-    <span class="mono rc-pct"></span> — your row is highlighted below.</p>
+    <span class="mono rc-pct"></span> — your card is highlighted below.</p>
   <div class="when-out" style="margin-top:.4rem">
     <a class="cta" href="{play}">Get the client →</a>
     <button class="wbtn connect-trigger" style="margin-left:.5rem">Connect to see your rank</button>
   </div>
 </section>
 
-<section class="section" style="border-top:none;padding-top:0">
-  <div class="row" style="display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap">
-    <h2 style="margin:0">Tiers &amp; your daily crate</h2>
-    <a class="xlink" href="{play}">Claim yours — get the client →</a>
-  </div>
-  <div class="callout" style="margin:1rem 0 1.3rem">
-    <strong>How your daily crate works.</strong> Each day you run <code>/daily</code> in-game to open
-    your crate — it rolls once per pool for your tier (one item per roll, by the weights shown as
-    odds below) plus a random pull from a vanilla treasure chest. <strong>Tiers are additive</strong>
-    — your crate also rolls every lower tier's, so a Whale opens the whole ladder daily. Every number
-    here is read straight from the server's loot tables, no marketing rounding.
-  </div>
+<section class="section" style="border-top:none;padding-top:.2rem">
+  <p class="callout" style="margin:0 0 1.3rem;font-size:.9rem">
+    Run <code>/daily</code> in-game to open your tier's crate — additive (you also get every lower
+    tier) plus a vanilla treasure pull. The icons and odds below are the real loot tables.</p>
   <div class="features ladder detailed">{ladder}</div>
 </section>
 
-<section class="section">
-  <h2>Holders</h2>
-  {''.join(rows)}
-</section>
-
-<footer>Ranks track the chain. Buys and sells are reflected the next time holdings are
-  refreshed. · <a href="{_home_url()}">Home</a> · <a href="{play}">Play</a></footer>
+<footer>Ranks track the chain — buys and sells show on the next refresh. ·
+  <a href="{_home_url()}">Home</a> · <a href="{play}">Play</a></footer>
 """
     return _shell("ndrchst — ranks", body, active="ranks")

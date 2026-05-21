@@ -124,27 +124,29 @@ def test_nav_links_are_same_host_relative(monkeypatch):
     assert "ndrchst.com" not in html  # no cross-host links leak into the page
 
 
-def test_ranks_renders_ladder_and_holders(tmp_path: Path):
+def test_ranks_renders_ladder_and_per_tier_counts(tmp_path: Path):
     from ndrchst.store import wallet_links as wl
     db = tmp_path / "t.db"
     conn = connect(db)
     wl.upsert(conn, "EUr2QnpmavMw51JiFYeTRnUywY7mPAtouzyY2P21pump",
               "EUr2Qn_pump", "gold", 1.25)
     wl.upsert(conn, "SoMeOtherWalletAddrxxxxxxxxxxxxxxxxxxxxxx",
-              "SoMeOt_xxxx", None, 0.0)  # no holdings → excluded from board
+              "SoMeOt_xxxx", None, 0.0)  # no holdings → not counted
     conn.close()
 
     app = create_public_app(db_path=db)
     with TestClient(app) as c:
         r = c.get("/ranks")
         assert r.status_code == 200
-        # Tier ladder is always present.
+        # Tier ladder is always present, one nested card per tier.
         for name in ("Holder", "Bronze", "Silver", "Gold", "Diamond", "Whale"):
             assert name in r.text
-        # The gold holder shows up; the zero-holdings wallet does not.
-        assert "EUr2…pump" in r.text
-        assert "1.2500%" in r.text
-        assert "SoMeOt_xxxx" not in r.text
+        assert 'data-tier="gold"' in r.text
+        # Per-tier holder COUNT replaces the leaderboard roster: one in gold,
+        # the empty tiers say so, and no individual wallet rows are exposed.
+        assert "1 holder" in r.text
+        assert "no holders yet" in r.text
+        assert "EUr2…pump" not in r.text and "SoMeOt_xxxx" not in r.text
         assert 'href="/ranks"' in r.text  # nav link present
 
 
@@ -382,9 +384,11 @@ def test_ranks_has_bands_and_transparency_table():
     assert "0.1% – 0.5% of supply" in html   # bronze: exact band  # noqa: RUF001
     assert "any holdings · base tier" in html  # holder floor
     # Transparency presentation: per-roll breakdown with amounts + exact odds.
-    assert "How your daily crate works" in html and "<code>/daily</code>" in html
+    assert "<code>/daily</code>" in html and "real loot tables" in html
     assert "Roll 1" in html and 'class="rpct mono"' in html  # odds column
-    assert "roll per day" in html or "rolls per day" in html
+    # Additive demonstration is shown as a compact chip, not prose copy.
+    assert "+ every lower tier, daily" in html
+    assert "no holders yet" in html  # per-tier count replaces the leaderboard
 
 
 def test_ranks_drop_odds_sum_to_100_per_roll():
@@ -512,9 +516,8 @@ def test_ranks_shows_random_treasure_pull():
     from ndrchst.web import public_pages as P
     P._tier_loot.cache_clear()
     html = P.render_ranks([], _tiers())
-    assert "random treasure pull" in html.lower()
-    assert "End City" in html               # diamond's vanilla treasure, surfaced
-    assert "vanilla treasure chest" in html  # explainer mentions the bonus
+    assert "treasure pull" in html.lower()    # explainer mentions the bonus
+    assert "treasure: End City" in html        # diamond's vanilla treasure, as a chip
     assert P._tier_treasure("diamond") == ["End City"]
 
 
@@ -523,7 +526,7 @@ def test_ranks_themed_as_daily_crate():
     with no separate keys/crate mechanic surfaced."""
     from ndrchst.web.public_pages import render_ranks
     html = render_ranks([], _tiers())
-    assert "your daily crate" in html.lower()
+    assert "daily crate" in html.lower()
     assert "Crates &amp; keys" not in html       # separate crate section gone
     assert 'data-crate=' not in html             # no key-balance slots
     assert "/crate common|rare|legendary" not in html
