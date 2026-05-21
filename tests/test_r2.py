@@ -90,3 +90,64 @@ def test_put_object_signs_and_sends(monkeypatch):
     assert captured["body"] == body
     assert captured["auth"].startswith("AWS4-HMAC-SHA256 Credential=AKID/")
     assert "SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date" in captured["auth"]
+
+
+def _list_xml(keys, *, next_token=None):
+    body = ['<?xml version="1.0" encoding="UTF-8"?>',
+            '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">']
+    body.append(f"<IsTruncated>{'true' if next_token else 'false'}</IsTruncated>")
+    for k, sz in keys:
+        body.append(f"<Contents><Key>{k}</Key><Size>{sz}</Size></Contents>")
+    if next_token:
+        body.append(f"<NextContinuationToken>{next_token}</NextContinuationToken>")
+    body.append("</ListBucketResult>")
+    return "".join(body).encode()
+
+
+def test_list_objects_paginates_and_signs(monkeypatch):
+    import httpx
+
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        # Canonical, pre-encoded query reaches the wire untouched.
+        assert "list-type=2" in request.url.query.decode()
+        assert request.headers.get("authorization", "").startswith("AWS4-HMAC-SHA256 ")
+        q = dict(request.url.params)
+        if q.get("continuation-token") == "TOK/2+x":
+            return httpx.Response(200, content=_list_xml([("pilot/b/c.jar", 7)]))
+        return httpx.Response(200, content=_list_xml(
+            [("pilot/a.jar", 5), ("pilot/b/x.jar", 9)], next_token="TOK/2+x"))
+
+    cfg = r2.R2Config("acct", "AKID", "secret", "ndrchst-dl", prefix="")
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        out = r2.list_objects(cfg, "pilot/", client=client)
+    assert out == [("pilot/a.jar", 5), ("pilot/b/x.jar", 9), ("pilot/b/c.jar", 7)]
+    assert len(seen) == 2  # paginated once via the continuation token
+    assert seen[0].startswith("https://acct.r2.cloudflarestorage.com/ndrchst-dl?")
+    assert "prefix=pilot%2F" in seen[0]
+
+
+def test_delete_object_signs_raw_key(monkeypatch):
+    import httpx
+
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["method"] = request.method
+        captured["url"] = str(request.url)
+        captured["auth"] = request.headers.get("authorization", "")
+        captured["sha"] = request.headers.get("x-amz-content-sha256", "")
+        return httpx.Response(204)
+
+    cfg = r2.R2Config("acct", "AKID", "secret", "ndrchst-dl", prefix="")
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        r2.delete_object(cfg, "pilot/b757b2ea9cea/mods/some+mod (2).jar", client=client)
+    assert captured["method"] == "DELETE"
+    # Key segments are percent-encoded (space, '+', parens) for both sign + send.
+    assert captured["url"] == (
+        "https://acct.r2.cloudflarestorage.com/ndrchst-dl/pilot/b757b2ea9cea/"
+        "mods/some%2Bmod%20%282%29.jar")
+    assert captured["sha"] == hashlib.sha256(b"").hexdigest()
+    assert "SignedHeaders=host;x-amz-content-sha256;x-amz-date" in captured["auth"]

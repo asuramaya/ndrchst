@@ -107,6 +107,33 @@ def build_bundle(
     out_dir = clients_root / server.id
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # Stage the CurseForge client pack so build_mods_index can read its
+    # manifest and resolve mods to CF's CDN. WITHOUT modpack.zip here, the
+    # index silently falls back to origin-serving every mod (~1.3 GB through
+    # the box's residential uplink) — the exact thing the CDN design avoids.
+    # Idempotent: download only when missing.
+    modpack_zip = out_dir / "modpack.zip"
+    if modpack_url and not modpack_zip.exists():
+        import logging
+
+        import httpx
+        try:
+            with httpx.stream("GET", modpack_url, follow_redirects=True,
+                              timeout=600.0) as r:
+                r.raise_for_status()
+                tmp = modpack_zip.with_suffix(".zip.part")
+                with tmp.open("wb") as f:
+                    for chunk in r.iter_bytes(1 << 16):
+                        f.write(chunk)
+                tmp.replace(modpack_zip)
+        except Exception:
+            # Non-fatal: the client.zip still builds. build_mods_index logs
+            # loudly and falls back to origin if the pack never lands.
+            modpack_zip.with_suffix(".zip.part").unlink(missing_ok=True)
+            logging.getLogger("ndrchst").warning(
+                "could not stage modpack.zip for %s from %s — mods index will "
+                "fall back to origin-serving (heavy publish)", server.id, modpack_url)
+
     host = _public_host(server, public_host=public_host)
     # MC clients need a real semver MC version, not a URL (which is what
     # modpack-platform servers store). Resolve modded servers to the MC
@@ -134,6 +161,10 @@ def build_bundle(
         "modpack_url": modpack_url or None,
         "mods_sync_url": mods_sync_url,
         "neoforge_version": neoforge_version or None,
+        # Self-update + wallet-auth/deep-link bases. Derived from the edge so a
+        # per-server build self-updates and authenticates against the same host.
+        "update_base_url": (f"{edge_url.rstrip('/')}/client" if edge_url else None),
+        "auth_base_url": edge_url or None,
     }
 
     zip_buf = io.BytesIO()
@@ -236,6 +267,8 @@ def _render_config_py(cfg: dict) -> str:
         f"MODPACK_URL = {cfg.get('modpack_url')!r}\n"
         f"MODS_SYNC_URL = {cfg.get('mods_sync_url')!r}\n"
         f"TUNNEL_HOSTNAME = {cfg.get('tunnel_hostname')!r}\n"
+        f"UPDATE_BASE_URL = {cfg.get('update_base_url')!r}\n"
+        f"AUTH_BASE_URL = {cfg.get('auth_base_url')!r}\n"
         f"DEFAULT_USERNAME = {cfg['default_username']!r}\n"
         f"SERVER_ID = {cfg['server_id']!r}\n"
     )

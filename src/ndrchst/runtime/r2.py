@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import os
 import urllib.parse
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
 import httpx
@@ -163,6 +164,133 @@ def put_object(
     try:
         r = c.put(url, content=body, headers=send)
         r.raise_for_status()
+    finally:
+        if owns:
+            c.close()
+
+
+def _canonical_query(params: dict[str, str]) -> str:
+    """SigV4 canonical query string: params sorted by name, both key and value
+    percent-encoded down to the RFC-3986 unreserved set, joined by '&'. httpx
+    transmits an already-encoded query string byte-for-byte (verified), so what
+    we sign here is exactly what goes on the wire."""
+    return "&".join(
+        f"{urllib.parse.quote(k, safe='-_.~')}={urllib.parse.quote(v, safe='-_.~')}"
+        for k, v in sorted(params.items())
+    )
+
+
+def _signed_get_or_delete(
+    cfg: R2Config,
+    *,
+    method: str,
+    canonical_uri: str,
+    query: str,
+    client: httpx.Client,
+) -> httpx.Response:
+    """Sign + send an empty-body request (GET list / DELETE object). Shared by
+    list_objects and delete_object — same SigV4 shape, empty payload hash."""
+    amz_date = datetime.datetime.now(datetime.UTC).strftime("%Y%m%dT%H%M%SZ")
+    empty_hash = _sha256_hex(b"")
+    sign = {
+        "host": cfg.host,
+        "x-amz-content-sha256": empty_hash,
+        "x-amz-date": amz_date,
+    }
+    auth, _ = sign_v4(
+        method=method, canonical_uri=canonical_uri, query=query, headers=sign,
+        payload_hash=empty_hash, access_key=cfg.access_key_id,
+        secret_key=cfg.secret_access_key, region=_REGION, service=_SERVICE,
+        amz_date=amz_date,
+    )
+    send = {
+        "Host": cfg.host,
+        "x-amz-content-sha256": empty_hash,
+        "x-amz-date": amz_date,
+        "Authorization": auth,
+    }
+    url = f"https://{cfg.host}{canonical_uri}"
+    if query:
+        url += f"?{query}"
+    r = client.request(method, url, headers=send)
+    r.raise_for_status()
+    return r
+
+
+def _parse_list_v2(xml_bytes: bytes) -> tuple[list[tuple[str, int]], str]:
+    """Parse a ListObjectsV2 XML body into ([(key, size), ...], next_token).
+    next_token is "" when the listing isn't truncated. Tolerates the S3
+    namespace by matching on the local tag name."""
+    # R2's own ListObjectsV2 response — a trusted source, not user input.
+    root = ET.fromstring(xml_bytes)
+
+    def local(tag: str) -> str:
+        return tag.rsplit("}", 1)[-1]
+
+    keys: list[tuple[str, int]] = []
+    token = ""
+    for el in root:
+        name = local(el.tag)
+        if name == "Contents":
+            key = None
+            size = 0
+            for ch in el:
+                cn = local(ch.tag)
+                if cn == "Key":
+                    key = ch.text
+                elif cn == "Size":
+                    size = int(ch.text or 0)
+            if key is not None:
+                keys.append((key, size))
+        elif name == "NextContinuationToken":
+            token = el.text or ""
+    return keys, token
+
+
+def list_objects(
+    cfg: R2Config, prefix: str = "", *, client: httpx.Client | None = None
+) -> list[tuple[str, int]]:
+    """List every object key under `prefix` (paginating past 1000), returning
+    [(key, size_bytes), ...]. `prefix` is a RAW bucket prefix (e.g. 'pilot/');
+    cfg.prefix is honored if set. Read-only — used by the orphan-purge tool."""
+    full_prefix = cfg.key(prefix) if (cfg.prefix and prefix) else prefix
+    canonical_uri = _encode_path([cfg.bucket])
+    out: list[tuple[str, int]] = []
+    token = ""
+    owns = client is None
+    c = client or httpx.Client(timeout=_UPLOAD_TIMEOUT)
+    try:
+        while True:
+            params = {"list-type": "2"}
+            if full_prefix:
+                params["prefix"] = full_prefix
+            if token:
+                params["continuation-token"] = token
+            query = _canonical_query(params)
+            r = _signed_get_or_delete(
+                cfg, method="GET", canonical_uri=canonical_uri, query=query, client=c)
+            page, token = _parse_list_v2(r.content)
+            out.extend(page)
+            if not token:
+                break
+    finally:
+        if owns:
+            c.close()
+    return out
+
+
+def delete_object(
+    cfg: R2Config, key: str, *, client: httpx.Client | None = None
+) -> None:
+    """DELETE one RAW object key (as returned by list_objects — NOT re-prefixed).
+    R2 returns 204 even for a missing key, so this is idempotent. Raises on a
+    non-2xx (auth / network) so the caller can stop on a real failure."""
+    canonical_uri = _encode_path([cfg.bucket, *key.split("/")])
+    owns = client is None
+    c = client or httpx.Client(timeout=_UPLOAD_TIMEOUT)
+    try:
+        _signed_get_or_delete(
+            cfg, method="DELETE", canonical_uri=canonical_uri, query="", client=c)
     finally:
         if owns:
             c.close()

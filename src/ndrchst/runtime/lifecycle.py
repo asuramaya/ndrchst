@@ -465,6 +465,17 @@ class Lifecycle:
             except cf.CurseForgeError:
                 # No manifest / not a CF pack — everything served from origin.
                 pass
+        if not resolved:
+            # Loud, because this is the difference between a light publish and
+            # re-hosting the whole pack (~1.3 GB) through the box. Almost always
+            # means modpack.zip is missing from CLIENTS_ROOT/<sid>/ (regenerate
+            # the client to re-stage it).
+            import logging
+            logging.getLogger("ndrchst").warning(
+                "build_mods_index(%s): no CF manifest resolved (modpack.zip "
+                "present=%s) — every mod will be ORIGIN-served, not CDN. "
+                "Regenerate the client to stage the pack.",
+                server_id, modpack_zip.exists())
 
         edge = self._edge_url.rstrip("/")
         entries = []

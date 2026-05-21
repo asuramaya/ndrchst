@@ -73,7 +73,7 @@ final class DailyCommand {
         server.getCommands().performPrefixedCommand(
                 server.createCommandSourceStack().withSuppressedOutput().withPermission(4),
                 "loot give " + p.getGameProfile().getName() + " loot ndrchst:daily/" + tier);
-        src.sendSuccess(() -> Component.literal("Claimed your " + tier + " daily reward!"), false);
+        src.sendSuccess(() -> Component.literal("Opened your " + tier + " daily crate!"), false);
         return 1;
     }
 

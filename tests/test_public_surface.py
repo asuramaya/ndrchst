@@ -88,10 +88,13 @@ def test_play_renders_html_with_download_link(tmp_path: Path):
         r = c.get("/play")
         assert r.status_code == 200
         assert "Public Test" in r.text
-        # Download is now gated behind wallet sign-in (auth-first): a client-dl
-        # button carrying the server id, not a bare download link.
+        # Play is gated behind wallet sign-in (auth-first): a client-dl button
+        # carrying the server id, which hands off to the installed app.
         assert 'class="btn client-dl" data-sid="srvjava01"' in r.text
-        assert "Sign in to download" in r.text
+        assert "Sign in to play" in r.text          # signed-out label
+        assert 'data-label-in="Play"' in r.text     # becomes "Play" once signed in
+        assert 'id="client-download"' in r.text      # primary exe download CTA
+        assert "/me/handoff" in r.text               # deep-link handoff wiring
         assert "bedrock 19150/udp" in r.text
 
 
@@ -171,6 +174,33 @@ def test_me_client_bakes_device_token_into_bundle(tmp_path: Path, monkeypatch):
         assert "ndrchst_client/config.py" in zf.namelist()  # the real bundle, intact
         baked = zf.read("ndrchst-device.token").decode()
         assert device_token.verify(baked) == "WALLETxyz"
+
+
+def test_handoff_mint_and_redeem(tmp_path: Path):
+    """The play page mints a one-time handoff code for a signed-in wallet; the
+    installed client redeems it (no session) for a device token + identity. The
+    URL only ever carries the single-use code, never a credential."""
+    from ndrchst.domain import auth_session, client_handoff, device_token
+    app = create_public_app(db_path=tmp_path / "t.db")
+    with TestClient(app) as c:
+        # minting requires a wallet session
+        assert c.post("/me/handoff").status_code == 401
+        c.cookies.set("ndrchst_session", auth_session.sign_session("WALLETxyz"))
+        code = c.post("/me/handoff").json()["code"]
+        assert code and isinstance(code, str)
+        # redeem as the client would — WITHOUT a session — for token + identity
+        c.cookies.delete("ndrchst_session")
+        body = c.post("/client/auth/handoff", json={"code": code})
+        assert body.status_code == 200
+        j = body.json()
+        assert j["wallet"] == "WALLETxyz"
+        assert j.get("join_token")                            # the mod credential
+        assert device_token.verify(j["device_token"]) == "WALLETxyz"
+        # single-use: the same code can't be redeemed again
+        assert c.post("/client/auth/handoff", json={"code": code}).status_code == 404
+        # an unknown code is rejected
+        assert c.post("/client/auth/handoff", json={"code": "nope"}).status_code == 404
+        assert client_handoff.redeem(code) is None            # nothing lingers in-process
 
 
 def test_internal_caller_guard():
@@ -345,13 +375,29 @@ def test_landing_drops_tier_teaser_but_keeps_chips():
     assert "/game/items/" in html  # deco chips still present, sampled from drops
 
 
-def test_ranks_has_bands_and_drop_tooltips():
+def test_ranks_has_bands_and_transparency_table():
     from ndrchst.web.public_pages import render_ranks
     html = render_ranks([], _tiers())
     assert "≥ 5% of supply" in html          # whale: open-ended top band
     assert "0.1% – 0.5% of supply" in html   # bronze: exact band  # noqa: RUF001
     assert "any holdings · base tier" in html  # holder floor
-    assert "data-tip=" in html and "daily reward" in html  # tooltipped drops + count
+    # Transparency presentation: per-roll breakdown with amounts + exact odds.
+    assert "How your daily crate works" in html and "<code>/daily</code>" in html
+    assert "Roll 1" in html and 'class="rpct mono"' in html  # odds column
+    assert "roll per day" in html or "rolls per day" in html
+
+
+def test_ranks_drop_odds_sum_to_100_per_roll():
+    """Odds are derived from the loot-table weights, so each roll's entries
+    must total 100% — proving the page reads the real source, not a fiction."""
+    from ndrchst.web import public_pages as P
+    P._tier_loot.cache_clear()
+    loot = P._tier_loot()
+    P._tier_loot.cache_clear()
+    assert loot, "expected loot tables to be present in the repo"
+    for tier, rolls in loot.items():
+        for i, entries in enumerate(rolls):
+            assert sum(e["pct"] for e in entries) == 100, (tier, i, entries)
 
 
 def test_drops_come_from_loot_tables(monkeypatch, tmp_path: Path):
@@ -424,3 +470,75 @@ def test_skin_too_large_rejected(tmp_path: Path, monkeypatch):
     with TestClient(app) as c:
         c.cookies.set("ndrchst_session", auth_session.sign_session("WALLETxyz"))
         assert c.post("/me/skin", content=b"x" * (256 * 1024 + 1)).status_code == 413
+
+
+def test_skin_search_preview_and_import(tmp_path: Path, monkeypatch):
+    """Username search → preview proxy → one-click import, all gated to a
+    signed-in wallet. Mojang is mocked (mojang module is unit-tested separately)."""
+    from ndrchst.domain import auth_session
+    from ndrchst.runtime import mojang
+    monkeypatch.setenv("NDRCHST_COOKIE_SECURE", "0")
+    monkeypatch.setenv("NDRCHST_SKINS_DIR", str(tmp_path / "skins"))
+    tex = "a" * 64
+    monkeypatch.setattr(mojang, "lookup_skin", lambda q, **k: (
+        {"name": "Notch", "uuid": "u", "texture": tex, "model": "classic"}
+        if q == "Notch" else None))
+    monkeypatch.setattr(mojang, "fetch_texture",
+                        lambda h, **k: _png(64, 64) if h == tex else None)
+    app = create_public_app(db_path=tmp_path / "t.db")
+    with TestClient(app) as c:
+        # search is gated to signed-in (no open Mojang proxy)
+        assert c.get("/me/skin/search?q=Notch").status_code == 401
+        c.cookies.set("ndrchst_session", auth_session.sign_session("WALLETxyz"))
+        res = c.get("/me/skin/search?q=Notch").json()["results"]
+        assert res and res[0]["texture"] == tex
+        assert res[0]["preview_url"] == f"/me/skin/preview/{tex}"
+        assert c.get("/me/skin/search?q=Ghost").json()["results"] == []
+        # preview proxies the texture bytes as image/png
+        p = c.get(f"/me/skin/preview/{tex}")
+        assert p.status_code == 200 and p.headers["content-type"] == "image/png"
+        # import stores under the wallet, surfaced via /me + /skins
+        im = c.post("/me/skin/import", json={"texture": tex})
+        assert im.status_code == 200 and im.json()["skin_url"] == "/skins/WALLETxyz.png"
+        assert c.get("/me").json()["skin_url"] == "/skins/WALLETxyz.png"
+        # import requires a session
+        c.cookies.delete("ndrchst_session")
+        assert c.post("/me/skin/import", json={"texture": tex}).status_code == 401
+
+
+def test_ranks_shows_random_treasure_pull():
+    """Each daily crate also pulls from a vanilla treasure table (built-in random
+    loot) — surfaced on /ranks, read from the loot table's minecraft: refs."""
+    from ndrchst.web import public_pages as P
+    P._tier_loot.cache_clear()
+    html = P.render_ranks([], _tiers())
+    assert "random treasure pull" in html.lower()
+    assert "End City" in html               # diamond's vanilla treasure, surfaced
+    assert "vanilla treasure chest" in html  # explainer mentions the bonus
+    assert P._tier_treasure("diamond") == ["End City"]
+
+
+def test_ranks_themed_as_daily_crate():
+    """Daily IS the crate now — /ranks frames the additive daily as the crate,
+    with no separate keys/crate mechanic surfaced."""
+    from ndrchst.web.public_pages import render_ranks
+    html = render_ranks([], _tiers())
+    assert "your daily crate" in html.lower()
+    assert "Crates &amp; keys" not in html       # separate crate section gone
+    assert 'data-crate=' not in html             # no key-balance slots
+    assert "/crate common|rare|legendary" not in html
+
+
+def test_pages_cache_identity_to_avoid_flicker():
+    """A signed-in player must not flash the signed-out layout on navigation:
+    the head bootstrap paints the login class from cache before first render,
+    and render() persists identity to localStorage on <html> (not <body>)."""
+    from ndrchst.web.public_pages import render_landing, render_play
+    home = render_landing()
+    assert "localStorage.getItem('ndrchst_me')" in home  # pre-render class paint
+    assert "localStorage.setItem('ndrchst_me'" in home    # render persists identity
+    assert "document.documentElement.classList" in home   # class on <html>
+    assert "html.signed-in" in home                       # CSS keys off <html>
+    play = render_play([])
+    assert "skin-q" in play and "/me/skin/search" in play  # username search wired
+    assert "minecraftskins.com" in play                    # Skindex jump-link

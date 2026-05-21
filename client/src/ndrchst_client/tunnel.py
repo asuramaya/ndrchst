@@ -184,7 +184,9 @@ class Tunnel:
         # edge errors). Falls back to DEVNULL if no log path is set.
         if self.log_path is not None:
             cmd[3:3] = ["--loglevel", "debug"]
-            log_f = open(self.log_path, "w")
+            # Long-lived: handed to Popen below for the sidecar's lifetime, so a
+            # context manager would close it prematurely (closed on stop()).
+            log_f = open(self.log_path, "w")  # noqa: SIM115
             out = err = log_f
         else:
             out = err = subprocess.DEVNULL

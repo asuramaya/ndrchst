@@ -26,10 +26,17 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .domain import auth_session, client_pairing, device_token, join_token, wallet
+from .domain import (
+    auth_session,
+    client_handoff,
+    client_pairing,
+    device_token,
+    join_token,
+    wallet,
+)
 from .domain.models import Family
 from .logging_setup import configure as configure_logging
-from .runtime import solana
+from .runtime import mojang, solana
 from .runtime.client import bundle_path as client_bundle_path
 from .runtime.holdings_refresh import refresh_all_holdings
 from .store import daily_claims as dc_store
@@ -74,12 +81,20 @@ class _DeviceExchangeReq(BaseModel):
     device_token: str  # the client's long-lived credential
 
 
+class _HandoffRedeemReq(BaseModel):
+    code: str  # one-time handoff code minted by the play page for a deep link
+
+
 class _DailyClaimReq(BaseModel):
     wallet: str  # the verified wallet the mod stashed at login
 
 
 class _DailyResetReq(BaseModel):
     wallet: str
+
+
+class _SkinImportReq(BaseModel):
+    texture: str  # 64-hex texture hash from a /me/skin/search result
 
 
 def _cookie_secure() -> bool:
@@ -400,6 +415,32 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             conn.close()
         return JSONResponse({"ok": True}, headers=_NO_STORE)
 
+    @app.post("/me/handoff")
+    def me_handoff(request: Request) -> JSONResponse:
+        """Mint a one-time handoff code for the signed-in wallet. The play page
+        embeds it in a ``ndrchst://`` deep link so an already-installed client
+        can link itself without a second sign-in. Requires a wallet session."""
+        pubkey = auth_session.verify_session(request.cookies.get(_SESSION_COOKIE))
+        if not pubkey:
+            raise HTTPException(status_code=401, detail="not signed in")
+        return JSONResponse({"code": client_handoff.mint(pubkey)}, headers=_NO_STORE)
+
+    @app.post("/client/auth/handoff")
+    def client_auth_handoff(req: _HandoffRedeemReq = Body(...)) -> JSONResponse:
+        """Redeem a one-time handoff code (carried in a ``ndrchst://`` deep link)
+        for a durable device token + a fresh identity. The code — not a
+        credential — is what travelled in the URL; it's single-use and
+        short-lived, so a leaked link can't be replayed."""
+        wallet_pk = client_handoff.redeem(req.code)
+        if not wallet_pk:
+            raise HTTPException(status_code=404, detail="invalid or expired handoff code")
+        ident = _identity(wallet_pk)
+        _record_link(ident)
+        return JSONResponse(
+            {**_with_join_token(ident), "device_token": device_token.issue(wallet_pk)},
+            headers=_NO_STORE,
+        )
+
     @app.get("/me/client/{server_id}")
     def me_client(server_id: str, request: Request) -> Response:
         """Authenticated, personalized client download: requires a wallet session
@@ -480,6 +521,53 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="no skin set")
         return FileResponse(path, media_type="image/png",
                             headers={"Cache-Control": "no-cache"})
+
+    @app.get("/me/skin/search")
+    def skin_search(request: Request, q: str = "") -> JSONResponse:
+        """Find a skin by Minecraft username (Mojang). The Skindex is walled by
+        a Cloudflare JS challenge a server can't pass, so search resolves a
+        username to that player's skin instead — reliable + dependency-free.
+        Returns at most one result: {name, model, texture, preview_url}. Gated
+        to a signed-in wallet so it can't be used as an open Mojang proxy."""
+        if not auth_session.verify_session(request.cookies.get(_SESSION_COOKIE)):
+            raise HTTPException(status_code=401, detail="sign in with your wallet first")
+        found = mojang.lookup_skin(q.strip()) if q.strip() else None
+        results = [] if found is None else [{
+            "name": found["name"],
+            "model": found["model"],
+            "texture": found["texture"],
+            "preview_url": f"/me/skin/preview/{found['texture']}",
+        }]
+        return JSONResponse({"results": results}, headers=_NO_STORE)
+
+    @app.get("/me/skin/preview/{texture}")
+    def skin_preview(texture: str) -> Response:
+        """Proxy a Mojang texture so the https page can preview an http://
+        textures.minecraft.net skin without mixed-content. Hash-only input ⇒
+        the box can only ever fetch textures.minecraft.net/texture/<hash>."""
+        data = mojang.fetch_texture(texture)
+        if data is None:
+            raise HTTPException(status_code=404, detail="texture not found")
+        return Response(content=data, media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+    @app.post("/me/skin/import")
+    def skin_import(request: Request, req: _SkinImportReq = Body(...)) -> JSONResponse:
+        """Apply a searched skin: fetch the texture by hash, validate it as a
+        64x64 / 64x32 PNG, and store it under the signed-in wallet — the same
+        slot as an uploaded skin."""
+        pubkey = auth_session.verify_session(request.cookies.get(_SESSION_COOKIE))
+        if not pubkey:
+            raise HTTPException(status_code=401, detail="not signed in")
+        data = mojang.fetch_texture(req.texture)
+        if data is None:
+            raise HTTPException(status_code=502, detail="could not fetch that skin")
+        if _png_dims(data) not in _SKIN_DIMS_OK:
+            raise HTTPException(status_code=400, detail="skin must be a 64x64 (or 64x32) PNG")
+        path = _skin_path(pubkey)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return JSONResponse({"ok": True, "skin_url": f"/skins/{pubkey}.png"}, headers=_NO_STORE)
 
     def _play_servers() -> list[dict]:
         return [

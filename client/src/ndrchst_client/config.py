@@ -18,6 +18,8 @@ Optional fields (modpack + tunnel support):
   UPDATE_BASE_URL    — base URL for self-update (e.g. an R2 bucket fronted
                        by a custom domain). Client fetches <base>/latest.json
                        on launch; unset disables auto-update.
+  AUTH_BASE_URL      — site base for wallet sign-in + deep-link handoff
+                       (/client/auth/*, /me/handoff, /client/<sid>/config.json).
 """
 from __future__ import annotations
 
@@ -31,7 +33,13 @@ NEOFORGE_VERSION: str | None = None
 MODPACK_URL: str | None = None
 MODS_SYNC_URL: str | None = None
 TUNNEL_HOSTNAME: str | None = None
-UPDATE_BASE_URL: str | None = None
+
+# Defaults so a GENERIC build (the standalone exe shipped from CI, with no
+# per-server config.py) self-updates from the R2-backed downloads path and knows
+# where to authenticate / fetch a server's config.json for a ndrchst:// deep
+# link. The Worker serves /client/latest.json + the binaries straight from R2.
+UPDATE_BASE_URL: str | None = "https://play.ndrchst.com/client"
+AUTH_BASE_URL: str | None = "https://play.ndrchst.com"
 
 DEFAULT_USERNAME = "Player"
 SERVER_ID = ""

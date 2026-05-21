@@ -139,3 +139,48 @@ def test_edge_url_missing_means_no_update_line(tmp_path: Path):
         readme = zf.read("README.txt").decode()
     assert "Grab the latest" not in readme
     assert "/client/" not in readme
+
+
+def test_build_bundle_stages_modpack_when_missing(tmp_path: Path, monkeypatch):
+    """build_bundle self-stages the CF pack so the mods index can resolve to
+    CDN — the root-cause fix for the all-origin (1.3 GB) regression. Idempotent:
+    a present pack isn't re-downloaded."""
+    import contextlib
+
+    import httpx
+
+    calls = {"n": 0}
+
+    @contextlib.contextmanager
+    def fake_stream(method, url, **kw):
+        calls["n"] += 1
+
+        class _R:
+            def raise_for_status(self):
+                pass
+
+            def iter_bytes(self, _n):
+                yield b"PK\x03\x04fake-pack"
+
+        yield _R()
+
+    monkeypatch.setattr(httpx, "stream", fake_stream)
+    s = _make_server()
+    client.build_bundle(s, public_host="x", clients_root=tmp_path,
+                        modpack_url="https://cdn.example/pack.zip")
+    pack = tmp_path / s.id / "modpack.zip"
+    assert pack.exists() and pack.read_bytes() == b"PK\x03\x04fake-pack"
+    assert calls["n"] == 1
+    # Present pack → no re-download on the next build.
+    client.build_bundle(s, public_host="x", clients_root=tmp_path,
+                        modpack_url="https://cdn.example/pack.zip")
+    assert calls["n"] == 1
+
+
+def test_build_bundle_no_modpack_url_no_download(tmp_path: Path, monkeypatch):
+    import httpx
+    monkeypatch.setattr(httpx, "stream", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("should not download without modpack_url")))
+    s = _make_server()
+    client.build_bundle(s, public_host="x", clients_root=tmp_path)  # no modpack_url
+    assert not (tmp_path / s.id / "modpack.zip").exists()

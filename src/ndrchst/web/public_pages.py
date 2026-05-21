@@ -210,12 +210,12 @@ nav.top .links a:hover{background:rgba(255,255,255,.05)}
 @media(max-width:560px){nav.top{justify-content:center}
   nav.top .links{width:100%;justify-content:center}
   .wnav{margin-left:0;flex-basis:100%;justify-content:center}}
-/* Login-state visibility, toggled by body.signed-in / .signed-out from wallet JS. */
-.when-in{display:none}body.signed-in .when-in{display:block}
-body.signed-in .when-out{display:none}
-body.signed-in .wbtn{display:none}
-body.signed-in .wchip{display:inline-flex}
-.rankcard.when-in{display:none}body.signed-in .rankcard.when-in{display:block}
+/* Login-state visibility, toggled by html.signed-in / .signed-out from wallet JS. */
+.when-in{display:none}html.signed-in .when-in{display:block}
+html.signed-in .when-out{display:none}
+html.signed-in .wbtn{display:none}
+html.signed-in .wchip{display:inline-flex}
+.rankcard.when-in{display:none}html.signed-in .rankcard.when-in{display:block}
 /* "You" highlight on the ranks ladder. */
 .server.me{border-color:rgba(20,241,149,.7);box-shadow:0 0 0 1px rgba(20,241,149,.35),0 0 26px rgba(20,241,149,.12)}
 .server.me .youtag{display:inline-flex}
@@ -254,6 +254,61 @@ body.signed-in .wchip{display:inline-flex}
 .skin-up{display:flex;flex-direction:column;gap:.4rem}
 .skin-up .row{display:flex;gap:.5rem;flex-wrap:wrap}
 .skin-up .meta{color:var(--muted);font-size:.78rem}
+/* Skin search (find a skin by Minecraft username, apply with one click). */
+.skin-search{display:flex;gap:.5rem;margin-top:.9rem;flex-wrap:wrap}
+.skin-search input{flex:1;min-width:12rem;background:rgba(10,6,19,.6);border:1px solid var(--border);
+  border-radius:var(--radius-sm);color:var(--fg);padding:.5rem .75rem;font:inherit}
+.skin-search input::placeholder{color:var(--muted)}
+.skin-search input:focus{outline:none;border-color:rgba(20,241,149,.5)}
+.skin-results{display:flex;gap:.7rem;flex-wrap:wrap;margin-top:.7rem}
+.skin-results .meta{color:var(--muted);font-size:.8rem}
+.skin-pick{display:flex;flex-direction:column;align-items:center;gap:.4rem;padding:.6rem;
+  border:1px solid var(--border);border-radius:10px;background:rgba(22,16,41,.6)}
+.skin-pick .face{width:56px;height:56px;image-rendering:pixelated;border-radius:6px;
+  background-color:rgba(10,6,19,.6);background-repeat:no-repeat;
+  background-size:448px 448px;background-position:-56px -56px}
+.skin-pick .nm{font-size:.76rem;color:var(--fg2);max-width:6rem;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.skin-pick .btn{padding:.3rem .8rem;font-size:.8rem}
+.skindex-link{display:inline-block;margin-top:.7rem;font-size:.82rem;color:var(--fg2)}
+.skindex-link:hover{color:var(--fg)}
+/* Ranks transparency: per-tier rolls with item, amount and exact drop odds. */
+.ladder.detailed{grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}
+.callout code{background:var(--bg3);padding:.08rem .35rem;border-radius:4px;font-size:.85em;
+  font-family:'JetBrains Mono',ui-monospace,monospace;color:var(--fg)}
+.rolls{margin-top:.7rem;display:flex;flex-direction:column;gap:.55rem}
+.roll{display:flex;gap:.6rem;align-items:flex-start}
+.roll-no{flex:none;min-width:3.1rem;padding-top:.4rem;font-family:'JetBrains Mono',ui-monospace,monospace;
+  font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.roll-items{display:flex;flex-direction:column;gap:.28rem;flex:1;min-width:0}
+.ritem{display:grid;grid-template-columns:22px 1fr auto auto;align-items:center;gap:.5rem;
+  background:rgba(10,6,19,.45);border:1px solid var(--border);border-radius:7px;padding:.26rem .55rem}
+.ritem img{width:22px;height:22px;image-rendering:pixelated}
+.ritem-noicon{width:22px;height:22px;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.ritem .rname{font-size:.82rem;color:var(--fg2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ritem .ramt{font-size:.8rem;color:var(--fg)}
+.ritem .rpct{font-size:.74rem;color:var(--accent);text-align:right;min-width:2.7rem}
+.inherit{margin-top:.55rem;font-size:.8rem;color:var(--fg2);border-left:2px solid rgba(20,241,149,.5);
+  padding:.35rem .6rem;background:rgba(20,241,149,.06);border-radius:0 7px 7px 0}
+.inherit strong{color:var(--accent)}
+/* Profile popover anchored to the wallet chip (skin + identity, every page). */
+.wprofile{position:relative}
+.wchip{cursor:pointer;gap:.45rem;padding-left:.4rem}
+.wchip-face{width:20px;height:20px;flex:none;border-radius:5px;image-rendering:pixelated;
+  background-color:var(--bg3);background-repeat:no-repeat;background-size:160px 160px;
+  background-position:-20px -20px;border:1px solid var(--border)}
+.profile-pop{position:absolute;top:calc(100% + .55rem);right:0;width:312px;max-width:88vw;z-index:40;
+  background:linear-gradient(135deg,rgba(36,26,64,.98),rgba(14,10,26,.98));
+  border:1px solid var(--border);border-radius:var(--radius);padding:1rem;text-align:left;
+  box-shadow:0 22px 54px rgba(0,0,0,.6);backdrop-filter:blur(10px)}
+.profile-pop[hidden]{display:none}
+.pp-head{display:flex;gap:.85rem;align-items:center;margin-bottom:.85rem}
+.pp-id{min-width:0}
+.pp-name{font-size:.95rem;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pp-sub{display:flex;gap:.45rem;align-items:baseline;margin-top:.15rem;font-size:.82rem}
+.pp-sub .rc-tier{color:var(--accent);font-weight:600}
+.pp-foot{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.9rem;padding-top:.8rem;border-top:1px solid var(--border)}
+.pp-foot .btn{font-size:.82rem;padding:.42rem .75rem}
 """
 
 # Single source of truth for the data the public pages display — DON'T hardcode
@@ -334,6 +389,103 @@ def _tier_drops() -> dict[str, list[dict]]:
     return {p.stem: _drops_from_loot(p) for p in d.glob("*.json")}
 
 
+def _icon_for(base: str) -> str | None:
+    """Sprite basename for an item, or None if we have no icon (block items
+    often only ship a `_side` texture)."""
+    if (_ITEMS_DIR / f"{base}.png").exists():
+        return base
+    if (_ITEMS_DIR / f"{base}_side.png").exists():
+        return f"{base}_side"
+    return None
+
+
+def _loot_pools(path: Path) -> list[list[dict]]:
+    """Parse one tier's loot table into ROLLS: a list of pools, each a list of
+    {icon, name, min, max, weight, pct}. /daily rolls once per pool, picking one
+    entry by weight — so pct = this entry's share of its pool's total weight.
+    This is the real source the transparency table renders; nothing hardcoded."""
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+    rolls: list[list[dict]] = []
+    for pool in data.get("pools", []):
+        items = [e for e in pool.get("entries", [])
+                 if e.get("type") == "minecraft:item" and e.get("name")]
+        entries: list[dict] = []
+        for e in items:
+            base = e["name"].split(":")[-1]
+            lo = hi = None
+            for fn in e.get("functions", []):
+                if fn.get("function") == "minecraft:set_count":
+                    c = fn.get("count", {})
+                    lo, hi = c.get("min"), c.get("max")
+            entries.append({
+                "icon": _icon_for(base), "name": _pretty_item(e["name"]),
+                "min": lo, "max": hi, "weight": e.get("weight", 1),
+            })
+        if entries:
+            _assign_odds(entries)
+            rolls.append(entries)
+    return rolls
+
+
+def _assign_odds(entries: list[dict]) -> None:
+    """Set each entry's integer "pct" from its weight, using largest-remainder
+    rounding so a roll's odds sum to EXACTLY 100% (independent round() can drift
+    to 99/101, which reads as sloppy on a page that promises transparency)."""
+    total = sum(e["weight"] for e in entries) or 1
+    exact = [100 * e["weight"] / total for e in entries]
+    floors = [int(x) for x in exact]
+    leftover = 100 - sum(floors)
+    # Hand the remaining points to the largest fractional remainders.
+    order = sorted(range(len(entries)), key=lambda k: exact[k] - floors[k], reverse=True)
+    for k in order[:leftover]:
+        floors[k] += 1
+    for e, p in zip(entries, floors, strict=True):
+        e["pct"] = p
+
+
+@lru_cache(maxsize=1)
+def _tier_loot() -> dict[str, list[list[dict]]]:
+    """{tier_key: [roll, ...]} — the full weighted breakdown per tier. Cached
+    like _tier_drops (changes only on a datapack edit + restart)."""
+    d = _loot_dir()
+    if not d.is_dir():
+        return {}
+    return {p.stem: _loot_pools(p) for p in d.glob("*.json")}
+
+
+# Vanilla treasure tables a tier's daily crate also pulls from — built-in random
+# loot, read straight from the loot table's minecraft: refs (single source).
+_TREASURE_NAMES = {
+    "minecraft:chests/simple_dungeon": "Dungeon",
+    "minecraft:chests/abandoned_mineshaft": "Mineshaft",
+    "minecraft:chests/nether_bridge": "Nether Fortress",
+    "minecraft:chests/bastion_treasure": "Bastion",
+    "minecraft:chests/end_city": "End City",
+    "minecraft:chests/ancient_city": "Ancient City",
+}
+
+
+def _tier_treasure(key: str) -> list[str]:
+    """Human names of the vanilla treasure tables a tier's daily crate pulls a
+    random bonus from (the built-in random-loot 'system'). From the loot table's
+    own minecraft: refs — additive tiers chain lower tiers' treasure too."""
+    try:
+        data = json.loads((_loot_dir() / f"{key}.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+    out: list[str] = []
+    for pool in data.get("pools", []):
+        for e in pool.get("entries", []):
+            v = e.get("value", "") if e.get("type") == "minecraft:loot_table" else ""
+            if isinstance(v, str) and v.startswith("minecraft:"):
+                out.append(_TREASURE_NAMES.get(
+                    v, v.rsplit("/", 1)[-1].replace("_", " ").title()))
+    return out
+
+
 @lru_cache(maxsize=1)
 def _float_pool() -> list[str]:
     """Sprite basenames eligible to float in the background — every PNG under
@@ -353,6 +505,8 @@ _WALLET_JS = """
 (function(){
   var API = window.NDRCHST_API || '';
   var signedIn = false;
+  var skinVer = 0;     // bumped on a real skin change to force the <img> to reload
+  var lastSkin = null; // last background-image URL set, so we don't re-paint it
   function $(id){return document.getElementById(id);}
   function provider(){
     if(window.phantom&&window.phantom.solana) return window.phantom.solana;
@@ -362,30 +516,47 @@ _WALLET_JS = """
   }
   function render(me){
     signedIn = !!me;
-    document.body.classList.toggle('signed-in', signedIn);
-    document.body.classList.toggle('signed-out', !signedIn);
+    var root = document.documentElement;
+    root.classList.toggle('signed-in', signedIn);
+    root.classList.toggle('signed-out', !signedIn);
+    // Persist identity so the next navigation can paint the signed-in state
+    // synchronously (head bootstrap + cache paint below) instead of flashing
+    // the signed-out layout while /me round-trips.
+    try{ if(me) localStorage.setItem('ndrchst_me', JSON.stringify(me));
+         else localStorage.removeItem('ndrchst_me'); }catch(e){}
     document.querySelectorAll('.client-dl').forEach(function(d){
-      d.disabled=false; d.textContent = me ? 'Download the client' : 'Sign in to download'; });
+      d.disabled=false;
+      d.textContent = me ? (d.dataset.labelIn||'Download the client')
+                         : (d.dataset.labelOut||'Sign in to download'); });
     // Highlight the signed-in player's row on the ranks ladder.
     document.querySelectorAll('.server.me').forEach(function(r){r.classList.remove('me');});
     if(!me) return;
     var t=$('wallet-tier');
     if(t){ $('wallet-addr').textContent=me.display;
       t.textContent=me.tier_name||'No rank'; t.className='tier'+(me.tier?'':' none'); }
-    document.querySelectorAll('.rankcard').forEach(function(c){
-      var a=c.querySelector('.rc-tier'); if(a) a.textContent=me.tier_name||'Not a holder yet';
-      var b=c.querySelector('.rc-pct'); if(b) b.textContent=(me.holdings_pct||0).toFixed(4)+'% of supply';
-      var n=c.querySelector('.rc-name'); if(n) n.textContent=me.mc_name; });
+    // Fill identity placeholders wherever they appear (rankcards on home/play
+    // AND the bare line on /ranks) — not only inside .rankcard.
+    document.querySelectorAll('.rc-tier').forEach(function(e){e.textContent=me.tier_name||'Not a holder yet';});
+    document.querySelectorAll('.rc-pct').forEach(function(e){e.textContent=(me.holdings_pct||0).toFixed(4)+'% of supply';});
+    document.querySelectorAll('.rc-name').forEach(function(e){e.textContent=me.mc_name;});
     if(me.mc_name){ var mine=document.querySelector('.server[data-mc="'+
       (window.CSS&&CSS.escape?CSS.escape(me.mc_name):me.mc_name)+'"]');
       if(mine) mine.classList.add('me'); }
-    var face=$('skin-face'), clr=$('skin-clear');
-    if(face){
-      if(me.skin_url){ face.style.backgroundImage='url('+API+me.skin_url+'?t='+Date.now()+')';
-        face.classList.add('has'); if(clr) clr.style.display=''; }
-      else { face.style.backgroundImage=''; face.classList.remove('has'); if(clr) clr.style.display='none'; }
+    // Paint every skin face (the chip avatar + the profile-pop face). Only
+    // touch background-image when the URL actually changes — re-setting it each
+    // render (the old ?t=Date.now() pattern) reloaded the image and flickered.
+    // skinVer busts the cache only after a real change.
+    var su = me.skin_url ? (API+me.skin_url+(skinVer?('?v='+skinVer):'')) : '';
+    if(su !== lastSkin){
+      lastSkin = su;
+      document.querySelectorAll('.js-skinface').forEach(function(f){
+        f.style.backgroundImage = su ? ('url('+su+')') : '';
+        f.classList.toggle('has', !!su);
+      });
     }
+    var clr=$('skin-clear'); if(clr) clr.style.display = me.skin_url ? '' : 'none';
   }
+  function bustSkin(){ skinVer++; refresh(); }  // reload the face after a change
   async function refresh(){
     try{ var r=await fetch(API+'/me',{credentials:'include'});
       render(r.ok?await r.json():null);}catch(e){ render(null);} }
@@ -421,15 +592,33 @@ _WALLET_JS = """
   }
   async function logout(){ try{await fetch(API+'/auth/logout',{method:'POST',credentials:'include'});}catch(e){} render(null); }
   // Exposed so other pages (e.g. /link) reuse the exact same wallet plumbing.
-  window.ndrchstWallet = {provider:provider, requestSignature:requestSignature, refresh:refresh};
+  window.ndrchstWallet = {provider:provider, requestSignature:requestSignature,
+                          refresh:refresh, bustSkin:bustSkin};
+  // Paint the last-known identity from cache right now (this script runs at the
+  // end of <body>, so the DOM above exists). The /me fetch below then reconciles
+  // — usually a no-op, so the signed-in player sees no flicker on navigation.
+  try{ var _cached=JSON.parse(localStorage.getItem('ndrchst_me')||'null'); if(_cached) render(_cached); }catch(e){}
   document.addEventListener('DOMContentLoaded',function(){
     var b=$('wallet-connect'); if(b)b.addEventListener('click',connect);
     document.querySelectorAll('.connect-trigger').forEach(function(c){c.addEventListener('click',connect);});
-    var o=$('wallet-logout'); if(o)o.addEventListener('click',logout);
+    // Profile popover: the wallet chip toggles a card with skin + identity.
+    var chip=$('wallet-chip'), pop=$('profile-pop');
+    function closePop(){ if(pop&&!pop.hidden){ pop.hidden=true; if(chip)chip.setAttribute('aria-expanded','false'); } }
+    if(chip) chip.addEventListener('click',function(e){
+      e.stopPropagation(); if(!pop) return;
+      pop.hidden=!pop.hidden; chip.setAttribute('aria-expanded',String(!pop.hidden)); });
+    if(pop) pop.addEventListener('click',function(e){ e.stopPropagation(); });
+    document.addEventListener('click',closePop);
+    document.addEventListener('keydown',function(e){ if(e.key==='Escape') closePop(); });
+    var o=$('wallet-logout'); if(o)o.addEventListener('click',function(){ logout(); closePop(); });
     document.querySelectorAll('.client-dl').forEach(function(d){
       d.addEventListener('click',function(){
-        if(signedIn){ window.location.href = API + '/me/client/' + d.dataset.sid; }
-        else { connect(); }
+        if(!signedIn){ connect(); return; }
+        // The play page installs window.ndrchstPlay to hand off to the installed
+        // app via a ndrchst:// deep link (with a download fallback). Elsewhere,
+        // fall back to the per-server zip download.
+        if(window.ndrchstPlay){ window.ndrchstPlay(d.dataset.sid); }
+        else { window.location.href = API + '/me/client/' + d.dataset.sid; }
       });
     });
     // Profile: skin upload / remove (only present on the play page).
@@ -440,15 +629,50 @@ _WALLET_JS = """
       try{
         var r=await fetch(API+'/me/skin',{method:'POST',credentials:'include',
           headers:{'content-type':'image/png'},body:await f.arrayBuffer()});
-        if(r.ok){ if(st)st.textContent='Skin updated.'; refresh(); }
+        if(r.ok){ if(st)st.textContent='Skin updated.'; bustSkin(); }
         else if(st) st.textContent = r.status===400 ? 'That must be a 64x64 PNG skin.' : 'Upload failed.';
       }catch(e){ if(st)st.textContent='Upload failed.'; }
     });
     var sc=$('skin-clear');
     if(sc) sc.addEventListener('click',async function(){
       try{ await fetch(API+'/me/skin',{method:'DELETE',credentials:'include'});
-        if(st)st.textContent='Skin removed.'; refresh(); }catch(e){}
+        if(st)st.textContent='Skin removed.'; bustSkin(); }catch(e){}
     });
+    // Find a skin by Minecraft username (Mojang) and apply it with one click.
+    var sq=$('skin-q'), sgo=$('skin-q-go'), sres=$('skin-results');
+    function meta(t){ sres.innerHTML='<span class="meta">'+t+'</span>'; }
+    async function runSearch(){
+      var term=sq.value.trim(); if(!term) return;
+      meta('Searching…');
+      try{
+        var r=await fetch(API+'/me/skin/search?q='+encodeURIComponent(term),{credentials:'include'});
+        if(!r.ok){ meta('Sign in to search for a skin.'); return; }
+        var res=(await r.json()).results||[];
+        if(!res.length){ meta('No skin for that username — try The Skindex below.'); return; }
+        sres.innerHTML='';
+        res.forEach(function(s){
+          var card=document.createElement('div'); card.className='skin-pick';
+          var face=document.createElement('div'); face.className='face';
+          face.style.backgroundImage='url('+API+s.preview_url+')'; card.appendChild(face);
+          var nm=document.createElement('div'); nm.className='nm'; nm.textContent=s.name; card.appendChild(nm);
+          var use=document.createElement('button'); use.className='btn'; use.textContent='Use';
+          use.addEventListener('click',async function(){
+            use.disabled=true; use.textContent='…';
+            try{
+              var im=await fetch(API+'/me/skin/import',{method:'POST',credentials:'include',
+                headers:{'content-type':'application/json'},body:JSON.stringify({texture:s.texture})});
+              if(im.ok){ if(st)st.textContent='Skin applied from '+s.name+'.'; sres.innerHTML=''; bustSkin(); }
+              else { use.disabled=false; use.textContent='Use'; if(st)st.textContent='Could not apply that skin.'; }
+            }catch(e){ use.disabled=false; use.textContent='Use'; }
+          });
+          card.appendChild(use); sres.appendChild(card);
+        });
+      }catch(e){ meta('Search is unavailable right now.'); }
+    }
+    if(sq){
+      if(sgo) sgo.addEventListener('click',runSearch);
+      sq.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); runSearch(); }});
+    }
     refresh();
   });
 })();
@@ -461,7 +685,9 @@ _HEAD = """<!doctype html><html lang="en"><head>
 <link rel="icon" type="image/png" href="/game/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>{css}</style></head><body><div class="wrap">"""
+<style>{css}</style>
+<script>try{{document.documentElement.classList.add(localStorage.getItem('ndrchst_me')?'signed-in':'signed-out');}}catch(e){{}}</script>
+</head><body><div class="wrap">"""
 
 # Drifting End-void backdrop (two parallax layers), shared by every page.
 _STARS = '<div class="stars" aria-hidden="true"><i></i><i></i></div>'
@@ -508,17 +734,61 @@ def _brand() -> str:
             '<img class="pixel" src="/game/decor/brand.png" alt="">ndrchst</a>')
 
 
+def _profile_pop() -> str:
+    """The profile card that drops from the wallet chip — identity + skin
+    management (upload / username search / Skindex) + quick links + sign-out.
+    Lives in the shared nav so it's reachable from every page; the play page
+    and landing no longer carry their own copy of this. All the skin-control
+    ids live ONLY here (ids stay unique across the page)."""
+    return (
+        '<div class="profile-pop" id="profile-pop" hidden>'
+        '<div class="pp-head">'
+        '<div class="skin-face js-skinface" id="skin-face" title="Your skin"></div>'
+        '<div class="pp-id">'
+        '<div class="pp-name mono rc-name"></div>'
+        '<div class="pp-sub"><span class="rc-tier"></span>'
+        '<span class="rc-pct meta"></span></div>'
+        "</div></div>"
+        '<div class="pp-skin">'
+        '<div class="row">'
+        '<label class="btn ghost" style="cursor:pointer">Upload skin'
+        '<input type="file" id="skin-file" accept="image/png" hidden></label>'
+        '<button class="btn ghost" id="skin-clear" style="display:none">Remove</button>'
+        "</div>"
+        '<div class="meta" id="skin-status">A 64x64 PNG — your face on your profile and in-game.</div>'
+        '<div class="skin-search">'
+        '<input id="skin-q" type="text" autocomplete="off" spellcheck="false" '
+        'placeholder="Find a skin by Minecraft username…">'
+        '<button class="btn ghost" id="skin-q-go">Search</button>'
+        "</div>"
+        '<div class="skin-results" id="skin-results"></div>'
+        '<a class="skindex-link" href="https://www.minecraftskins.com/" target="_blank" '
+        'rel="noopener">Or browse The Skindex ↗ (download a PNG, then Upload skin)</a>'
+        "</div>"
+        '<div class="pp-foot">'
+        f'<a class="btn" href="{html.escape(_play_url(), quote=True)}">Open client →</a>'
+        '<a class="btn ghost" href="/ranks">Where you rank</a>'
+        '<button class="btn ghost" id="wallet-logout">Sign out</button>'
+        "</div>"
+        "</div>"
+    )
+
+
 def _wallet_ctl() -> str:
     """The shared wallet control: connect button (signed-out) + identity chip
-    (signed-in). Wrapped so it stays a unit on the right and never overlaps the
-    nav links when they wrap."""
+    (signed-in) that opens the profile popover. Wrapped so it stays a unit on
+    the right and never overlaps the nav links when they wrap."""
     return (
         '<div class="wnav">'
         '<button id="wallet-connect" class="wbtn">Connect Wallet</button>'
-        '<span id="wallet-chip" class="wchip">'
+        '<div class="wprofile">'
+        '<button id="wallet-chip" class="wchip" aria-haspopup="true" aria-expanded="false">'
+        '<span class="wchip-face js-skinface" id="chip-face"></span>'
         '<span id="wallet-addr" class="mono"></span>'
         '<span id="wallet-tier" class="tier"></span>'
-        '<button id="wallet-logout" title="Sign out">&times;</button></span>'
+        "</button>"
+        + _profile_pop() +
+        "</div>"
         "</div>"
     )
 
@@ -573,17 +843,10 @@ def render_landing() -> str:
   <p class="lede">A modded Minecraft server gated by $NDRCHST. Sign in with your Solana
      wallet, grab a client that's already linked, and press Play — your tier, ranks
      and daily rewards follow you straight in-game.</p>
-  <div class="when-out">
+  <div>
     <a class="cta" href="{play}">Play now →</a>
     <a class="cta ghost" href="/ranks">Explore the ranks</a>
   </div>
-  <section class="rankcard when-in" style="margin:1.4rem 0 0;max-width:30rem">
-    <div class="row"><span class="big rc-tier"></span><span class="pct rc-pct"></span></div>
-    <p style="margin:.55rem 0 1rem;color:var(--fg2);font-size:.9rem">
-      Signed in as <span class="mono rc-name" style="color:var(--fg)"></span></p>
-    <a class="cta" href="{play}">Open the client →</a>
-    <a class="cta ghost" href="/ranks">Where you rank</a>
-  </section>
   <div class="deco-row"><span class="chips">{chips}</span> daily drops scale with your tier</div>
 </section>
 
@@ -599,20 +862,6 @@ def render_landing() -> str:
     <div class="feature"><div class="num">STEP 03</div><h3>Press Play</h3>
       <p>A cryptographic gate verifies your wallet at connect time and drops you in at
          your rank, with your perks and <code>/daily</code> ready.</p></div>
-  </div>
-</section>
-
-<section class="section">
-  <h2>A stack you actually own</h2>
-  <div class="features">
-    <div class="feature"><h3>One wallet, everywhere</h3>
-      <p>The same identity carries the site, the client and the server. Sign in once.</p></div>
-    <div class="feature"><h3>Holdings are rank — both ways</h3>
-      <p>Your tier is your share of $NDRCHST supply, read live from Solana and pushed
-         into the game. Buy in, rank up; the chain is the source of truth.</p></div>
-    <div class="feature"><h3>Open and self-hosted</h3>
-      <p>Custom client, private edge, our own server — all open source. No third-party
-         account stands between you and the world.</p></div>
   </div>
 </section>
 
@@ -713,7 +962,12 @@ def _status_class(status: str) -> str:
 
 def render_play(servers: list[dict], *, downloads_base: str = "") -> str:
     """servers: list of {name, version, port, status, cross_play,
-    bedrock_bridge_port, client_url, config_url}."""
+    bedrock_bridge_port, client_url, config_url}.
+
+    The standalone per-OS executable is the primary path: download it once
+    (it self-updates), sign in here, and pressing Play on a server hands off to
+    the installed app via a ``ndrchst://`` deep link — with a download fallback
+    when the app isn't installed yet."""
     rows = []
     if not servers:
         rows.append('<div class="empty">No servers are online right now.</div>')
@@ -723,6 +977,7 @@ def render_play(servers: list[dict], *, downloads_base: str = "") -> str:
             if s.get("cross_play") and s.get("bedrock_bridge_port") else ""
         )
         st = _status_class(s.get("status", ""))
+        sid = html.escape(str(s.get("id", "")), quote=True)
         rows.append(
             '<div class="server">'
             '<div>'
@@ -731,107 +986,151 @@ def render_play(servers: list[dict], *, downloads_base: str = "") -> str:
             '</div>'
             '<div class="right">'
             f'<span class="dot {st}">{html.escape(s.get("status",""))}</span>'
-            f'<button class="btn client-dl" data-sid="{html.escape(str(s.get("id","")), quote=True)}" '
-            'disabled>Sign in to download</button>'
+            f'<button class="btn client-dl" data-sid="{sid}" '
+            'data-label-in="Play" data-label-out="Sign in to play" '
+            'disabled>Sign in to play</button>'
+            f'<a class="btn ghost when-in" href="/me/client/{sid}" '
+            'title="Download a self-contained client folder for this server">.zip</a>'
             f'<a class="btn ghost" href="{s["config_url"]}">config</a>'
             '</div></div>'
         )
 
-    # Standalone per-OS binaries (only when the operator has published them).
-    binaries_html = ""
-    if downloads_base:
-        base = downloads_base.rstrip("/")
-        links = "".join(
-            f'<li>{html.escape(label)}: <a href="{base}/{html.escape(fname)}">{html.escape(fname)}</a></li>'
-            for label, fname in CLIENT_ASSETS
-        )
-        binaries_html = (
-            '<p style="color:var(--fg2);font-size:.92rem">Prefer a standalone client? '
-            "Download the binary for your OS and drop a server's "
-            "<code>config.json</code> next to it:</p>"
-            f'<ul class="mono" style="color:var(--fg2);line-height:1.9;font-size:.88rem">{links}</ul>'
-        )
+    dl_base = downloads_base.rstrip("/") if downloads_base else ""
+    dl_cfg = json.dumps({
+        "base": dl_base,
+        "assets": {
+            "windows": f"{dl_base}/ndrchst-client-windows-x86_64.exe" if dl_base else "",
+            "macos": f"{dl_base}/ndrchst-client-macos-arm64" if dl_base else "",
+            "linux": f"{dl_base}/ndrchst-client-linux-x86_64" if dl_base else "",
+        },
+    })
+
+    script = """
+(function(){
+  var API = window.NDRCHST_API || '';
+  window.NDRCHST_DL = __DL__;
+  function osKey(){
+    var d=(navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||'';
+    d=String(d).toLowerCase();
+    if(d.indexOf('win')>=0) return 'windows';
+    if(d.indexOf('mac')>=0||d.indexOf('iphone')>=0||d.indexOf('ipad')>=0) return 'macos';
+    return 'linux';
+  }
+  var OS_LABEL={windows:'Windows',macos:'macOS',linux:'Linux'};
+  function exeUrl(){ var a=(window.NDRCHST_DL||{}).assets||{}; return window.NDRCHST_DL.base?(a[osKey()]||''):''; }
+  // Primary download button → the visitor's OS binary (a self-updating exe).
+  var dlBtn=document.getElementById('client-download');
+  if(dlBtn){
+    var u=exeUrl();
+    if(u){ dlBtn.href=u; dlBtn.textContent='Download for '+OS_LABEL[osKey()]; }
+    else { dlBtn.href='#servers'; }   // no published binaries yet → grab a server's .zip
+  }
+  // Open the installed app via a ndrchst:// deep link; if nothing handles it
+  // (app not installed) fall back to the download after a short grace period.
+  function openApp(deeplink, fallbackUrl){
+    var done=false;
+    function cancel(){ done=true; }
+    document.addEventListener('visibilitychange',function h(){ if(document.hidden){cancel();document.removeEventListener('visibilitychange',h);} });
+    window.addEventListener('blur',function b(){ cancel(); window.removeEventListener('blur',b); });
+    setTimeout(function(){ if(!done && !document.hidden && fallbackUrl){ window.location.href=fallbackUrl; } },1500);
+    window.location.href=deeplink;
+  }
+  // Per-server Play: mint a one-time handoff code so the app links instantly,
+  // build the deep link, and hand off (download fallback if not installed).
+  window.ndrchstPlay=async function(sid){
+    var code='';
+    try{
+      var r=await fetch(API+'/me/handoff',{method:'POST',credentials:'include'});
+      if(r.ok){ code=(await r.json()).code||''; }
+    }catch(e){}
+    var dl='ndrchst://launch?sid='+encodeURIComponent(sid)+(code?('&code='+encodeURIComponent(code)):'');
+    openApp(dl, exeUrl()||(API+'/me/client/'+sid));   // exe, else the authed .zip
+  };
+  // OS tabs for the instructions.
+  var def=osKey()==='windows'?'win':(osKey()==='macos'?'mac':'linux');
+  function sel(os){
+    document.querySelectorAll('.os-tab').forEach(function(t){t.classList.toggle('active',t.dataset.os===os);});
+    document.querySelectorAll('.os-panel').forEach(function(p){p.classList.toggle('active',p.dataset.os===os);});
+  }
+  document.querySelectorAll('.os-tab').forEach(function(t){t.addEventListener('click',function(){sel(t.dataset.os);});});
+  sel(def);
+})();
+""".replace("__DL__", dl_cfg)
 
     body = f"""
 <section class="hero" style="padding:3rem 0 1.5rem">
+  <span class="eyebrow">$NDRCHST · play</span>
   <h1 style="font-size:2.1rem">Play on ndrchst</h1>
-  <p class="lede">Connect your wallet to download the client — it arrives already linked to
-     your wallet, so you just press Play. It installs the modpack and joins for you.</p>
-  <div class="when-out">
-    <button class="wbtn connect-trigger"
-       style="font-size:.95rem;padding:.55rem 1.1rem">Connect Wallet to begin</button>
+  <p class="lede">Download the client once — it links to your wallet, installs the modpack,
+     joins the server for you, and keeps itself up to date. Sign in here, then press Play.</p>
+  <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin:.5rem 0 0">
+    <a id="client-download" class="cta" href="#servers">Download the client</a>
+    <span class="when-out"><button class="wbtn connect-trigger"
+       style="font-size:.95rem;padding:.55rem 1.1rem">Connect Wallet</button></span>
     <a class="cta ghost" href="/ranks">See the ranks</a>
   </div>
-  <section class="rankcard when-in" style="margin:1.4rem 0 0;max-width:32rem">
-    <div class="row"><span class="big rc-tier"></span><span class="pct rc-pct"></span></div>
-    <p style="margin:.55rem 0 .2rem;color:var(--fg2);font-size:.9rem">
-      Signed in as <span class="mono rc-name" style="color:var(--fg)"></span> — you're cleared to join.</p>
-    <div class="profile-skin">
-      <div class="skin-face" id="skin-face" title="Your skin"></div>
-      <div class="skin-up">
-        <div class="row">
-          <label class="btn ghost" style="cursor:pointer">Upload skin
-            <input type="file" id="skin-file" accept="image/png" hidden></label>
-          <button class="btn ghost" id="skin-clear" style="display:none">Remove</button>
-        </div>
-        <div class="meta" id="skin-status">A 64x64 PNG — your face on your profile and in-game.</div>
-      </div>
-    </div>
-    <a class="xlink" href="/ranks" style="margin-top:1rem;display:inline-flex">See where you stand on the ladder →</a>
-  </section>
+  <p class="when-in" style="color:var(--accent);font-size:.96rem;margin:.6rem 0 0;max-width:38rem">
+    Signed in as <span class="mono rc-name" style="color:var(--fg)"></span> ·
+    <span class="rc-tier" style="color:var(--fg)"></span> — pick a server below and press
+    <strong>Play</strong>. If the client's installed it opens straight away; otherwise it downloads.
+    <span class="meta" style="display:block;margin-top:.45rem">Manage your skin &amp; profile from
+      your wallet chip, top-right.</span>
+  </p>
 </section>
 
-<section class="section" style="border-top:none;padding-top:0">
+<section class="section" id="servers" style="border-top:none;padding-top:0">
   <h2>Servers</h2>
   {''.join(rows)}
 </section>
 
 <section class="section">
-  <h2>How to run the client</h2>
-  <div class="os-tabs">
+  <h2>How it works</h2>
+  <div class="features">
+    <div class="feature"><div class="num">STEP 01</div><h3>Download the client</h3>
+      <p>One small app for your OS — no Python, no setup. It self-updates, so you grab it once.</p></div>
+    <div class="feature"><div class="num">STEP 02</div><h3>Sign in with your wallet</h3>
+      <p>Connect Phantom or Solflare here on the site. Your rank and perks come from your holdings.</p></div>
+    <div class="feature"><div class="num">STEP 03</div><h3>Press Play</h3>
+      <p>Hit Play on a server — the site opens your installed client, already linked, and it joins
+         you at your rank with <code>/daily</code> ready.</p></div>
+  </div>
+
+  <div class="os-tabs" style="margin-top:1.4rem">
     <div class="os-tab" data-os="win">Windows</div>
     <div class="os-tab" data-os="mac">macOS</div>
     <div class="os-tab" data-os="linux">Linux</div>
   </div>
   <div class="os-panel" data-os="win">
     <ol>
-      <li>Download a server's client above and unzip it.</li>
-      <li>Run <code>ndrchst-client.exe</code> (or <code>launch.bat</code>).</li>
-      <li>Enter your name, pick your RAM, and press <strong>Play</strong>.</li>
+      <li>Download the client (button above) and run <code>ndrchst-client-windows-x86_64.exe</code>.</li>
+      <li>SmartScreen may warn on an unsigned app — choose <em>More info → Run anyway</em>.</li>
+      <li>Back here, sign in and press <strong>Play</strong> on a server — it opens the app.</li>
     </ol>
   </div>
   <div class="os-panel" data-os="mac">
     <ol>
-      <li>Download a server's client above and unzip it.</li>
-      <li>Run it (you may need to allow it in System Settings → Privacy &amp; Security).</li>
-      <li>Enter your name, pick your RAM, and press <strong>Play</strong>.</li>
+      <li>Download the client and move it to Applications; first run, right-click → <em>Open</em>.</li>
+      <li>Sign in with your wallet in the app itself (the website Play hand-off is Windows/Linux for now).</li>
+      <li>Press <strong>Play</strong>.</li>
     </ol>
   </div>
   <div class="os-panel" data-os="linux">
     <ol>
-      <li>Download a server's client above and unzip it: <code>unzip client.zip &amp;&amp; cd client</code></li>
-      <li>Run <code>./launch.sh</code>.</li>
-      <li>Enter your name, pick your RAM (and Graphics, on hybrid laptops), and press <strong>Play</strong>.</li>
+      <li>Download the client, then <code>chmod +x ndrchst-client-linux-x86_64 &amp;&amp; ./ndrchst-client-linux-x86_64</code>.</li>
+      <li>First launch installs the app + registers the <code>ndrchst://</code> handler.</li>
+      <li>Back here, sign in and press <strong>Play</strong> on a server — it opens the app.</li>
     </ol>
   </div>
-  {binaries_html}
+
+  <p class="meta when-in" style="margin-top:1rem">Prefer a self-contained folder? Each server's
+    <span class="mono">.zip</span> above bundles the client pinned to that server (Python required).</p>
 </section>
 
 <footer>The client is an offline launcher pinned to each server. It mirrors the server's
-  mod set from a CDN, so first launch downloads the pack once. ·
+  mod set from a CDN, so first launch downloads the pack once, and self-updates after. ·
   <a href="{_home_url()}">Home</a> · <a href="/ranks">Ranks</a></footer>
 
-<script>
-(function(){{
-  var def = navigator.platform.indexOf('Win')>=0?'win':(navigator.platform.indexOf('Mac')>=0?'mac':'linux');
-  function sel(os){{
-    document.querySelectorAll('.os-tab').forEach(function(t){{t.classList.toggle('active',t.dataset.os===os);}});
-    document.querySelectorAll('.os-panel').forEach(function(p){{p.classList.toggle('active',p.dataset.os===os);}});
-  }}
-  document.querySelectorAll('.os-tab').forEach(function(t){{t.addEventListener('click',function(){{sel(t.dataset.os);}});}});
-  sel(def);
-}})();
-</script>
+<script>{script}</script>
 """
     return _shell("ndrchst — play", body, active="play")
 
@@ -854,31 +1153,73 @@ def _drop_amount(d: dict) -> str:
     return f" ·×{lo}" if lo == hi else f" ·×{lo}–{hi}"  # noqa: RUF001
 
 
+def _amt(d: dict) -> str:
+    """Inline count for the transparency table: a single value or a min-max range."""
+    lo, hi = d.get("min"), d.get("max")
+    if lo is None:
+        return "×1"  # noqa: RUF001
+    return f"×{lo}" if lo == hi else f"×{lo}–{hi}"  # noqa: RUF001
+
+
+def _ritem_html(e: dict) -> str:
+    """One reward row: icon (or a placeholder), name, amount, exact drop odds.
+    Shared by the ranks ladder and the crates page."""
+    icon = (
+        f'<img class="pixel" src="/game/items/{html.escape(e["icon"], quote=True)}.png" alt="">'
+        if e["icon"] else '<span class="ritem-noicon">▩</span>'
+    )
+    return (
+        '<span class="ritem">' + icon
+        + f'<span class="rname">{html.escape(e["name"])}</span>'
+        + f'<span class="ramt mono">{_amt(e)}</span>'
+        + f'<span class="rpct mono">{e["pct"]}%</span></span>'
+    )
+
+
+def _rolls_html(rolls: list[list[dict]]) -> str:
+    """The `<div class="rolls">` for a set of weighted rolls (one item per roll,
+    odds shown). Used by both the ranks tiers and the crates."""
+    blocks = "".join(
+        f'<div class="roll"><span class="roll-no">Roll {n}</span>'
+        f'<div class="roll-items">{"".join(_ritem_html(e) for e in entries)}</div></div>'
+        for n, entries in enumerate(rolls, start=1)
+    )
+    return f'<div class="rolls">{blocks}</div>'
+
+
 def render_ranks(holders: list[dict], tiers: list[dict]) -> str:
     """tiers: list of {key, name, min_pct} ascending. holders: list of
     {display, mc_name, tier, tier_name, holdings_pct} sorted by holdings desc."""
-    def _drops(key: str) -> str:
-        items = _tier_drops().get(key, [])
-        if not items:
-            return ""
-        chips = "".join(
-            f'<span class="tip" data-tip="{html.escape(d["name"] + _drop_amount(d), quote=True)}">'
-            f'<img class="pixel" src="/game/items/{html.escape(d["icon"], quote=True)}.png" alt=""></span>'
-            for d in items
-        )
-        n = len(items)
-        return (f'<div class="drops">{chips}</div>'
-                f'<div class="drop-note">{n} daily reward{"" if n == 1 else "s"} '
-                "· hover an item for the amount</div>")
+    def _rolls(key: str, lower_names: list[str]) -> str:
+        """A tier's OWN weighted rolls (each item, amount range and exact odds,
+        from _tier_loot) plus an inheritance note: tiers are additive, so a tier
+        also rolls every lower tier's table each day (see the daily datapack)."""
+        rolls = _tier_loot().get(key, [])
+        nr = len(rolls)
+        own = (f'{_rolls_html(rolls)}'
+               f'<div class="drop-note">{nr} own roll{"" if nr == 1 else "s"} per day '
+               "· one item per roll, picked by weight</div>") if rolls else ""
+        treas = _tier_treasure(key)
+        bonus = ""
+        if treas:
+            bonus = ('<div class="inherit">+ a random treasure pull from '
+                     f'<strong>{html.escape(", ".join(treas))}</strong></div>')
+        inherit = ""
+        if lower_names:
+            names = ", ".join(reversed(lower_names))  # highest-lower first
+            inherit = (f'<div class="inherit">+ everything <strong>{html.escape(names)}</strong> '
+                       "get, every day</div>")
+        return own + bonus + inherit
 
-    # Build ascending (so bands can see the next tier), display top-first.
+    # Build ascending (so bands see the next tier + lower tiers for the additive
+    # note), display top-first.
     cards = [
         '<div class="feature tier-card">'
         '<div class="lrow">'
         f'<h3>{html.escape(t["name"])}</h3>'
         f'<span class="thr">{_tier_band(tiers, i)}</span>'
         "</div>"
-        f'{_drops(t["key"])}'
+        f'{_rolls(t["key"], [lt["name"] for lt in tiers[:i]])}'
         "</div>"
         for i, t in enumerate(tiers)
     ]
@@ -924,10 +1265,17 @@ def render_ranks(holders: list[dict], tiers: list[dict]) -> str:
 
 <section class="section" style="border-top:none;padding-top:0">
   <div class="row" style="display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap">
-    <h2 style="margin:0">Tiers</h2>
+    <h2 style="margin:0">Tiers &amp; your daily crate</h2>
     <a class="xlink" href="{play}">Claim yours — get the client →</a>
   </div>
-  <div class="features ladder" style="margin-top:1.2rem">{ladder}</div>
+  <div class="callout" style="margin:1rem 0 1.3rem">
+    <strong>How your daily crate works.</strong> Each day you run <code>/daily</code> in-game to open
+    your crate — it rolls once per pool for your tier (one item per roll, by the weights shown as
+    odds below) plus a random pull from a vanilla treasure chest. <strong>Tiers are additive</strong>
+    — your crate also rolls every lower tier's, so a Whale opens the whole ladder daily. Every number
+    here is read straight from the server's loot tables, no marketing rounding.
+  </div>
+  <div class="features ladder detailed">{ladder}</div>
 </section>
 
 <section class="section">

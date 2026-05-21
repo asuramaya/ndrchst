@@ -7,19 +7,21 @@ log pane. The same binary serves any server via settings.load().
 """
 from __future__ import annotations
 
+import contextlib
 import platform
+import sys
 import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
-from . import __version__, desktop, updater, wallet_auth
+from . import __version__, deeplink, desktop, updater, wallet_auth
 from .launcher import launch
 from .settings import load as load_config
 
 APP_SLUG = "ndrchst-client"
 
-# End × Solana palette — matches the web surfaces (void purple + ender green).
+# End x Solana palette — matches the web surfaces (void purple + ender green).
 _BG = "#0a0613"
 _PANEL = "#161029"
 _FG = "#f4f0ff"
@@ -28,11 +30,47 @@ _ACCENT = "#14f195"  # ender green / Solana green
 _PURPLE = "#9945ff"  # Solana purple
 _INK = "#04130c"     # dark text on the green accent
 
-# Themed UI assets (banner GIF + brand glyph), bundled into the client zip.
+# Themed UI assets (banner GIF + brand glyph + app icon), bundled into the zip.
 _ASSETS = Path(__file__).resolve().parent / "assets"
 
+# Remembered launch prefs (RAM / GPU) so the player sets them once. Lives next
+# to the client's data dir; best-effort — a missing/corrupt file just resets.
+_PREFS_PATH = Path.home() / f".{APP_SLUG}" / "prefs.json"
 
-def _load_gif_frames(root: "tk.Tk", path: Path) -> list:
+
+def _load_prefs() -> dict:
+    import json
+    try:
+        return json.loads(_PREFS_PATH.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_prefs(prefs: dict) -> None:
+    import json
+    try:
+        _PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _PREFS_PATH.write_text(json.dumps(prefs))
+    except OSError:
+        pass
+
+
+def _header_text(cfg: object) -> tuple[str, str]:
+    """The two identity lines under the title — server target + version line.
+    Pure so it can be recomputed after a deep link swaps in a new server."""
+    host = cfg.tunnel_hostname or (
+        f"{cfg.server_host}:{cfg.server_port}" if cfg.server_host else "")
+    target = f"Server  {host}" if host else "Server  — open a server from the website —"
+    sub = f"Minecraft {cfg.mc_version}"
+    if cfg.neoforge_version:
+        sub += f"  ·  NeoForge {cfg.neoforge_version}"
+    if cfg.modpack_url:
+        sub += "  ·  modded"
+    sub += f"  ·  client {__version__}"
+    return target, sub
+
+
+def _load_gif_frames(root: tk.Tk, path: Path) -> list:
     """Read every frame of an animated GIF as a PhotoImage (Tk has no native
     animation — we cycle frames ourselves)."""
     frames = []
@@ -69,13 +107,31 @@ _GPU_CHOICES = [
 
 
 def run() -> None:
+    # If the OS launched us to handle a ndrchst:// deep link and a window is
+    # already open, hand the URL to it and exit — don't open a second window.
+    initial_url = deeplink.url_from_argv(sys.argv[1:])
+    if initial_url and deeplink.try_forward(initial_url):
+        return
+
     cfg = load_config()
 
-    root = tk.Tk()
+    prefs = _load_prefs()
+
+    # className groups the window under our icon in the Linux taskbar (matches
+    # StartupWMClass in the .desktop shortcut).
+    root = tk.Tk(className="ndrchst")
     root.title(cfg.app_name)
-    root.geometry("640x500")
-    root.minsize(560, 440)
+    root.geometry("640x460")
+    root.minsize(560, 420)
     root.configure(bg=_BG)
+    # Window + taskbar icon (the same glyph the desktop shortcut uses). Best-effort.
+    icon_path = _ASSETS / "icon.png"
+    if icon_path.exists():
+        try:
+            root._icon_img = tk.PhotoImage(master=root, file=str(icon_path))
+            root.iconphoto(True, root._icon_img)
+        except tk.TclError:
+            pass
 
     style = ttk.Style(root)
     with_theme = "clam" in style.theme_names()
@@ -127,16 +183,18 @@ def run() -> None:
         root._brand_img = tk.PhotoImage(master=root, file=str(brand_path))  # keep ref
         ttk.Label(titlebar, image=root._brand_img, style="Brand.TLabel").pack(
             side=tk.LEFT, padx=(0, 8))
-    ttk.Label(titlebar, text=cfg.app_name, style="Title.TLabel").pack(side=tk.LEFT)
-    target = cfg.tunnel_hostname or f"{cfg.server_host}:{cfg.server_port}"
-    ttk.Label(info, text=f"Server  {target}", style="Muted.TLabel").pack(anchor="w")
-    sub = f"Minecraft {cfg.mc_version}"
-    if cfg.neoforge_version:
-        sub += f"  ·  NeoForge {cfg.neoforge_version}"
-    if cfg.modpack_url:
-        sub += "  ·  modded"
-    sub += f"  ·  client {__version__}"
-    ttk.Label(info, text=sub, style="Muted.TLabel").pack(anchor="w")
+    title_lbl = ttk.Label(titlebar, text=cfg.app_name, style="Title.TLabel")
+    title_lbl.pack(side=tk.LEFT)
+    target_lbl = ttk.Label(info, style="Muted.TLabel")
+    target_lbl.pack(anchor="w")
+    sub_lbl = ttk.Label(info, style="Muted.TLabel")
+    sub_lbl.pack(anchor="w")
+
+    def _refresh_header() -> None:
+        tgt, sub = _header_text(cfg)
+        target_lbl.config(text=tgt)
+        sub_lbl.config(text=sub)
+    _refresh_header()
 
     # Update banner — hidden until a newer build is found on the CDN.
     style.configure("Update.TFrame", background="#13351f")
@@ -163,13 +221,16 @@ def run() -> None:
         row=0, column=1, sticky="w", padx=(10, 0), pady=4)
 
     ttk.Label(form, text="Memory (GB)").grid(row=1, column=0, sticky="w", pady=4)
-    ram_var = tk.StringVar(value="8")
+    ram_var = tk.StringVar(value=str(prefs.get("ram_gb", 8)))
     ram_spin = ttk.Spinbox(form, from_=2, to=32, increment=1, width=6,
                            textvariable=ram_var)
     ram_spin.grid(row=1, column=1, sticky="w", padx=(10, 0), pady=4)
 
     ttk.Label(form, text="Graphics").grid(row=2, column=0, sticky="w", pady=4)
-    gpu_var = tk.StringVar(value=_GPU_CHOICES[0][0])
+    _gpu_labels = [label for label, _ in _GPU_CHOICES]
+    gpu_var = tk.StringVar(
+        value=prefs["gpu_label"] if prefs.get("gpu_label") in _gpu_labels
+        else _GPU_CHOICES[0][0])
     gpu_combo = ttk.Combobox(
         form, textvariable=gpu_var, state="readonly", width=24,
         values=[label for label, _ in _GPU_CHOICES],
@@ -207,11 +268,31 @@ def run() -> None:
     bar = ttk.Progressbar(root, mode="determinate", maximum=len(_PHASES))
     bar.pack(fill=tk.X, padx=16, pady=(0, 6))
 
-    # ---- Log pane ------------------------------------------------------
-    log_box = tk.Text(root, height=12, wrap="word", state=tk.DISABLED,
+    # ---- Details (log) — collapsed by default for a clean, braindead window.
+    details_row = ttk.Frame(root, padding=(16, 0))
+    details_row.pack(fill=tk.X)
+    details_btn = ttk.Button(details_row, text="Show details ▾")
+    details_btn.pack(side=tk.LEFT)
+
+    log_box = tk.Text(root, height=10, wrap="word", state=tk.DISABLED,
                       bg=_PANEL, fg=_MUTED, insertbackground=_FG,
                       relief="flat", font=("monospace", 9), padx=10, pady=8)
-    log_box.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 16))
+    _log_shown = {"v": False}
+
+    def toggle_log(show: bool | None = None) -> None:
+        show = (not _log_shown["v"]) if show is None else show
+        if show == _log_shown["v"]:
+            return
+        _log_shown["v"] = show
+        if show:
+            log_box.pack(fill=tk.BOTH, expand=True, padx=16, pady=(4, 16))
+            details_btn.config(text="Hide details ▴")
+            root.geometry("640x600")
+        else:
+            log_box.pack_forget()
+            details_btn.config(text="Show details ▾")
+            root.geometry("640x460")
+    details_btn.config(command=toggle_log)
 
     def append_log(line: str) -> None:
         log_box.config(state=tk.NORMAL)
@@ -238,6 +319,68 @@ def run() -> None:
             state=tk.NORMAL if (enabled and signed_in) else tk.DISABLED,
             text="Play" if enabled else "Running…")
 
+    def apply_identity(ident: object, dev: str | None = None) -> None:
+        """Reflect a signed-in wallet identity in the UI. Main-thread only.
+        Shared by the manual sign-in, the device-token auto sign-in, and the
+        deep-link handoff so they can't drift apart."""
+        wallet_id["mc_name"] = ident.mc_name
+        wallet_id["join_token"] = ident.join_token
+        if dev:
+            wallet_id["device_token"] = dev
+        name_var.set(ident.mc_name)
+        tier = f"  ·  {ident.tier_name}" if ident.tier_name else "  ·  no rank"
+        wallet_status.set(f"{ident.display}{tier}")
+        wallet_btn.config(text="Signed in", state=tk.DISABLED)
+        launch_btn.config(state=tk.NORMAL)
+        phase_var.set("Ready — press Play")
+
+    def reload_config() -> None:
+        """Re-read config after a deep link swapped in a new server, and refresh
+        the header to match. Main-thread only."""
+        nonlocal cfg
+        cfg = load_config()
+        with contextlib.suppress(tk.TclError):
+            root.title(cfg.app_name)
+            title_lbl.config(text=cfg.app_name)
+        _refresh_header()
+
+    def apply_deeplink(url: str) -> None:
+        """Act on a ndrchst:// URL: pin the named server (fetch its config) and
+        redeem any one-time handoff code for an instant sign-in."""
+        dl = deeplink.parse(url)
+        if dl is None or dl.action != "launch":
+            return
+        with contextlib.suppress(tk.TclError):
+            root.deiconify()
+            root.lift()
+            root.focus_force()
+        sid = dl.params.get("sid")
+        code = dl.params.get("code")
+        base = cfg.auth_base_url or wallet_auth.DEFAULT_BASE
+
+        def worker() -> None:
+            if sid:
+                try:
+                    deeplink.fetch_server_config(base, sid)
+                    emit_from_worker(f"Linked to server {sid}.")
+                    root.after(0, reload_config)
+                except (OSError, ValueError) as exc:
+                    # URLError is an OSError and JSONDecodeError a ValueError, so
+                    # this is any network/parse failure. Best-effort; logged only.
+                    emit_from_worker(f"Couldn't load that server's config: {exc}")
+            if code:
+                try:
+                    ident = wallet_auth.redeem_handoff(base, code)
+                except wallet_auth.WalletAuthError as exc:
+                    emit_from_worker(f"Sign-in handoff failed: {exc}")
+                    return
+                dev = ident.device_token or None
+                if dev:
+                    wallet_auth.write_device_token(dev)
+                root.after(0, lambda: apply_identity(ident, dev))
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def on_launch() -> None:
         username = wallet_id["mc_name"]
         if not username:
@@ -248,6 +391,7 @@ def run() -> None:
         except ValueError:
             ram_gb = 8
         gpu = dict(_GPU_CHOICES).get(gpu_var.get(), "auto")
+        _save_prefs({"ram_gb": ram_gb, "gpu_label": gpu_var.get()})  # remember for next time
         set_controls(False)
         phase_var.set("Starting…")
 
@@ -283,7 +427,8 @@ def run() -> None:
                 root.after(0, lambda: phase_var.set("Minecraft exited"))
             except Exception as exc:
                 emit_from_worker(f"Error: {exc!r}")
-                root.after(0, lambda: phase_var.set("Error — see log"))
+                root.after(0, lambda: (phase_var.set("Error — see details below"),
+                                       toggle_log(True)))
             finally:
                 root.after(0, lambda: set_controls(True))
 
@@ -303,16 +448,7 @@ def run() -> None:
                     state=tk.NORMAL, text="Sign in with wallet"))
                 return
 
-            def apply() -> None:
-                wallet_id["mc_name"] = ident.mc_name
-                wallet_id["join_token"] = ident.join_token
-                name_var.set(ident.mc_name)
-                tier = f"  ·  {ident.tier_name}" if ident.tier_name else "  ·  no rank"
-                wallet_status.set(f"{ident.display}{tier}")
-                wallet_btn.config(text="Signed in", state=tk.DISABLED)
-                launch_btn.config(state=tk.NORMAL)  # mandated auth path satisfied
-                phase_var.set("Ready — press Play")
-            root.after(0, apply)
+            root.after(0, lambda: apply_identity(ident))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -360,6 +496,15 @@ def run() -> None:
     launch_btn.config(command=on_launch)
     wallet_btn.config(command=on_wallet_signin)
 
+    # Keyboard shortcuts — Enter plays (when ready), Esc minimises, Ctrl+Q quits.
+    def _play_if_ready(_e: object = None) -> None:
+        if str(launch_btn["state"]) == tk.NORMAL:
+            on_launch()
+    root.bind("<Return>", _play_if_ready)
+    root.bind("<KP_Enter>", _play_if_ready)
+    root.bind("<Escape>", lambda _e: root.iconify())
+    root.bind("<Control-q>", lambda _e: root.destroy())
+
     # Auth-first: if this bundle was downloaded after signing in on the play
     # page, it carries a device token — auto-sign-in, no button press needed.
     def _try_device_signin() -> None:
@@ -373,17 +518,15 @@ def run() -> None:
             emit_from_worker(f"Device sign-in unavailable ({exc}) — use 'Sign in with wallet'.")
             return
 
-        def apply() -> None:
-            wallet_id["mc_name"] = ident.mc_name
-            wallet_id["join_token"] = ident.join_token
-            wallet_id["device_token"] = dev
-            name_var.set(ident.mc_name)
-            tier = f"  ·  {ident.tier_name}" if ident.tier_name else "  ·  no rank"
-            wallet_status.set(f"{ident.display}{tier}")
-            wallet_btn.config(text="Signed in", state=tk.DISABLED)
-            launch_btn.config(state=tk.NORMAL)
-            phase_var.set("Ready — press Play")
-        root.after(0, apply)
+        root.after(0, lambda: apply_identity(ident, dev))
 
     threading.Thread(target=_try_device_signin, daemon=True).start()
+
+    # Single-instance + deep links: become the URL handler, and if the OS
+    # launched us WITH a ndrchst:// URL (and no other instance grabbed it
+    # above), act on it once the window is up.
+    deeplink.start_listener(lambda u: root.after(0, lambda: apply_deeplink(u)))
+    if initial_url:
+        root.after(400, lambda: apply_deeplink(initial_url))
+
     root.mainloop()

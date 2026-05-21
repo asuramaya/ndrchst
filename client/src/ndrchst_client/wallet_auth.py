@@ -32,6 +32,7 @@ class WalletIdentity:
     tier_name: str | None
     holdings_pct: float
     join_token: str  # short-lived credential the ndrchst-auth mod presents
+    device_token: str = ""  # durable credential, only set by the handoff redeem
 
 
 class WalletAuthError(Exception):
@@ -55,20 +56,60 @@ def _get_json(url: str, timeout: float = 15) -> dict:
 
 
 _DEVICE_TOKEN_FILE = "ndrchst-device.token"
+# Persistent home for a token obtained via the deep-link handoff (a frozen exe
+# can't rely on its bundle dir surviving). Matches APP_SLUG in app.py.
+_DATA_DIR = Path.home() / ".ndrchst-client"
 
 
 def read_device_token() -> str | None:
-    """The auth-first download bakes a device token into the bundle. The client
-    runs from the bundle dir, so look there (cwd) + next to this package."""
+    """Where a device token might live. The auth-first zip bakes it into the
+    bundle (next to the package / cwd); the deep-link handoff persists it in the
+    data dir. First non-empty hit wins."""
     here = Path(__file__).resolve().parent
-    for p in (Path(_DEVICE_TOKEN_FILE), here / _DEVICE_TOKEN_FILE,
-              here.parent.parent / _DEVICE_TOKEN_FILE):
+    for p in (_DATA_DIR / _DEVICE_TOKEN_FILE, Path(_DEVICE_TOKEN_FILE),
+              here / _DEVICE_TOKEN_FILE, here.parent.parent / _DEVICE_TOKEN_FILE):
         with contextlib.suppress(OSError):
             if p.is_file():
                 tok = p.read_text().strip()
                 if tok:
                     return tok
     return None
+
+
+def write_device_token(token: str) -> Path | None:
+    """Persist a device token (from the deep-link handoff) in the data dir so the
+    next launch auto-signs-in. Best-effort — returns the path on success."""
+    if not token:
+        return None
+    with contextlib.suppress(OSError):
+        _DATA_DIR.mkdir(parents=True, exist_ok=True)
+        p = _DATA_DIR / _DEVICE_TOKEN_FILE
+        p.write_text(token)
+        return p
+    return None
+
+
+def redeem_handoff(base_url: str | None, code: str) -> WalletIdentity:
+    """Redeem a one-time handoff code (from a ``ndrchst://`` deep link) for a
+    durable device token + fresh identity. Lets an installed client link itself
+    to a wallet already signed in on the web, with no second sign-in."""
+    base = (base_url or DEFAULT_BASE).rstrip("/")
+    try:
+        d = _post_json(f"{base}/client/auth/handoff", {"code": code})
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        raise WalletAuthError(f"handoff failed: {e}") from e
+    if not d.get("wallet"):
+        raise WalletAuthError("handoff code rejected — sign in again")
+    return WalletIdentity(
+        wallet=d["wallet"],
+        display=d.get("display", ""),
+        mc_name=d.get("mc_name", ""),
+        tier=d.get("tier"),
+        tier_name=d.get("tier_name"),
+        holdings_pct=float(d.get("holdings_pct", 0.0)),
+        join_token=d.get("join_token", ""),
+        device_token=d.get("device_token", ""),
+    )
 
 
 def exchange_device_token(base_url: str | None, device_token: str) -> WalletIdentity:

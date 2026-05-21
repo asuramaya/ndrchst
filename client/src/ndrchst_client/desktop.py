@@ -36,9 +36,10 @@ def _exec_command() -> str:
 
 
 def _bundled_icon() -> Path | None:
-    """Icon shipped alongside the binary, if PyInstaller bundled one."""
+    """Icon shipped alongside the binary, if PyInstaller bundled one. The spec
+    stages assets under ndrchst_client/assets/; the others are dev/zip layouts."""
     base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-    for name in ("icon.png", "assets/icon.png"):
+    for name in ("ndrchst_client/assets/icon.png", "assets/icon.png", "icon.png"):
         p = base / name
         if p.exists():
             return p
@@ -94,10 +95,18 @@ def _install_linux(
         "[Desktop Entry]",
         "Type=Application",
         f"Name={app_name}",
-        "Comment=Play on ndrchst",
-        f"Exec={cmd}",
+        "Comment=Play modded Minecraft on ndrchst",
+        # %u passes a ndrchst:// URL through when the browser hands one off.
+        f"Exec={cmd} %u",
         "Terminal=false",
         "Categories=Game;",
+        "Keywords=minecraft;ndrchst;solana;modded;",
+        # Declares this app as the handler for the ndrchst:// scheme so a deep
+        # link from the website opens the installed client.
+        "MimeType=x-scheme-handler/ndrchst;",
+        # Matches tk.Tk(className="ndrchst") so the running window groups under
+        # this launcher's icon in the taskbar instead of a generic Tk feather.
+        "StartupWMClass=ndrchst",
         "StartupNotify=true",
     ]
     if icon is not None:
@@ -108,6 +117,21 @@ def _install_linux(
     target.write_text(entry)
     target.chmod(0o755)
     on_log(f"Installed application entry: {target}")
+
+    # Make this entry the default handler for ndrchst:// and refresh the desktop
+    # MIME cache so the association takes effect without a re-login. Best-effort,
+    # and only for a REAL install (apps_dir is None) — xdg-mime mutates the
+    # user's global mimeapps.list, so a test passing a temp apps_dir must not.
+    if apps_dir is None:
+        if _which("xdg-mime"):
+            subprocess.run(
+                ["xdg-mime", "default", f"{slug}.desktop", "x-scheme-handler/ndrchst"],
+                check=False, capture_output=True,
+            )
+        if _which("update-desktop-database"):
+            subprocess.run(
+                ["update-desktop-database", str(apps)], check=False, capture_output=True,
+            )
 
     # Also drop one on the Desktop if the dir exists, and mark it trusted
     # (GNOME/Nautilus refuses to run untrusted .desktop launchers).
@@ -126,7 +150,6 @@ def _install_linux(
 
 
 def _install_windows(app_name: str, on_log: Callable[[str], None]) -> bool:
-    slug = _slug(app_name)
     exe = sys.executable
     appdata = os.environ.get("APPDATA", "")
     start_menu = (
@@ -150,10 +173,30 @@ def _install_windows(app_name: str, on_log: Callable[[str], None]) -> bool:
             check=True, capture_output=True,
         )
         made.append(str(lnk))
+    _register_scheme_windows(exe, on_log)
     if made:
         on_log("Created shortcuts: " + ", ".join(made))
         return True
     return False
+
+
+def _register_scheme_windows(exe: str, on_log: Callable[[str], None]) -> bool:
+    """Register HKCU\\Software\\Classes\\ndrchst so the OS opens this exe for a
+    ndrchst:// deep link. Per-user (HKCU) so it needs no admin rights."""
+    cmd_val = f'"{exe}" "%1"'
+    base = r"HKCU\Software\Classes\ndrchst"
+    cmds = [
+        ["reg", "add", base, "/ve", "/d", "URL:ndrchst Protocol", "/f"],
+        ["reg", "add", base, "/v", "URL Protocol", "/d", "", "/f"],
+        ["reg", "add", base + r"\shell\open\command", "/ve", "/d", cmd_val, "/f"],
+    ]
+    ok = all(
+        subprocess.run(c, capture_output=True, check=False).returncode == 0
+        for c in cmds
+    )
+    if ok:
+        on_log("Registered ndrchst:// URL scheme")
+    return ok
 
 
 def _install_macos(app_name: str, on_log: Callable[[str], None], apps_dir: Path | None) -> bool:
