@@ -180,7 +180,12 @@ def run() -> None:
     titlebar.pack(anchor="w")
     brand_path = _ASSETS / "brand.png"
     if brand_path.exists():
-        root._brand_img = tk.PhotoImage(master=root, file=str(brand_path))  # keep ref
+        img = tk.PhotoImage(master=root, file=str(brand_path))
+        # The CI exe pulls the 128px web glyph; the zip ships a 48px one. Shrink
+        # an oversized glyph so the header looks the same either way.
+        if img.height() > 56:
+            img = img.subsample(max(1, round(img.height() / 40)))
+        root._brand_img = img  # keep ref
         ttk.Label(titlebar, image=root._brand_img, style="Brand.TLabel").pack(
             side=tk.LEFT, padx=(0, 8))
     title_lbl = ttk.Label(titlebar, text=cfg.app_name, style="Title.TLabel")

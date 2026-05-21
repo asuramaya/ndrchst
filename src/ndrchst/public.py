@@ -185,11 +185,22 @@ def _png_dims(data: bytes) -> tuple[int, int] | None:
     return (int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big"))
 
 
-def _identity(pubkey: str) -> dict:
+def _identity(pubkey: str, *, conn: sqlite3.Connection | None = None) -> dict:
     """Public identity view for a wallet: display handle, derived MC name,
-    holdings %, rank tier, and (if set) the wallet's skin URL. Holdings is a
-    live RPC read (0.0 on any miss)."""
-    pct = solana.holdings_pct(pubkey)
+    holdings %, rank tier, and (if set) the wallet's skin URL.
+
+    Holdings is a live RPC read, but a *flaky* read (None) falls back to the
+    wallet's last persisted snapshot (when `conn` is given) instead of dropping
+    to 0.0 — otherwise a transient RPC blip demotes a real holder's rank, which
+    is the "holder detection loses identity" flapping. A genuine zero balance
+    still reads 0.0 and is honoured."""
+    pct = solana.try_holdings_pct(pubkey)
+    if pct is None and conn is not None:
+        link = wl_store.get(conn, pubkey)
+        if link is not None and link.snapshot_pct is not None:
+            pct = link.snapshot_pct
+    if pct is None:
+        pct = 0.0
     tier = wallet.tier_for(pct)
     return {
         "wallet": pubkey,
@@ -291,7 +302,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
     def auth_verify(req: _VerifyReq = Body(...)) -> JSONResponse:
         """Verify the signed challenge, then set a session cookie."""
         _verify_signed_or_raise(req.pubkey, req.message, req.signature)
-        ident = _identity(req.pubkey)
+        ident = _identity(req.pubkey, conn=_conn())
         _record_link(ident)
         token = auth_session.sign_session(req.pubkey)
         resp = JSONResponse(ident, headers=_NO_STORE)
@@ -326,7 +337,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         _verify_signed_or_raise(req.pubkey, req.message, req.signature)
         if not client_pairing.approve(req.code, req.pubkey):
             raise HTTPException(status_code=404, detail="unknown or expired pairing code")
-        ident = _identity(req.pubkey)
+        ident = _identity(req.pubkey, conn=_conn())
         _record_link(ident)
         return JSONResponse({"ok": True, **_with_join_token(ident)}, headers=_NO_STORE)
 
@@ -338,7 +349,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="unknown or expired pairing")
         if not p.pubkey:
             return JSONResponse({"status": "pending"}, headers=_NO_STORE)
-        ident = _with_join_token(_identity(p.pubkey))
+        ident = _with_join_token(_identity(p.pubkey, conn=_conn()))
         return JSONResponse({"status": "approved", **ident}, headers=_NO_STORE)
 
     @app.post("/join/verify")
@@ -375,7 +386,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         wallet_pk = device_token.verify(req.device_token)
         if not wallet_pk:
             raise HTTPException(status_code=401, detail="invalid or expired device token")
-        ident = _identity(wallet_pk)
+        ident = _identity(wallet_pk, conn=_conn())
         _record_link(ident)
         return JSONResponse(_with_join_token(ident), headers=_NO_STORE)
 
@@ -434,7 +445,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         wallet_pk = client_handoff.redeem(req.code)
         if not wallet_pk:
             raise HTTPException(status_code=404, detail="invalid or expired handoff code")
-        ident = _identity(wallet_pk)
+        ident = _identity(wallet_pk, conn=_conn())
         _record_link(ident)
         return JSONResponse(
             {**_with_join_token(ident), "device_token": device_token.issue(wallet_pk)},
@@ -477,7 +488,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         pubkey = auth_session.verify_session(request.cookies.get(_SESSION_COOKIE))
         if not pubkey:
             raise HTTPException(status_code=401, detail="not signed in")
-        return JSONResponse(_identity(pubkey), headers=_NO_STORE)
+        return JSONResponse(_identity(pubkey, conn=_conn()), headers=_NO_STORE)
 
     @app.post("/auth/logout")
     def auth_logout() -> JSONResponse:

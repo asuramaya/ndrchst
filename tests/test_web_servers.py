@@ -499,7 +499,7 @@ def test_wallets_refresh_recomputes_tiers(app_with_docker, monkeypatch):
     for every linked wallet, persisting the new rank."""
     from ndrchst.store import wallet_links as wl
     monkeypatch.setattr(
-        "ndrchst.runtime.solana.holdings_pct", lambda w, **k: 0.2)  # -> bronze
+        "ndrchst.runtime.solana.try_holdings_pct", lambda w, **k: 0.2)  # -> bronze
     with TestClient(app_with_docker) as client:
         conn = app_with_docker.state.ndrchst.conn
         wl.upsert(conn, "WALLETA", "WALLET_A", "whale", 6.0)

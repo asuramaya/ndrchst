@@ -45,6 +45,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller portablemc httpx
 
+      # The themed UI assets (End banner GIF + brand glyph + window icon) are
+      # gitignored (rebuilt from ripped textures), so they're absent in a clean
+      # checkout. Pull them from the already-published edge so the binary ships
+      # with its animated header + icon. Best-effort: build without them on miss.
+      - name: Fetch themed UI assets from the edge
+        shell: bash
+        run: |
+          mkdir -p src/ndrchst_client/assets
+          base="https://play.ndrchst.com/game/decor"
+          curl -fsS -o src/ndrchst_client/assets/end_banner.gif "$base/end_banner.gif" || echo "banner fetch failed — building without it"
+          curl -fsS -o src/ndrchst_client/assets/brand.png "$base/brand.png" || echo "brand fetch failed"
+          cp src/ndrchst_client/assets/brand.png src/ndrchst_client/assets/icon.png 2>/dev/null || true
+          ls -la src/ndrchst_client/assets/ || true
+
       # Stamp the binary's __version__ from the tag (client-vX.Y.Z → X.Y.Z) so
       # the self-updater compares against the version it actually shipped as.
       - name: Stamp version

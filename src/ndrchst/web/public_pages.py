@@ -1078,24 +1078,9 @@ def render_play(servers: list[dict], *, downloads_base: str = "") -> str:
   </p>
 </section>
 
-<section class="section" id="servers" style="border-top:none;padding-top:0">
-  <h2>Servers</h2>
-  {''.join(rows)}
-</section>
-
-<section class="section">
-  <h2>How it works</h2>
-  <div class="features">
-    <div class="feature"><div class="num">STEP 01</div><h3>Download the client</h3>
-      <p>One small app for your OS — no Python, no setup. It self-updates, so you grab it once.</p></div>
-    <div class="feature"><div class="num">STEP 02</div><h3>Sign in with your wallet</h3>
-      <p>Connect Phantom or Solflare here on the site. Your rank and perks come from your holdings.</p></div>
-    <div class="feature"><div class="num">STEP 03</div><h3>Press Play</h3>
-      <p>Hit Play on a server — the site opens your installed client, already linked, and it joins
-         you at your rank with <code>/daily</code> ready.</p></div>
-  </div>
-
-  <div class="os-tabs" style="margin-top:1.4rem">
+<section class="section" style="border-top:none;padding-top:.4rem">
+  <h2 style="font-size:1.2rem">Run the client</h2>
+  <div class="os-tabs">
     <div class="os-tab" data-os="win">Windows</div>
     <div class="os-tab" data-os="mac">macOS</div>
     <div class="os-tab" data-os="linux">Linux</div>
@@ -1104,7 +1089,7 @@ def render_play(servers: list[dict], *, downloads_base: str = "") -> str:
     <ol>
       <li>Download the client (button above) and run <code>ndrchst-client-windows-x86_64.exe</code>.</li>
       <li>SmartScreen may warn on an unsigned app — choose <em>More info → Run anyway</em>.</li>
-      <li>Back here, sign in and press <strong>Play</strong> on a server — it opens the app.</li>
+      <li>Sign in here and press <strong>Play</strong> on a server — it opens the app.</li>
     </ol>
   </div>
   <div class="os-panel" data-os="mac">
@@ -1118,12 +1103,16 @@ def render_play(servers: list[dict], *, downloads_base: str = "") -> str:
     <ol>
       <li>Download the client, then <code>chmod +x ndrchst-client-linux-x86_64 &amp;&amp; ./ndrchst-client-linux-x86_64</code>.</li>
       <li>First launch installs the app + registers the <code>ndrchst://</code> handler.</li>
-      <li>Back here, sign in and press <strong>Play</strong> on a server — it opens the app.</li>
+      <li>Sign in here and press <strong>Play</strong> on a server — it opens the app.</li>
     </ol>
   </div>
-
   <p class="meta when-in" style="margin-top:1rem">Prefer a self-contained folder? Each server's
-    <span class="mono">.zip</span> above bundles the client pinned to that server (Python required).</p>
+    <span class="mono">.zip</span> below bundles the client pinned to that server (Python required).</p>
+</section>
+
+<section class="section" id="servers">
+  <h2>Servers</h2>
+  {''.join(rows)}
 </section>
 
 <footer>The client is an offline launcher pinned to each server. It mirrors the server's

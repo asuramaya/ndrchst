@@ -65,7 +65,7 @@ def _sign(seed: bytes, msg: bytes) -> bytes:
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("NDRCHST_COOKIE_SECURE", "0")  # so TestClient resends over http
-    monkeypatch.setattr("ndrchst.runtime.solana.holdings_pct", lambda *a, **k: 0.7)
+    monkeypatch.setattr("ndrchst.runtime.solana.try_holdings_pct", lambda *a, **k: 0.7)
     app = create_public_app(db_path=tmp_path / "t.db")
     with TestClient(app) as c:
         yield c
@@ -176,7 +176,7 @@ def test_approve_records_wallet_link(tmp_path, monkeypatch):
     from ndrchst.store.db import connect
 
     monkeypatch.setenv("NDRCHST_COOKIE_SECURE", "0")
-    monkeypatch.setattr("ndrchst.runtime.solana.holdings_pct", lambda *a, **k: 0.7)
+    monkeypatch.setattr("ndrchst.runtime.solana.try_holdings_pct", lambda *a, **k: 0.7)
     db = tmp_path / "t.db"
     app = create_public_app(db_path=db)
     with TestClient(app) as c:

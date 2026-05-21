@@ -64,18 +64,20 @@ def get_balance(owner: str, mint: str, *, client: httpx.Client, url: str) -> flo
     return total
 
 
-def holdings_pct(
+def try_holdings_pct(
     owner: str,
     *,
     mint: str | None = None,
     url: str | None = None,
     client: httpx.Client | None = None,
-) -> float:
-    """A wallet's holdings as a percentage of total supply (0.0 on any miss).
+) -> float | None:
+    """A wallet's holdings as a percentage of total supply, or **None if the RPC
+    read failed** (network / rate-limit / bad response).
 
-    Network errors degrade to 0.0 — a flaky RPC must never block login; the
-    caller still gets an authenticated session, just no rank until the next
-    refresh."""
+    The None-vs-0.0 distinction is the point: a *successful* read of an empty
+    balance is a real 0.0, but a *flaky* read is None — so callers can fall back
+    to a last-known snapshot instead of silently demoting a holder's rank. A
+    flaky RPC must never block login or wipe someone's tier."""
     mint = mint or token_mint()
     url = url or rpc_url()
     owns = client is None
@@ -87,7 +89,20 @@ def holdings_pct(
         bal = get_balance(owner, mint, client=c, url=url)
         return (bal / supply) * 100.0
     except (httpx.HTTPError, RuntimeError, ValueError):
-        return 0.0
+        return None
     finally:
         if owns:
             c.close()
+
+
+def holdings_pct(
+    owner: str,
+    *,
+    mint: str | None = None,
+    url: str | None = None,
+    client: httpx.Client | None = None,
+) -> float:
+    """Back-compat wrapper: holdings as a % of supply, 0.0 on any miss. Prefer
+    :func:`try_holdings_pct` where a flaky read should preserve a prior value."""
+    pct = try_holdings_pct(owner, mint=mint, url=url, client=client)
+    return pct if pct is not None else 0.0
