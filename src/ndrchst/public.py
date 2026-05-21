@@ -185,20 +185,28 @@ def _png_dims(data: bytes) -> tuple[int, int] | None:
     return (int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big"))
 
 
-def _identity(pubkey: str, *, conn: sqlite3.Connection | None = None) -> dict:
+def _identity(pubkey: str, *, conn: sqlite3.Connection | None = None,
+              allow_live: bool = True) -> dict:
     """Public identity view for a wallet: display handle, derived MC name,
     holdings %, rank tier, and (if set) the wallet's skin URL.
 
-    Holdings is a live RPC read, but a *flaky* read (None) falls back to the
-    wallet's last persisted snapshot (when `conn` is given) instead of dropping
-    to 0.0 — otherwise a transient RPC blip demotes a real holder's rank, which
-    is the "holder detection loses identity" flapping. A genuine zero balance
-    still reads 0.0 and is honoured."""
-    pct = solana.try_holdings_pct(pubkey)
-    if pct is None and conn is not None:
-        link = wl_store.get(conn, pubkey)
-        if link is not None and link.snapshot_pct is not None:
-            pct = link.snapshot_pct
+    Holdings is served **from the DB**, not a live RPC call: the hourly snapshot
+    loop keeps every linked wallet's value fresh, and a wallet's first sign-in
+    seeds it. So the high-frequency request paths (/me, the pairing poll loop,
+    Play) cost ZERO Solana RPC — only a wallet we've never seen does one live
+    read to establish its tier, and `allow_live=False` suppresses even that for
+    pure-display endpoints. This is what keeps a metered RPC (Helius, 1M/mo)
+    from being drained by edge traffic; freshness for known wallets rides the
+    snapshot interval. A live miss still falls back to the last snapshot rather
+    than demoting a holder to 0."""
+    link = wl_store.get(conn, pubkey) if conn is not None else None
+    pct: float | None = None
+    if link is not None and link.holdings_pct is not None:
+        pct = link.holdings_pct          # DB value: refreshed hourly + at first link
+    elif allow_live:
+        pct = solana.try_holdings_pct(pubkey)  # never-seen wallet → one live read
+    if pct is None and link is not None and link.snapshot_pct is not None:
+        pct = link.snapshot_pct          # live miss → last good snapshot, not 0
     if pct is None:
         pct = 0.0
     tier = wallet.tier_for(pct)
@@ -349,7 +357,9 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="unknown or expired pairing")
         if not p.pubkey:
             return JSONResponse({"status": "pending"}, headers=_NO_STORE)
-        ident = _with_join_token(_identity(p.pubkey, conn=_conn()))
+        # Polled in a loop while pairing — the wallet was just written by
+        # /client/auth/approve, so read its tier from the DB (no live RPC).
+        ident = _with_join_token(_identity(p.pubkey, conn=_conn(), allow_live=False))
         return JSONResponse({"status": "approved", **ident}, headers=_NO_STORE)
 
     @app.post("/join/verify")
@@ -488,7 +498,9 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         pubkey = auth_session.verify_session(request.cookies.get(_SESSION_COOKIE))
         if not pubkey:
             raise HTTPException(status_code=401, detail="not signed in")
-        return JSONResponse(_identity(pubkey, conn=_conn()), headers=_NO_STORE)
+        # /me is hit on every page load — serve tier from the DB, no live RPC.
+        return JSONResponse(_identity(pubkey, conn=_conn(), allow_live=False),
+                            headers=_NO_STORE)
 
     @app.post("/auth/logout")
     def auth_logout() -> JSONResponse:

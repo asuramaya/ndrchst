@@ -12,6 +12,8 @@ Config is environment-driven:
 from __future__ import annotations
 
 import os
+import threading
+import time
 
 import httpx
 
@@ -19,6 +21,14 @@ DEFAULT_RPC = "https://api.mainnet-beta.solana.com"
 DEFAULT_MINT = "EUr2QnpmavMw51JiFYeTRnUywY7mPAtouzyY2P21pump"
 
 _TIMEOUT = httpx.Timeout(connect=10.0, read=15.0, write=10.0, pool=10.0)
+
+# Total supply barely moves (mint/burn only) but is read on every holdings call
+# AND once per wallet in the hourly refresh. Cache it globally so a metered RPC
+# (Helius: 1M/mo) isn't billed for the same number thousands of times — the
+# refresh and every live read share one supply call per TTL. 0 disables.
+_SUPPLY_TTL = float(os.environ.get("NDRCHST_SUPPLY_TTL", "600"))
+_supply_cache: dict[tuple[str, str], tuple[float, float]] = {}
+_supply_lock = threading.Lock()
 
 
 def rpc_url() -> str:
@@ -41,10 +51,23 @@ def _rpc(method: str, params: list, *, client: httpx.Client, url: str) -> dict:
     return body.get("result", {})
 
 
-def get_token_supply(mint: str, *, client: httpx.Client, url: str) -> float:
-    """Total supply of the mint as a UI amount (decimals applied)."""
+def get_token_supply(
+    mint: str, *, client: httpx.Client, url: str, use_cache: bool = True,
+) -> float:
+    """Total supply of the mint as a UI amount (decimals applied). Cached for
+    _SUPPLY_TTL across all callers (set use_cache=False to force a fresh read)."""
+    if use_cache and _SUPPLY_TTL > 0:
+        now = time.monotonic()
+        with _supply_lock:
+            hit = _supply_cache.get((mint, url))
+            if hit is not None and hit[1] > now:
+                return hit[0]
     res = _rpc("getTokenSupply", [mint], client=client, url=url)
-    return float(res.get("value", {}).get("uiAmount") or 0.0)
+    val = float(res.get("value", {}).get("uiAmount") or 0.0)
+    if use_cache and _SUPPLY_TTL > 0 and val > 0:
+        with _supply_lock:
+            _supply_cache[(mint, url)] = (val, time.monotonic() + _SUPPLY_TTL)
+    return val
 
 
 def get_balance(owner: str, mint: str, *, client: httpx.Client, url: str) -> float:
