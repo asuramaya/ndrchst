@@ -113,7 +113,7 @@ def test_detail_full_page_renders(detail_client):
     assert "Survival" in html
     assert "← Back" in html or "&larr; Back" in html
     # All tabs in the nav
-    for tab in ("Console", "Properties", "Players", "Files", "Marketplace", "Backups"):
+    for tab in ("Console", "Properties", "Players", "Files", "Assets", "Backups"):
         assert tab in html
 
 

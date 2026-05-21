@@ -138,7 +138,7 @@ def set_cf_pack(
     file_id: int | None,
 ) -> None:
     """Pin (or clear) the CurseForge client-pack coordinates used to build
-    the pilot's modpack CDN URL."""
+    the client's modpack CDN URL."""
     conn.execute(
         "UPDATE servers SET cf_project_id = ?, cf_file_id = ? WHERE id = ?",
         (project_id, file_id, server_id),
@@ -148,7 +148,7 @@ def set_cf_pack(
 def set_neoforge_version(
     conn: sqlite3.Connection, server_id: str, version: str | None
 ) -> None:
-    """Pin (or clear) the NeoForge version the pilot installs for this server."""
+    """Pin (or clear) the NeoForge version the client installs for this server."""
     conn.execute(
         "UPDATE servers SET neoforge_version = ? WHERE id = ?",
         (version, server_id),

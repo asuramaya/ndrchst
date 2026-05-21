@@ -2,8 +2,8 @@
 config so one cross-platform build serves any server.
 
 Resolution order (first hit wins):
-  1. $NDRCHST_PILOT_CONFIG — path to a JSON config file.
-  2. A `pilot-config.json` sitting next to the executable / cwd.
+  1. $NDRCHST_CLIENT_CONFIG — path to a JSON config file.
+  2. A `client-config.json` sitting next to the executable / cwd.
   3. The baked-in `config.py` defaults (back-compat with the old
      per-server source bundles).
 
@@ -28,7 +28,7 @@ from . import config as _baked
 
 
 @dataclass(frozen=True, slots=True)
-class PilotConfig:
+class ClientConfig:
     app_name: str
     server_host: str
     server_port: int
@@ -40,7 +40,7 @@ class PilotConfig:
     mods_sync_url: str | None = None
     tunnel_hostname: str | None = None
     update_base_url: str | None = None
-    auth_base_url: str | None = None  # site base for wallet sign-in (/pilot/auth/*)
+    auth_base_url: str | None = None  # site base for wallet sign-in (/client/auth/*)
 
 
 def _exe_dir() -> Path:
@@ -52,7 +52,7 @@ def _exe_dir() -> Path:
 
 def _from_baked() -> dict:
     return {
-        "app_name": getattr(_baked, "APP_NAME", "ndrchst Pilot"),
+        "app_name": getattr(_baked, "APP_NAME", "ndrchst Client"),
         "server_host": getattr(_baked, "SERVER_HOST", ""),
         "server_port": getattr(_baked, "SERVER_PORT", 25565),
         "mc_version": getattr(_baked, "MC_VERSION", "1.21.1"),
@@ -69,15 +69,15 @@ def _from_baked() -> dict:
 
 def _candidate_paths() -> list[Path]:
     paths: list[Path] = []
-    env = os.environ.get("NDRCHST_PILOT_CONFIG")
+    env = os.environ.get("NDRCHST_CLIENT_CONFIG")
     if env:
         paths.append(Path(env))
-    paths.append(_exe_dir() / "pilot-config.json")
-    paths.append(Path.cwd() / "pilot-config.json")
+    paths.append(_exe_dir() / "client-config.json")
+    paths.append(Path.cwd() / "client-config.json")
     return paths
 
 
-def load() -> PilotConfig:
+def load() -> ClientConfig:
     """Merge baked defaults with the first JSON config found (if any)."""
     merged = _from_baked()
     for p in _candidate_paths():
@@ -90,4 +90,4 @@ def load() -> PilotConfig:
             for k, v in data.items():
                 merged[k.lower()] = v
             break
-    return PilotConfig(**{k: merged.get(k) for k in PilotConfig.__dataclass_fields__})
+    return ClientConfig(**{k: merged.get(k) for k in ClientConfig.__dataclass_fields__})

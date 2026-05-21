@@ -24,7 +24,7 @@ def public(
     host: str = typer.Option("127.0.0.1", help="Bind address (default: localhost only)"),
     port: int = typer.Option(8081, help="HTTP port for the public surface"),
 ) -> None:
-    """Boot the ndrchst public surface (pilot downloads + server list).
+    """Boot the ndrchst public surface (client downloads + server list).
 
     Read-only; safe to expose. Run alongside `ndrchst run` (separate port,
     separate process), then front each with a different hostname via your

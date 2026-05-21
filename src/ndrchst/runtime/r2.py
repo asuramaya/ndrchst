@@ -1,7 +1,7 @@
 """Minimal Cloudflare R2 (S3-compatible) uploader — AWS SigV4 over httpx,
 no boto3 dependency.
 
-Used to push pilot artifacts off the residential box onto Cloudflare's
+Used to push client artifacts off the residential box onto Cloudflare's
 edge so distribution scales and the box stays outbound-only. R2 speaks
 the S3 API; we sign PUTs with SigV4 (region "auto", service "s3").
 
@@ -35,7 +35,7 @@ class R2Config:
     access_key_id: str
     secret_access_key: str
     bucket: str
-    prefix: str = ""  # optional key prefix, e.g. "pilot"
+    prefix: str = ""  # optional key prefix, e.g. "client"
 
     @property
     def host(self) -> str:

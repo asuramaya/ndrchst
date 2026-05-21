@@ -201,15 +201,29 @@ def test_html_create_round_trip(app_with_docker):
         assert ":19132" in r.text
 
 
-def test_assets_page_empty_when_no_servers(app_no_docker):
+def test_assets_url_redirects_to_servers(app_no_docker):
+    """The global /assets view was folded into each server's detail page
+    (the "Assets" tab); the old URL now redirects rather than dead-ending."""
     with TestClient(app_no_docker) as client:
-        r = client.get("/assets")
+        r = client.get("/assets", follow_redirects=False)
+        assert r.status_code == 307
+        assert r.headers["location"] == "/"
+
+
+def test_assets_removed_from_sidebar(app_no_docker):
+    """Assets is no longer a top-level destination — it lives per-server."""
+    with TestClient(app_no_docker) as client:
+        r = client.get("/")
         assert r.status_code == 200
-        assert "Installed assets" in r.text
-        assert "No servers yet" in r.text
+        assert 'href="/assets"' not in r.text
+        # The remaining nav destinations are still present.
+        for dest in ("/", "/system", "/settings"):
+            assert f'href="{dest}"' in r.text
 
 
-def test_assets_page_lists_zero_assets_for_servers_with_none(app_with_docker):
+def test_server_assets_tab_lists_installed_assets(app_with_docker):
+    """Installed assets render in the per-server Assets tab (route slug: mods),
+    which also cross-links to the file-managed asset types."""
     with TestClient(app_with_docker) as client:
         st: AppState = app_with_docker.state.ndrchst
         import tempfile
@@ -217,70 +231,34 @@ def test_assets_page_lists_zero_assets_for_servers_with_none(app_with_docker):
         st.lifecycle = Lifecycle(Docker(client=FakeClient()), st.conn, servers_root=root)
 
         client.post("/servers", data={
-            "name": "Empty", "platform_id": "paper", "version": "1.21.3",
-            "port": "25700", "memory_mb": "2048",
-        }, headers={"HX-Request": "true"})
-
-        r = client.get("/assets")
-        assert r.status_code == 200
-        assert "Empty" in r.text
-        assert "No mods, plugins, or packs installed" in r.text
-        assert "0 assets across 1 server" in r.text
-
-
-def test_assets_page_groups_by_server_and_lists_assets(app_with_docker):
-    """When installed_assets rows exist, the global view groups them by server."""
-    with TestClient(app_with_docker) as client:
-        st: AppState = app_with_docker.state.ndrchst
-        import tempfile
-        root = Path(tempfile.mkdtemp())
-        st.lifecycle = Lifecycle(Docker(client=FakeClient()), st.conn, servers_root=root)
-
-        # Two servers, two assets on the first
-        r = client.post("/servers", data={
             "name": "Survival", "platform_id": "paper", "version": "1.21.3",
             "port": "25571", "memory_mb": "2048",
         }, headers={"HX-Request": "true"})
-        assert r.status_code == 200
-        r = client.post("/servers", data={
-            "name": "Bdrk", "platform_id": "bedrock", "version": "latest",
-            "port": "19132", "memory_mb": "1024",
-        }, headers={"HX-Request": "true"})
-        assert r.status_code == 200
-
-        ids = {s["name"]: s["id"] for s in client.get("/api/servers").json()}
+        sid = next(s["id"] for s in client.get("/api/servers").json()
+                   if s["name"] == "Survival")
 
         # Insert assets straight into the DB — the installer is exercised
-        # elsewhere; here we just verify the view reads + groups correctly.
+        # elsewhere; here we just verify the tab reads + renders them.
         st.conn.execute(
             "INSERT INTO installed_assets (server_id, source_id, asset_id, kind, version) "
             "VALUES (?, 'modrinth', 'fabric-api', 'mod', '0.100.0')",
-            (ids["Survival"],),
+            (sid,),
         )
         st.conn.execute(
             "INSERT INTO installed_assets (server_id, source_id, asset_id, kind, version) "
             "VALUES (?, 'modrinth', 'lithium', 'mod', '0.12.0')",
-            (ids["Survival"],),
+            (sid,),
         )
 
-        r = client.get("/assets")
+        r = client.get(f"/servers/{sid}/mods", headers={"HX-Request": "true"})
         assert r.status_code == 200
         body = r.text
-        assert "Survival" in body
-        assert "Bdrk" in body  # listed even with no assets
         assert "fabric-api" in body
         assert "lithium" in body
         assert "0.100.0" in body
-        assert "modrinth" in body
-        assert "2 assets across 2 servers" in body
-
-
-def test_assets_appears_in_sidebar(app_no_docker):
-    with TestClient(app_no_docker) as client:
-        r = client.get("/")
-        assert r.status_code == 200
-        assert 'href="/assets"' in r.text
-        assert ">Assets<" in r.text
+        # The Assets tab is the hub: it cross-links to the other asset types.
+        assert "Manage by type" in body
+        assert f"/servers/{sid}/plugins" in body
 
 
 # ─── Management functions ported from v2 (versions, restart, stats, rename) ──
@@ -418,13 +396,13 @@ def test_stats_fragment_returns_cpu_and_memory_html(app_with_docker):
             lc.Lifecycle.stats = original
 
 
-def test_regenerate_pilot_rebuilds_bundle_with_current_env(app_with_docker, tmp_path):
+def test_regenerate_client_rebuilds_bundle_with_current_env(app_with_docker, tmp_path):
     """Creating a server bakes the lifespan's public_host into the bundle.
-    Changing the env + hitting POST /servers/{id}/pilot/regenerate should
+    Changing the env + hitting POST /servers/{id}/client/regenerate should
     rebuild with the new host — no recreate needed."""
     with TestClient(app_with_docker) as client:
         st: AppState = app_with_docker.state.ndrchst
-        pilots_root = tmp_path / "pilots"
+        clients_root = tmp_path / "clients"
         servers_root = tmp_path / "servers"
         st.lifecycle = Lifecycle(
             Docker(client=FakeClient()), st.conn,
@@ -432,9 +410,9 @@ def test_regenerate_pilot_rebuilds_bundle_with_current_env(app_with_docker, tmp_
             public_host="old.example",
             edge_url="",
         )
-        import ndrchst.runtime.pilot as pilot_mod
-        original_root = pilot_mod.PILOTS_ROOT_DEFAULT
-        pilot_mod.PILOTS_ROOT_DEFAULT = pilots_root
+        import ndrchst.runtime.client as client_mod
+        original_root = client_mod.CLIENTS_ROOT_DEFAULT
+        client_mod.CLIENTS_ROOT_DEFAULT = clients_root
         try:
             r = client.post("/servers", data={
                 "name": "Rebuilder", "platform_id": "paper",
@@ -445,7 +423,7 @@ def test_regenerate_pilot_rebuilds_bundle_with_current_env(app_with_docker, tmp_
                        if s["name"] == "Rebuilder")
 
             import json
-            man = json.loads((pilots_root / sid / "manifest.json").read_text())
+            man = json.loads((clients_root / sid / "manifest.json").read_text())
             assert man["host"] == "old.example"
             assert man["edge_url"] == ""
 
@@ -454,22 +432,22 @@ def test_regenerate_pilot_rebuilds_bundle_with_current_env(app_with_docker, tmp_
             st.lifecycle._public_host = "mc.ndrchst.com"
             st.lifecycle._edge_url = "https://play.ndrchst.com"
 
-            r = client.post(f"/servers/{sid}/pilot/regenerate")
+            r = client.post(f"/servers/{sid}/client/regenerate")
             assert r.status_code == 200
-            assert "Rebuilt pilot bundle" in r.text
+            assert "Rebuilt client bundle" in r.text
 
-            man2 = json.loads((pilots_root / sid / "manifest.json").read_text())
+            man2 = json.loads((clients_root / sid / "manifest.json").read_text())
             assert man2["host"] == "mc.ndrchst.com"
             assert man2["edge_url"] == "https://play.ndrchst.com"
         finally:
-            pilot_mod.PILOTS_ROOT_DEFAULT = original_root
+            client_mod.CLIENTS_ROOT_DEFAULT = original_root
 
 
-def test_regenerate_pilot_pins_cf_pack_and_bakes_cdn_url(
+def test_regenerate_client_pins_cf_pack_and_bakes_cdn_url(
     app_with_docker, tmp_path, monkeypatch,
 ):
     """Passing cf_project_id + cf_file_id pins the pack and bakes a CF CDN
-    URL into the pilot config — the box re-hosts no 200MB pack zip. The
+    URL into the client config — the box re-hosts no 200MB pack zip. The
     filename is resolved live (mocked here) so the URL stays synced."""
     async def fake_fetch_filename(client, pid, fid):
         assert (pid, fid) == (925200, 8091114)
@@ -479,15 +457,15 @@ def test_regenerate_pilot_pins_cf_pack_and_bakes_cdn_url(
 
     with TestClient(app_with_docker) as client:
         st: AppState = app_with_docker.state.ndrchst
-        pilots_root = tmp_path / "pilots"
+        clients_root = tmp_path / "clients"
         st.lifecycle = Lifecycle(
             Docker(client=FakeClient()), st.conn,
             servers_root=tmp_path / "servers",
             public_host="mc.ndrchst.com", edge_url="https://play.ndrchst.com",
         )
-        import ndrchst.runtime.pilot as pilot_mod
-        original_root = pilot_mod.PILOTS_ROOT_DEFAULT
-        pilot_mod.PILOTS_ROOT_DEFAULT = pilots_root
+        import ndrchst.runtime.client as client_mod
+        original_root = client_mod.CLIENTS_ROOT_DEFAULT
+        client_mod.CLIENTS_ROOT_DEFAULT = clients_root
         try:
             r = client.post("/servers", data={
                 "name": "Packed", "platform_id": "paper",
@@ -497,12 +475,12 @@ def test_regenerate_pilot_pins_cf_pack_and_bakes_cdn_url(
             sid = next(s["id"] for s in client.get("/api/servers").json()
                        if s["name"] == "Packed")
 
-            r = client.post(f"/servers/{sid}/pilot/regenerate", data={
+            r = client.post(f"/servers/{sid}/client/regenerate", data={
                 "cf_project_id": "925200", "cf_file_id": "8091114"})
             assert r.status_code == 200, r.text
 
             import json
-            cfg = json.loads((pilots_root / sid / "config.json").read_text())
+            cfg = json.loads((clients_root / sid / "config.json").read_text())
             assert cfg["modpack_url"] == (
                 "https://edge.forgecdn.net/files/8091/114/"
                 "All%20the%20Mods%2010-7.0.zip"
@@ -513,7 +491,7 @@ def test_regenerate_pilot_pins_cf_pack_and_bakes_cdn_url(
             assert s.cf_project_id == 925200
             assert s.cf_file_id == 8091114
         finally:
-            pilot_mod.PILOTS_ROOT_DEFAULT = original_root
+            client_mod.CLIENTS_ROOT_DEFAULT = original_root
 
 
 def test_wallets_refresh_recomputes_tiers(app_with_docker, monkeypatch):
@@ -538,19 +516,19 @@ def test_wallets_refresh_empty(app_with_docker):
         assert "No linked wallets" in r.text
 
 
-def test_regenerate_pilot_persists_neoforge_version(app_with_docker, tmp_path):
+def test_regenerate_client_persists_neoforge_version(app_with_docker, tmp_path):
     """neoforge_version is persisted, so a later BARE regenerate keeps the
     modloader baked in (a regression that would otherwise install vanilla)."""
     with TestClient(app_with_docker) as client:
         st: AppState = app_with_docker.state.ndrchst
-        pilots_root = tmp_path / "pilots"
+        clients_root = tmp_path / "clients"
         st.lifecycle = Lifecycle(
             Docker(client=FakeClient()), st.conn,
             servers_root=tmp_path / "servers", public_host="mc.ndrchst.com",
         )
-        import ndrchst.runtime.pilot as pilot_mod
-        original_root = pilot_mod.PILOTS_ROOT_DEFAULT
-        pilot_mod.PILOTS_ROOT_DEFAULT = pilots_root
+        import ndrchst.runtime.client as client_mod
+        original_root = client_mod.CLIENTS_ROOT_DEFAULT
+        client_mod.CLIENTS_ROOT_DEFAULT = clients_root
         try:
             r = client.post("/servers", data={
                 "name": "Forged", "platform_id": "paper",
@@ -561,21 +539,21 @@ def test_regenerate_pilot_persists_neoforge_version(app_with_docker, tmp_path):
                        if s["name"] == "Forged")
 
             import json
-            assert client.post(f"/servers/{sid}/pilot/regenerate",
+            assert client.post(f"/servers/{sid}/client/regenerate",
                                data={"neoforge_version": "21.1.228"}).status_code == 200
-            cfg = json.loads((pilots_root / sid / "config.json").read_text())
+            cfg = json.loads((clients_root / sid / "config.json").read_text())
             assert cfg["neoforge_version"] == "21.1.228"
 
             # Bare regenerate — must NOT drop the modloader.
-            assert client.post(f"/servers/{sid}/pilot/regenerate").status_code == 200
-            cfg = json.loads((pilots_root / sid / "config.json").read_text())
+            assert client.post(f"/servers/{sid}/client/regenerate").status_code == 200
+            cfg = json.loads((clients_root / sid / "config.json").read_text())
             assert cfg["neoforge_version"] == "21.1.228"
         finally:
-            pilot_mod.PILOTS_ROOT_DEFAULT = original_root
+            client_mod.CLIENTS_ROOT_DEFAULT = original_root
 
 
-def test_regenerate_pilot_bedrock_rejected(app_with_docker, tmp_path):
-    """Bedrock servers have no pilot bundle; the route must 400."""
+def test_regenerate_client_bedrock_rejected(app_with_docker, tmp_path):
+    """Bedrock servers have no client bundle; the route must 400."""
     with TestClient(app_with_docker) as client:
         st: AppState = app_with_docker.state.ndrchst
         st.lifecycle = Lifecycle(
@@ -589,7 +567,7 @@ def test_regenerate_pilot_bedrock_rejected(app_with_docker, tmp_path):
         assert r.status_code == 200, r.text
         sid = next(s["id"] for s in client.get("/api/servers").json()
                    if s["name"] == "Bdrk")
-        r = client.post(f"/servers/{sid}/pilot/regenerate")
+        r = client.post(f"/servers/{sid}/client/regenerate")
         assert r.status_code == 400
 
 

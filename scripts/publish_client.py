@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build + publish the pilot binary to R2 — no GitHub Actions required.
+"""Build + publish the client binary to R2 — no GitHub Actions required.
 
 PyInstaller can't cross-compile, so run this ON each OS you want a binary
-for. It builds the pilot for the *current* OS, uploads it to R2, and
+for. It builds the client for the *current* OS, uploads it to R2, and
 merges this OS's entry into ``<prefix>/latest.json`` so the client
 auto-updater picks it up. Run it on Linux for the Linux build, on a Mac
 for macOS, on Windows for Windows — each updates its own slot.
@@ -15,13 +15,13 @@ Env (an R2 token with Object Read & Write on the bucket):
   NDRCHST_R2_ACCESS_KEY_ID
   NDRCHST_R2_SECRET_ACCESS_KEY
   NDRCHST_R2_BUCKET
-  NDRCHST_PILOT_DOWNLOADS_BASE   public base to read the current manifest
-                                 (e.g. https://dl.ndrchst.com/pilot)
+  NDRCHST_CLIENT_DOWNLOADS_BASE   public base to read the current manifest
+                                 (e.g. https://dl.ndrchst.com/client)
 
 Usage:
-  python scripts/publish_pilot.py --version 0.1.1
-  python scripts/publish_pilot.py --version 0.1.1 --no-build   # publish an existing dist/ binary
-  python scripts/publish_pilot.py --version 0.1.1 --prefix pilot
+  python scripts/publish_client.py --version 0.1.1
+  python scripts/publish_client.py --version 0.1.1 --no-build   # publish an existing dist/ binary
+  python scripts/publish_client.py --version 0.1.1 --prefix client
 """
 from __future__ import annotations
 
@@ -36,17 +36,17 @@ import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-PILOT_DIR = REPO / "pilot-client"
+CLIENT_DIR = REPO / "client"
 sys.path.insert(0, str(REPO / "src"))
 
 from ndrchst.runtime import r2  # noqa: E402
 
 # platform_key → (built binary name in dist/, published asset name)
 _TARGETS = {
-    "linux-x86_64": ("ndrchst-pilot", "ndrchst-pilot-linux-x86_64"),
-    "windows-x86_64": ("ndrchst-pilot.exe", "ndrchst-pilot-windows-x86_64.exe"),
-    "macos-arm64": ("ndrchst-pilot", "ndrchst-pilot-macos-arm64"),
-    "macos-x86_64": ("ndrchst-pilot", "ndrchst-pilot-macos-x86_64"),
+    "linux-x86_64": ("ndrchst-client", "ndrchst-client-linux-x86_64"),
+    "windows-x86_64": ("ndrchst-client.exe", "ndrchst-client-windows-x86_64.exe"),
+    "macos-arm64": ("ndrchst-client", "ndrchst-client-macos-arm64"),
+    "macos-x86_64": ("ndrchst-client", "ndrchst-client-macos-x86_64"),
 }
 
 
@@ -65,7 +65,7 @@ def merge_manifest(existing: dict | None, *, version: str, key: str,
                    asset: str, sha256: str, notes: str | None = None) -> dict:
     """Set the overall version + this platform's asset entry, preserving
     other platforms' entries from the existing manifest."""
-    out = {"version": version, "notes": notes or f"ndrchst pilot {version}", "assets": {}}
+    out = {"version": version, "notes": notes or f"ndrchst client {version}", "assets": {}}
     if existing and isinstance(existing.get("assets"), dict):
         out["assets"] = dict(existing["assets"])
     out["assets"][key] = {"file": asset, "sha256": sha256}
@@ -92,17 +92,17 @@ def _sha256(path: Path) -> str:
 
 
 def _stamp_version(version: str) -> None:
-    init = PILOT_DIR / "src" / "ndrchst_pilot" / "__init__.py"
+    init = CLIENT_DIR / "src" / "ndrchst_client" / "__init__.py"
     import re
     init.write_text(re.sub(r'__version__ = "[^"]*"', f'__version__ = "{version}"', init.read_text()))
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Build + publish the pilot to R2")
+    ap = argparse.ArgumentParser(description="Build + publish the client to R2")
     ap.add_argument("--version", required=True, help="release version, e.g. 0.1.1")
-    ap.add_argument("--prefix", default="pilot", help="R2 key prefix (default: pilot)")
+    ap.add_argument("--prefix", default="client", help="R2 key prefix (default: client)")
     ap.add_argument("--no-build", action="store_true", help="publish the existing dist/ binary")
-    ap.add_argument("--public-base", default=os.environ.get("NDRCHST_PILOT_DOWNLOADS_BASE", ""),
+    ap.add_argument("--public-base", default=os.environ.get("NDRCHST_CLIENT_DOWNLOADS_BASE", ""),
                     help="public base URL to read the current latest.json")
     args = ap.parse_args()
 
@@ -124,10 +124,10 @@ def main() -> int:
 
     if not args.no_build:
         _stamp_version(args.version)
-        print(f"Building pilot {args.version} for {key}…")
-        subprocess.run(["pyinstaller", "ndrchst-pilot.spec"], cwd=PILOT_DIR, check=True)
+        print(f"Building client {args.version} for {key}…")
+        subprocess.run(["pyinstaller", "ndrchst-client.spec"], cwd=CLIENT_DIR, check=True)
 
-    built = PILOT_DIR / "dist" / bin_name
+    built = CLIENT_DIR / "dist" / bin_name
     if not built.exists():
         print(f"error: built binary not found at {built} "
               f"(build first, or drop it there)", file=sys.stderr)

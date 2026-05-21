@@ -28,11 +28,11 @@ import org.slf4j.Logger;
  *
  * <p>During the connection configuration phase the server asks for a join
  * token (minted by the box after Sign-In-With-Solana, written into the game
- * dir by the pilot). The client replies with it; the server verifies it via
+ * dir by the client). The client replies with it; the server verifies it via
  * {@link JoinVerifier} and either admits the player (stashing their wallet +
  * tier for rank assignment at login, M5) or disconnects. The payload channel
  * is non-optional, so a client without this mod is denied during negotiation —
- * the pilot is the only way in.
+ * the client is the only way in.
  */
 @Mod(NdrchstAuth.MOD_ID)
 public final class NdrchstAuth {
@@ -95,7 +95,7 @@ public final class NdrchstAuth {
         event.register(new JoinConfigTask());
     }
 
-    /** Client side: read the pilot-written token and reply (empty if absent). */
+    /** Client side: read the client-written token and reply (empty if absent). */
     private static void onClientRequest(JoinRequestPayload payload, IPayloadContext ctx) {
         String token = "";
         try {

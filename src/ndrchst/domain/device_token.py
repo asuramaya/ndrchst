@@ -1,10 +1,10 @@
-"""Long-lived device tokens — the durable credential the pilot carries.
+"""Long-lived device tokens — the durable credential the client carries.
 
-The auth-first flow: a wallet signs in on the web (SIWS), downloads a pilot
-with a device token baked in, and from then on the pilot exchanges that device
+The auth-first flow: a wallet signs in on the web (SIWS), downloads a client
+with a device token baked in, and from then on the client exchanges that device
 token for a *fresh* short-lived join token at each launch (see join_token) —
 no in-launcher device-flow round-trip, and the join token can't go stale during
-a long install. The device token is the only thing the pilot stores; it's
+a long install. The device token is the only thing the client stores; it's
 revocable (rotate NDRCHST_SESSION_SECRET) and re-readable only by the box.
 
 Stdlib HMAC, same secret as auth_session/join_token, domain-separated prefix.

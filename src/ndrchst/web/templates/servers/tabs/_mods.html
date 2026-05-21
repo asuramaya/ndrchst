@@ -1,6 +1,13 @@
+{# Assets tab: the per-server home for everything installed on this server.
+   Search + install tracked add-ons here; jump to the dedicated tabs for the
+   file-managed asset types (plugins, datapacks, resource pack). #}
 <div class="card" style="margin-bottom: 1rem;">
-  <strong>Search Modrinth</strong>
-  <form style="display: flex; gap: 0.4rem; margin-top: 0.5rem;"
+  <strong>Add assets</strong>
+  <small style="color: var(--text-muted); display: block; margin: 0.3rem 0 0.5rem;">
+    Search Modrinth for {{ 'resource packs' if server.family.value == 'bedrock' else 'mods & plugins' }}.
+    Installs are tracked below and auto-snapshotted first.
+  </small>
+  <form style="display: flex; gap: 0.4rem;"
         hx-get="/servers/{{ server.id }}/mods/search"
         hx-target="#market-results" hx-swap="innerHTML">
     <input type="text" name="q" placeholder="search mods, plugins, packs…"
@@ -11,7 +18,19 @@
 
 <div id="market-results"></div>
 
-<h3 style="margin-top: 1.5rem;">Installed</h3>
+<h3 style="margin: 1.5rem 0 0.5rem;">Installed on this server</h3>
 <div id="installed-list">
   {% include "servers/tabs/_mods_installed.html" %}
+</div>
+
+{# Plugins / datapacks / resource packs aren't tracked in the install DB —
+   they live on disk and have their own tabs. Surface them here so this is a
+   single, obvious jumping-off point for every asset type. #}
+<div class="asset-links">
+  <span class="asset-links-label">Manage by type:</span>
+  {% if server.family.value == 'java' %}
+    <a href="/servers/{{ server.id }}/plugins">🔌 Plugins</a>
+    <a href="/servers/{{ server.id }}/packs">📦 Datapacks &amp; resource pack</a>
+  {% endif %}
+  <a href="/servers/{{ server.id }}/files">🗂 All files</a>
 </div>

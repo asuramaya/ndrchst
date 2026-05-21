@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS installed_assets (
 );
 
 -- Wallet identities (Solana). The public surface upserts a row when a wallet
--- signs in / links a pilot; the admin surface reads these to push whitelist +
+-- signs in / links a client; the admin surface reads these to push whitelist +
 -- rank to game servers over RCON. Identity = wallet pubkey; mc_name is the
 -- deterministic in-game name; tier is the holdings-based rank key.
 -- `tier`/`holdings_pct` are the LATEST known values (refreshed on every

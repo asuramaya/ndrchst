@@ -1,4 +1,4 @@
-"""Tests for the long-lived device token (the pilot's durable credential)."""
+"""Tests for the long-lived device token (the client's durable credential)."""
 from __future__ import annotations
 
 from ndrchst.domain import device_token, join_token

@@ -1,9 +1,9 @@
-"""In-memory device-pairing for the desktop pilot's wallet sign-in.
+"""In-memory device-pairing for the desktop client's wallet sign-in.
 
-OAuth device-flow shape: the pilot calls start() for a long secret `pair_id`
-(which only it holds, used to poll) plus a short human `user_code`. The pilot
+OAuth device-flow shape: the client calls start() for a long secret `pair_id`
+(which only it holds, used to poll) plus a short human `user_code`. The client
 opens the web /link page with the user_code; the user connects their wallet
-there and the server binds the verified pubkey to the code. The pilot polls
+there and the server binds the verified pubkey to the code. The client polls
 with its pair_id until the binding appears — it never sees a private key.
 
 Single uvicorn worker -> in-memory is fine; a multi-worker deploy would need a
@@ -70,7 +70,7 @@ def approve(user_code: str, pubkey: str) -> bool:
 
 
 def poll(pair_id: str) -> Pairing | None:
-    """The pilot's view of its pairing (None if unknown/expired)."""
+    """The client's view of its pairing (None if unknown/expired)."""
     now = time.time()
     _gc(now)
     p = _by_id.get(pair_id)

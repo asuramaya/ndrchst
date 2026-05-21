@@ -1,4 +1,4 @@
-"""Pilot launch glue — vanilla MC or NeoForge + modpack, dialled
+"""Client launch glue — vanilla MC or NeoForge + modpack, dialled
 through a Cloudflare tunnel if configured.
 
 Three operating modes, picked from config flags:

@@ -1,11 +1,11 @@
-# PyInstaller spec — single-file ndrchst pilot launcher.
+# PyInstaller spec — single-file ndrchst client launcher.
 # Builds on whichever OS it runs (Linux/macOS/Windows); PyInstaller does
 # not cross-compile, so CI runs this on a matrix of OS runners.
 #
-#   pyinstaller ndrchst-pilot.spec
+#   pyinstaller ndrchst-client.spec
 #
-# cloudflared is NOT bundled — the pilot fetches the right per-OS binary
-# at first run (see ndrchst_pilot/tunnel.py). portablemc + its loader
+# cloudflared is NOT bundled — the client fetches the right per-OS binary
+# at first run (see ndrchst_client/tunnel.py). portablemc + its loader
 # addons (forge/neoforge live in portablemc.forge) are pure Python and
 # get collected here.
 from PyInstaller.utils.hooks import collect_submodules
@@ -15,7 +15,7 @@ block_cipher = None
 hiddenimports = collect_submodules("portablemc")
 
 a = Analysis(
-    ["run_pilot.py"],
+    ["run_client.py"],
     pathex=["src"],
     binaries=[],
     datas=[],
@@ -35,7 +35,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="ndrchst-pilot",
+    name="ndrchst-client",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

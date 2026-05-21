@@ -286,6 +286,36 @@ code, pre, .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 0.88rem;
 }
+.console-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.console-title { display: flex; align-items: center; gap: 0.45rem; }
+.console-tools { display: flex; gap: 0.3rem; }
+.console-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); flex: none; }
+.console-dot.live { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
+.console-hint { color: var(--text-muted); font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.console-mini { font-size: 0.78rem; padding: 0.25rem 0.55rem; }
+/* Friendly placeholder until the first log line streams in (and after Clear). */
+#console-output:empty::before { content: attr(data-empty); color: var(--text-muted); font-style: italic; }
+.quick-cmds { display: flex; gap: 0.3rem; flex-wrap: wrap; align-items: center; }
+.quick-cmds .quick-label { color: var(--text-muted); font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 0.1rem; }
+.quick-cmds .btn { font-size: 0.78rem; padding: 0.25rem 0.55rem; }
+
+/* "Manage" entry point on each server card — the obvious way into detail. */
+.btn-manage { color: var(--accent); border-color: rgba(34, 197, 94, 0.4); }
+.btn-manage:hover { background: var(--accent-glow); border-color: var(--accent); }
+
+/* Assets tab: cross-links to the file-managed asset types. */
+.asset-links {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem;
+  margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border);
+}
+.asset-links-label { color: var(--text-muted); font-size: 0.8rem; }
+.asset-links a {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.35rem 0.7rem; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--bg-secondary);
+  color: var(--text-secondary); font-size: 0.85rem;
+}
+.asset-links a:hover { border-color: var(--border-hover); color: var(--text-primary); }
 
 /* ─── File browser ─────────────────────────────────────────────────────── */
 

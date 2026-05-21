@@ -1,4 +1,4 @@
-"""Minimal tkinter front-end for the pilot.
+"""Minimal tkinter front-end for the client.
 
 Kept deliberately small — the value is in the backend (install, mod
 sync, tunnel, launch). One window: server info, the launch controls
@@ -17,7 +17,7 @@ from . import __version__, desktop, updater, wallet_auth
 from .launcher import launch
 from .settings import load as load_config
 
-APP_SLUG = "ndrchst-pilot"
+APP_SLUG = "ndrchst-client"
 
 # End × Solana palette — matches the web surfaces (void purple + ender green).
 _BG = "#0a0613"
@@ -28,7 +28,7 @@ _ACCENT = "#14f195"  # ender green / Solana green
 _PURPLE = "#9945ff"  # Solana purple
 _INK = "#04130c"     # dark text on the green accent
 
-# Themed UI assets (banner GIF + brand glyph), bundled into the pilot zip.
+# Themed UI assets (banner GIF + brand glyph), bundled into the client zip.
 _ASSETS = Path(__file__).resolve().parent / "assets"
 
 
@@ -135,7 +135,7 @@ def run() -> None:
         sub += f"  ·  NeoForge {cfg.neoforge_version}"
     if cfg.modpack_url:
         sub += "  ·  modded"
-    sub += f"  ·  pilot {__version__}"
+    sub += f"  ·  client {__version__}"
     ttk.Label(info, text=sub, style="Muted.TLabel").pack(anchor="w")
 
     # Update banner — hidden until a newer build is found on the CDN.
@@ -311,7 +311,7 @@ def run() -> None:
                 wallet_status.set(f"{ident.display}{tier}")
                 wallet_btn.config(text="Signed in", state=tk.DISABLED)
                 launch_btn.config(state=tk.NORMAL)  # mandated auth path satisfied
-                phase_var.set("Ready")
+                phase_var.set("Ready — press Play")
             root.after(0, apply)
 
         threading.Thread(target=worker, daemon=True).start()
@@ -331,7 +331,7 @@ def run() -> None:
         threading.Thread(target=worker, daemon=True).start()
 
     def show_update(info) -> None:
-        update_msg.set(f"Update available — pilot {info.version}   ")
+        update_msg.set(f"Update available — client {info.version}   ")
         update_btn.config(command=lambda: do_update(info))
         update_bar.pack(fill=tk.X, after=info)
         append_log(
@@ -382,7 +382,7 @@ def run() -> None:
             wallet_status.set(f"{ident.display}{tier}")
             wallet_btn.config(text="Signed in", state=tk.DISABLED)
             launch_btn.config(state=tk.NORMAL)
-            phase_var.set("Ready")
+            phase_var.set("Ready — press Play")
         root.after(0, apply)
 
     threading.Thread(target=_try_device_signin, daemon=True).start()

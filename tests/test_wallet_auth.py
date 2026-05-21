@@ -129,39 +129,39 @@ def test_me_requires_session(client):
 def _approve(client, pubkey, seed, code):
     msg = client.post("/auth/challenge", json={"pubkey": pubkey}).json()["message"]
     sig = base64.b64encode(_sign(seed, msg.encode())).decode()
-    return client.post("/pilot/auth/approve",
+    return client.post("/client/auth/approve",
                        json={"code": code, "pubkey": pubkey, "message": msg, "signature": sig})
 
 
-def test_pilot_pairing_full_flow(client):
+def test_client_pairing_full_flow(client):
     pubkey, seed = _keypair(b"\x10" * 32)
-    start = client.post("/pilot/auth/start").json()
+    start = client.post("/client/auth/start").json()
     assert start["user_code"] and start["pair_id"]
     assert start["verify_url"].endswith("/link?code=" + start["user_code"])
 
     # before approval -> pending
-    poll = client.get("/pilot/auth/poll", params={"pair_id": start["pair_id"]})
+    poll = client.get("/client/auth/poll", params={"pair_id": start["pair_id"]})
     assert poll.status_code == 200 and poll.json()["status"] == "pending"
 
     # user connects wallet on /link and approves
     a = _approve(client, pubkey, seed, start["user_code"])
     assert a.status_code == 200 and a.json()["wallet"] == pubkey
 
-    # pilot poll now sees the bound wallet + derived in-game name
-    poll2 = client.get("/pilot/auth/poll", params={"pair_id": start["pair_id"]}).json()
+    # client poll now sees the bound wallet + derived in-game name
+    poll2 = client.get("/client/auth/poll", params={"pair_id": start["pair_id"]}).json()
     assert poll2["status"] == "approved"
     assert poll2["wallet"] == pubkey
     assert poll2["mc_name"] == W.derive_mc_name(pubkey)
 
 
-def test_pilot_approve_rejects_unknown_code(client):
+def test_client_approve_rejects_unknown_code(client):
     pubkey, seed = _keypair(b"\x11" * 32)
     a = _approve(client, pubkey, seed, "ZZZZ-9999")
     assert a.status_code == 404
 
 
-def test_pilot_poll_unknown_pair(client):
-    assert client.get("/pilot/auth/poll", params={"pair_id": "nope"}).status_code == 404
+def test_client_poll_unknown_pair(client):
+    assert client.get("/client/auth/poll", params={"pair_id": "nope"}).status_code == 404
 
 
 def test_link_page_renders(client):
@@ -181,7 +181,7 @@ def test_approve_records_wallet_link(tmp_path, monkeypatch):
     app = create_public_app(db_path=db)
     with TestClient(app) as c:
         pubkey, seed = _keypair(b"\x20" * 32)
-        start = c.post("/pilot/auth/start").json()
+        start = c.post("/client/auth/start").json()
         assert _approve(c, pubkey, seed, start["user_code"]).status_code == 200
 
     link = wl.get(connect(db), pubkey)
@@ -190,13 +190,13 @@ def test_approve_records_wallet_link(tmp_path, monkeypatch):
     assert link.tier == "silver"  # 0.7% -> silver
 
 
-def test_pilot_poll_carries_join_token_and_verifies(client):
+def test_client_poll_carries_join_token_and_verifies(client):
     """The device-flow 'approved' response carries a join token; the mod would
     POST it to /join/verify, which returns the bound identity."""
     pubkey, seed = _keypair(b"\x30" * 32)
-    start = client.post("/pilot/auth/start").json()
+    start = client.post("/client/auth/start").json()
     assert _approve(client, pubkey, seed, start["user_code"]).status_code == 200
-    poll = client.get("/pilot/auth/poll", params={"pair_id": start["pair_id"]}).json()
+    poll = client.get("/client/auth/poll", params={"pair_id": start["pair_id"]}).json()
     assert poll["status"] == "approved"
     token = poll.get("join_token")
     assert token
@@ -215,7 +215,7 @@ def test_join_verify_rejects_bad_token(client):
 
 
 def test_device_exchange_returns_fresh_join_token(client):
-    """The pilot trades its device token for a fresh join token at Play."""
+    """The client trades its device token for a fresh join token at Play."""
     from ndrchst.domain import device_token as dt
     wallet = "EUr2QnpmavMw51JiFYeTRnUywY7mPAtouzyY2P21pump"
     r = client.post("/device/exchange", json={"device_token": dt.issue(wallet)})
@@ -234,5 +234,5 @@ def test_device_exchange_rejects_bad_token(client):
     assert client.post("/device/exchange", json={"device_token": "nope"}).status_code == 401
 
 
-def test_me_pilot_requires_session(client):
-    assert client.get("/me/pilot/anyserver").status_code == 401
+def test_me_client_requires_session(client):
+    assert client.get("/me/client/anyserver").status_code == 401

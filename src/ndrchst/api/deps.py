@@ -49,9 +49,9 @@ def make_lifespan(
         lifecycle: Lifecycle | None = None
         docker_error: str | None = None
         # Address MC clients dial (NDRCHST_PUBLIC_HOST), and the HTTPS edge
-        # URL where the public surface lives so the pilot bundle README can
+        # URL where the public surface lives so the client bundle README can
         # point users at it for downloads/updates (NDRCHST_EDGE_URL). Both
-        # are blank by default; an unset PUBLIC_HOST means generated pilots
+        # are blank by default; an unset PUBLIC_HOST means generated clients
         # ship a placeholder for the user to fill in by hand.
         import os
         public_host = os.environ.get("NDRCHST_PUBLIC_HOST", "")

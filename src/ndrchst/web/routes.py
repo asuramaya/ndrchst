@@ -10,21 +10,19 @@ behaviour.
 from __future__ import annotations
 
 import os
-import sqlite3
-from collections import defaultdict
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .. import __version__
-from ..api.deps import db, state
+from ..api.deps import state
 from ..domain import sysinfo
 from ..domain.models import Family, ServerStatus
+from ..runtime.client import CLIENTS_ROOT_DEFAULT
+from ..runtime.client import bundle_path as client_bundle_path
 from ..runtime.lifecycle import SERVERS_ROOT_DEFAULT
-from ..runtime.pilot import PILOTS_ROOT_DEFAULT
-from ..runtime.pilot import bundle_path as pilot_bundle_path
 from ..store import servers as srv_store
 from ..store.db import DEFAULT_DB_PATH
 from .detail_routes import router as detail_router
@@ -44,52 +42,12 @@ def is_htmx(request: Request) -> bool:
     return request.headers.get("HX-Request") == "true"
 
 
-@router.get("/assets", response_class=HTMLResponse)
-def assets_page(
-    request: Request,
-    conn: sqlite3.Connection = Depends(db),
-) -> HTMLResponse:
-    """Read-only global view of every installed asset across every server."""
-    rows = conn.execute(
-        """SELECT a.server_id, a.source_id, a.asset_id, a.kind, a.version,
-                  a.installed_at, s.name AS server_name, s.family
-             FROM installed_assets a
-             JOIN servers s ON s.id = a.server_id
-             ORDER BY a.installed_at DESC""",
-    ).fetchall()
-    by_server: dict[str, dict] = defaultdict(lambda: {"name": "", "family": "", "assets": []})
-    for r in rows:
-        bucket = by_server[r["server_id"]]
-        bucket["name"] = r["server_name"]
-        bucket["family"] = r["family"]
-        bucket["server_id"] = r["server_id"]
-        bucket["assets"].append({
-            "source_id": r["source_id"],
-            "asset_id": r["asset_id"],
-            "kind": r["kind"],
-            "version": r["version"],
-            "installed_at": r["installed_at"],
-        })
-    # Surface servers with zero installed assets too, so users see them
-    # explicitly empty rather than missing.
-    for s in srv_store.list_all(conn):
-        if s.id not in by_server:
-            by_server[s.id] = {
-                "name": s.name, "family": s.family.value,
-                "server_id": s.id, "assets": [],
-            }
-    grouped = sorted(by_server.values(), key=lambda x: x["name"].lower())
-    total = sum(len(g["assets"]) for g in grouped)
-    return TEMPLATES.TemplateResponse(
-        request,
-        "assets.html",
-        {
-            "active": "assets",
-            "grouped": grouped,
-            "total": total,
-            "docker_error": state(request).docker_error,
-        },
-    )
+@router.get("/assets")
+def assets_redirect() -> RedirectResponse:
+    """Installed assets are now managed per-server, on each server's detail
+    page (the **Assets** tab). The old global cross-server view is folded in
+    there; this redirect keeps any stale links/bookmarks from dead-ending."""
+    return RedirectResponse("/", status_code=307)
 
 
 @router.get("/system", response_class=HTMLResponse)
@@ -99,7 +57,7 @@ async def system_page(request: Request) -> HTMLResponse:
     host = sysinfo.host_metrics()
     disks = {
         "servers root": sysinfo.disk_usage(SERVERS_ROOT_DEFAULT),
-        "pilots root": sysinfo.disk_usage(PILOTS_ROOT_DEFAULT),
+        "clients root": sysinfo.disk_usage(CLIENTS_ROOT_DEFAULT),
     }
     engine = await s.lifecycle.engine_info() if s.lifecycle is not None else None
 
@@ -126,35 +84,35 @@ async def system_page(request: Request) -> HTMLResponse:
 
 @router.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request) -> HTMLResponse:
-    """Effective runtime configuration (env-driven) + per-server pilot
+    """Effective runtime configuration (env-driven) + per-server client
     wiring status. Read-only: these are set via environment / systemd at
     boot, surfaced here so an operator can verify the public-edge setup
     without SSHing in."""
     s = state(request)
     config = [
         ("Edge URL", os.environ.get("NDRCHST_EDGE_URL", ""),
-         "NDRCHST_EDGE_URL", "Public HTTPS base where pilots fetch mods/config."),
+         "NDRCHST_EDGE_URL", "Public HTTPS base where clients fetch mods/config."),
         ("Public host", os.environ.get("NDRCHST_PUBLIC_HOST", ""),
          "NDRCHST_PUBLIC_HOST", "Address Minecraft clients dial (when not tunnelled)."),
         ("Tunnel hostname", os.environ.get("NDRCHST_TUNNEL_HOSTNAME", ""),
-         "NDRCHST_TUNNEL_HOSTNAME", "Cloudflare hostname the pilot tunnels through."),
+         "NDRCHST_TUNNEL_HOSTNAME", "Cloudflare hostname the client tunnels through."),
         ("Public surface port", os.environ.get("NDRCHST_PUBLIC_PORT", "8081"),
          "NDRCHST_PUBLIC_PORT", "Port the read-only public app binds."),
         ("Servers root", str(SERVERS_ROOT_DEFAULT), "", "Per-server data dirs."),
-        ("Pilots root", str(PILOTS_ROOT_DEFAULT), "", "Staged pilot bundles + modpacks."),
+        ("Clients root", str(CLIENTS_ROOT_DEFAULT), "", "Staged client bundles + modpacks."),
         ("Database", str(DEFAULT_DB_PATH), "", "SQLite control-plane state."),
         ("Version", __version__, "", "Running ndrchst version."),
     ]
-    pilots = []
+    clients = []
     for srv in srv_store.list_all(s.conn):
         if srv.family is not Family.JAVA:
             continue
-        pdir = PILOTS_ROOT_DEFAULT / srv.id
+        pdir = CLIENTS_ROOT_DEFAULT / srv.id
         sdir = SERVERS_ROOT_DEFAULT / srv.id
-        pilots.append({
+        clients.append({
             "name": srv.name,
             "id": srv.id,
-            "bundle": pilot_bundle_path(srv.id) is not None,
+            "bundle": client_bundle_path(srv.id) is not None,
             "config": (pdir / "config.json").exists(),
             "modpack": (pdir / "modpack.zip").exists(),
             "mods_index": (sdir / "mods-index.json").exists(),
@@ -165,7 +123,7 @@ def settings_page(request: Request) -> HTMLResponse:
         {
             "active": "settings",
             "config": config,
-            "pilots": pilots,
+            "clients": clients,
             "docker_error": s.docker_error,
         },
     )

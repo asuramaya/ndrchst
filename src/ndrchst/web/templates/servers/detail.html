@@ -32,7 +32,7 @@
       ('plugins', 'Plugins'),
       ('packs', 'Packs'),
       ('files', 'Files'),
-      ('mods', 'Marketplace'),
+      ('mods', 'Assets'),
       ('config', 'Config'),
       ('backups', 'Backups'),
     ] %}
@@ -50,4 +50,15 @@
   <div id="tab-content">
     {% include "servers/tabs/_" + tab + ".html" %}
   </div>
+
+  {# Tabs swap only #tab-content, so the server-rendered .active class would
+     stay stuck on the first-loaded tab. Move it to whatever tab was clicked. #}
+  <script>
+    document.getElementById('detail-tabs')?.addEventListener('click', (e) => {
+      const clicked = e.target.closest('.tab');
+      if (!clicked) return;
+      document.querySelectorAll('#detail-tabs .tab').forEach((t) => t.classList.remove('active'));
+      clicked.classList.add('active');
+    });
+  </script>
 {% endblock %}

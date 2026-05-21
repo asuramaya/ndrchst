@@ -1,21 +1,21 @@
-# Pilot distribution & auto-update (Cloudflare R2)
+# Client distribution & auto-update (Cloudflare R2)
 
-The pilot ships as a per-OS binary and **self-updates** from a Cloudflare R2
+The client ships as a per-OS binary and **self-updates** from a Cloudflare R2
 bucket fronted by a custom domain. Bytes come off Cloudflare's global CDN, not
 the operator's residential uplink — so distribution scales to any number of
 clients without touching the host.
 
 ```
- GitHub tag pilot-vX.Y.Z
-        │  (build-pilot.yml)
+ GitHub tag client-vX.Y.Z
+        │  (build-client.yml)
         ├── build per-OS binaries (PyInstaller)
         └── publish → R2 bucket  ┐
-                                 │  https://dl.ndrchst.com/pilot/
+                                 │  https://dl.ndrchst.com/client/
    ┌─────────────────────────────┘
-   ├── ndrchst-pilot-linux-x86_64
-   ├── ndrchst-pilot-windows-x86_64.exe
-   ├── ndrchst-pilot-macos-arm64
-   └── latest.json   ← pilot checks this on launch
+   ├── ndrchst-client-linux-x86_64
+   ├── ndrchst-client-windows-x86_64.exe
+   ├── ndrchst-client-macos-arm64
+   └── latest.json   ← client checks this on launch
 ```
 
 ## One-time Cloudflare setup
@@ -29,8 +29,8 @@ clients without touching the host.
    Object Read & Write on the bucket). Note the **Access Key ID**, **Secret
    Access Key**, and your **Account ID**.
 
-The published layout is `<bucket>/<prefix>/…` (prefix defaults to `pilot`), so
-objects resolve at `https://dl.ndrchst.com/pilot/latest.json`, etc.
+The published layout is `<bucket>/<prefix>/…` (prefix defaults to `client`), so
+objects resolve at `https://dl.ndrchst.com/client/latest.json`, etc.
 
 ## GitHub configuration
 
@@ -39,7 +39,7 @@ In the repo (*Settings → Secrets and variables → Actions*):
 | Kind     | Name                   | Value                                  |
 |----------|------------------------|----------------------------------------|
 | Variable | `PUBLISH_R2`           | `true` (enables the publish job)       |
-| Variable | `R2_PREFIX`            | `pilot` (optional; this is the default)|
+| Variable | `R2_PREFIX`            | `client` (optional; this is the default)|
 | Secret   | `R2_ACCOUNT_ID`        | Cloudflare account id                  |
 | Secret   | `R2_ACCESS_KEY_ID`     | R2 token access key id                 |
 | Secret   | `R2_SECRET_ACCESS_KEY` | R2 token secret                        |
@@ -51,8 +51,8 @@ Actions run — they just aren't pushed to R2.
 ## Cutting a release
 
 ```bash
-git tag pilot-v0.2.0
-git push origin pilot-v0.2.0
+git tag client-v0.2.0
+git push origin client-v0.2.0
 ```
 
 The workflow stamps `__version__` from the tag, builds all three binaries, then
@@ -62,13 +62,13 @@ The workflow stamps `__version__` from the tag, builds all three binaries, then
 ## Pointing clients + the play page at it
 
 Both the self-updater and the play page's "standalone launcher" links read the
-same base URL. Set, wherever the pilot config / public app run:
+same base URL. Set, wherever the client config / public app run:
 
-- Pilot config / build: **`UPDATE_BASE_URL=https://dl.ndrchst.com/pilot`**
-  (baked into `config.py` per drop, or via `pilot-config.json`).
-- Public app (play page download links): **`NDRCHST_PILOT_DOWNLOADS_BASE=https://dl.ndrchst.com/pilot`**
+- Client config / build: **`UPDATE_BASE_URL=https://dl.ndrchst.com/client`**
+  (baked into `config.py` per drop, or via `client-config.json`).
+- Public app (play page download links): **`NDRCHST_CLIENT_DOWNLOADS_BASE=https://dl.ndrchst.com/client`**
 
-On launch the pilot fetches `<UPDATE_BASE_URL>/latest.json`; if it advertises a
+On launch the client fetches `<UPDATE_BASE_URL>/latest.json`; if it advertises a
 newer `version` with an asset for the client's OS/arch, the launcher shows
 **Update & restart**. Applying it downloads the binary, verifies its SHA-256,
 swaps the running executable (POSIX in-place + re-exec; Windows via a detached
@@ -86,14 +86,14 @@ occasional outbound uploads — no inbound web exposure.
 ## Bucket layout (`ndrchst-dl`)
 
 ```
-pilot/latest.json                      ← updater manifest (CI)
-pilot/ndrchst-pilot-<os>-<arch>[.exe]  ← pilot binaries (CI)
-pilot/<sid>/config.json                ← per-server (admin push)
-pilot/<sid>/manifest.json
-pilot/<sid>/modpack.zip                ← heavy push only
-pilot/<sid>/pilot.zip                  ← heavy push only
-pilot/<sid>/mods/index.json            ← what the pilot mirrors
-pilot/<sid>/mods/<substitution>.jar    ← origin-served jars (non-CDN)
+client/latest.json                      ← updater manifest (CI)
+client/ndrchst-client-<os>-<arch>[.exe]  ← client binaries (CI)
+client/<sid>/config.json                ← per-server (admin push)
+client/<sid>/manifest.json
+client/<sid>/modpack.zip                ← heavy push only
+client/<sid>/client.zip                  ← heavy push only
+client/<sid>/mods/index.json            ← what the client mirrors
+client/<sid>/mods/<substitution>.jar    ← origin-served jars (non-CDN)
 index.html  play.html  servers.json    ← rendered pages (admin push)
 ```
 
@@ -106,15 +106,18 @@ NDRCHST_R2_ACCOUNT_ID=<account id>
 NDRCHST_R2_ACCESS_KEY_ID=<r2 token key id>
 NDRCHST_R2_SECRET_ACCESS_KEY=<r2 token secret>
 NDRCHST_R2_BUCKET=ndrchst-dl
-# leave NDRCHST_R2_PREFIX UNSET — keys already carry pilot/<sid>/…
+# leave NDRCHST_R2_PREFIX UNSET — keys already carry client/<sid>/…
 NDRCHST_EDGE_URL=https://play.ndrchst.com          # mod origin_urls resolve via the Worker
-NDRCHST_PILOT_DOWNLOADS_BASE=https://dl.ndrchst.com/pilot
-NDRCHST_PLAY_URL=https://play.ndrchst.com/play     # www landing → play domain
+NDRCHST_CLIENT_DOWNLOADS_BASE=https://dl.ndrchst.com/client
 ```
+
+The surface is one host now (`play.ndrchst.com`; apex + www 301 there), so the
+page nav is same-host relative — there's no `NDRCHST_PLAY_URL`/`NDRCHST_HOME_URL`
+to set anymore.
 
 When R2 is configured, **rebuilding a server's mods index auto-publishes** the
 light set (index + pages + substitution jars). Push the big blobs (modpack.zip,
-pilot.zip) when the pack changes:
+client.zip) when the pack changes:
 
 ```
 curl -X POST 'http://127.0.0.1:8080/servers/<sid>/r2-publish?heavy=true'
@@ -127,9 +130,9 @@ cd cf/worker
 wrangler deploy            # binds bucket ndrchst-dl, routes play.* + www.*
 ```
 
-- **`play.ndrchst.com` / `www.ndrchst.com`** → the Worker (pages + `/pilot/*` from R2).
+- **`play.ndrchst.com` / `www.ndrchst.com`** → the Worker (pages + `/client/*` from R2).
 - **`dl.ndrchst.com`** → a *direct* R2 custom domain on the bucket (serves the
-  pilot binaries + per-server objects without a Worker). This is the
+  client binaries + per-server objects without a Worker). This is the
   `*_DOWNLOADS_BASE` / `UPDATE_BASE_URL` host.
 
 Once the Worker is live and serving, the box's inbound `play.ndrchst.com`

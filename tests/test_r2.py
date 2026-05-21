@@ -52,11 +52,11 @@ def test_config_from_env_requires_all(monkeypatch):
     monkeypatch.setenv("NDRCHST_R2_SECRET_ACCESS_KEY", "sk")
     assert r2.config_from_env() is None  # still missing bucket
     monkeypatch.setenv("NDRCHST_R2_BUCKET", "ndrchst-dl")
-    monkeypatch.setenv("NDRCHST_R2_PREFIX", "pilot")
+    monkeypatch.setenv("NDRCHST_R2_PREFIX", "client")
     cfg = r2.config_from_env()
     assert cfg is not None
     assert cfg.host == "acct.r2.cloudflarestorage.com"
-    assert cfg.key("b757b2ea9cea/config.json") == "pilot/b757b2ea9cea/config.json"
+    assert cfg.key("b757b2ea9cea/config.json") == "client/b757b2ea9cea/config.json"
 
 
 def test_key_no_prefix():
@@ -78,12 +78,12 @@ def test_put_object_signs_and_sends(monkeypatch):
         captured["body"] = request.content
         return httpx.Response(200)
 
-    cfg = r2.R2Config("acct", "AKID", "secret", "ndrchst-dl", prefix="pilot")
+    cfg = r2.R2Config("acct", "AKID", "secret", "ndrchst-dl", prefix="client")
     body = b'{"hello":"world"}'
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         r2.put_object(cfg, "x/latest.json", body, content_type="application/json",
                       cache_control="no-cache", client=client)
-    assert captured["url"] == "https://acct.r2.cloudflarestorage.com/ndrchst-dl/pilot/x/latest.json"
+    assert captured["url"] == "https://acct.r2.cloudflarestorage.com/ndrchst-dl/client/x/latest.json"
     assert captured["sha"] == hashlib.sha256(body).hexdigest()
     assert captured["ct"] == "application/json"
     assert captured["cc"] == "no-cache"

@@ -1,4 +1,8 @@
-"""Self-contained HTML for the public surface (www landing + play page).
+"""Self-contained HTML for the public surface (marketing landing + play page).
+
+The whole surface now lives on one host (play.ndrchst.com): `/` is the
+landing, `/play` is the app, and apex/www just 301 here. So every nav link is
+a same-host relative path and the wallet session cookie never crosses origins.
 
 The public app (public.py) deliberately ships no Jinja template dir so it
 stays bind-agnostic — these pages are plain Python string builders sharing
@@ -6,43 +10,38 @@ one dark shell + embedded CSS that mirrors the admin design tokens.
 
 Two pages:
   - render_landing(): the marketing front page (what ndrchst is).
-  - render_play():    the player page (server list + how to run the pilot).
+  - render_play():    the player page (server list + how to run the client).
 """
 from __future__ import annotations
 
 import html
+import json
 import os
+from functools import lru_cache
+from pathlib import Path
 
 
 def _play_url() -> str:
-    """Canonical host for the app + auth flow. The session cookie is set with no
-    Domain attribute, so it scopes to whatever host the user is on; the marketing
-    landing lives on the apex but "Play" must cross over to the play host or the
-    wallet session strands on the wrong origin. Falls back to a relative path
-    only when neither the play nor edge URL is configured (dev/tests)."""
-    return os.environ.get("NDRCHST_PLAY_URL") or os.environ.get("NDRCHST_EDGE_URL") or "/play"
+    """The player/app page. The whole public surface now lives on the single
+    play host (apex + www 301 there), so this is a same-host relative path. That
+    is the point of the collapse: the wallet session cookie is host-scoped, and
+    with one host it can never strand on the wrong origin — no cross-host hop,
+    no `.ndrchst.com` cookie-domain hack."""
+    return "/play"
 
 
 def _home_url() -> str:
-    """Canonical marketing home (the apex). The nav/brand must point here, not a
-    relative "/" — on the play host "/" serves the app, so a relative Home link
-    would never reach the landing. Derived from the edge URL (play.<zone> ->
-    <zone>) when not set explicitly; falls back to "/" in dev/tests."""
-    home = os.environ.get("NDRCHST_HOME_URL")
-    if home:
-        return home
-    edge = os.environ.get("NDRCHST_EDGE_URL", "")
-    if edge:
-        return edge.replace("//play.", "//", 1)
+    """The marketing landing, served at the root of the one play host. Relative
+    for the same single-host reason as _play_url."""
     return "/"
 
-# Per-OS pilot binary asset names produced by .github/workflows/build-pilot.yml.
-# Joined with NDRCHST_PILOT_DOWNLOADS_BASE when set so the play page can offer
-# direct downloads; falls back to the per-server pilot.zip otherwise.
-PILOT_ASSETS = [
-    ("Windows", "ndrchst-pilot-windows-x86_64.exe"),
-    ("macOS (Apple Silicon)", "ndrchst-pilot-macos-arm64"),
-    ("Linux (x86_64)", "ndrchst-pilot-linux-x86_64"),
+# Per-OS client binary asset names produced by .github/workflows/build-client.yml.
+# Joined with NDRCHST_CLIENT_DOWNLOADS_BASE when set so the play page can offer
+# direct downloads; falls back to the per-server client.zip otherwise.
+CLIENT_ASSETS = [
+    ("Windows", "ndrchst-client-windows-x86_64.exe"),
+    ("macOS (Apple Silicon)", "ndrchst-client-macos-arm64"),
+    ("Linux (x86_64)", "ndrchst-client-linux-x86_64"),
 ]
 
 _CSS = """
@@ -190,8 +189,11 @@ footer a{color:var(--fg2)}footer a:hover{color:var(--fg)}
   background:url(/game/decor/end_stone.png);background-size:128px;
   image-rendering:pixelated;opacity:.05;mix-blend-mode:luminosity}
 .feature>*,.server>*,.callout>*,.rankcard>*,.os-panel>*{position:relative;z-index:1}
-/* Floating decor sprites (existing PNGs), GPU transforms only, hidden on phones. */
-.float{position:absolute;image-rendering:pixelated;pointer-events:none;z-index:0;
+/* Ambient floating decor — a fixed layer behind the content, populated at load
+   from a random subset of the decor pool (see floats JS). GPU transforms only,
+   hidden on phones / reduced-motion. */
+.floats{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
+.float{position:absolute;image-rendering:pixelated;pointer-events:none;
   opacity:.5;filter:drop-shadow(0 0 12px rgba(153,69,255,.35))}
 .float.spin{animation:float 7s ease-in-out infinite,spin 26s linear infinite}
 .float.bob{animation:float 5.5s ease-in-out infinite}
@@ -228,18 +230,119 @@ body.signed-in .wchip{display:inline-flex}
 .xlink:hover{color:var(--fg)}
 .hero .deco-row{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem;margin-top:1.6rem;color:var(--muted);font-size:.82rem}
 .hero .deco-row img{width:22px;height:22px;image-rendering:pixelated;opacity:.8}
+/* CSS hover tooltip — wrap any element in .tip with a data-tip attribute. */
+.tip{position:relative;display:inline-flex}
+.tip::after{content:attr(data-tip);position:absolute;left:50%;bottom:calc(100% + .5rem);
+  transform:translateX(-50%) translateY(.25rem);background:var(--bg3);color:var(--fg);
+  border:1px solid var(--border);border-radius:7px;padding:.32rem .55rem;font-size:.72rem;
+  font-family:'JetBrains Mono',ui-monospace,monospace;white-space:nowrap;opacity:0;
+  pointer-events:none;transition:opacity .12s ease,transform .12s ease;z-index:6;
+  box-shadow:0 8px 22px rgba(0,0,0,.5)}
+.tip:hover::after,.tip:focus-visible::after{opacity:1;transform:translateX(-50%) translateY(0)}
+/* Ranks ladder detail. */
+.tier-card .thr{white-space:nowrap}
+.drop-note{margin-top:.5rem;color:var(--muted);font-size:.74rem;letter-spacing:.01em}
+/* Profile / skin. The face is the 8x8 region at (8,8) of a 64px skin, shown at
+   72px (scale 9 → 576px sheet, -72px,-72px origin). */
+.profile-skin{display:flex;align-items:center;gap:1rem;margin-top:1.1rem;flex-wrap:wrap}
+.skin-face{width:72px;height:72px;flex:none;border:1px solid var(--border);border-radius:10px;
+  background-color:rgba(10,6,19,.6);background-repeat:no-repeat;
+  background-size:576px 576px;background-position:-72px -72px;image-rendering:pixelated;
+  position:relative}
+.skin-face:not(.has)::after{content:"?";position:absolute;inset:0;display:flex;
+  align-items:center;justify-content:center;color:var(--muted);font-size:1.6rem;font-weight:700}
+.skin-up{display:flex;flex-direction:column;gap:.4rem}
+.skin-up .row{display:flex;gap:.5rem;flex-wrap:wrap}
+.skin-up .meta{color:var(--muted);font-size:.78rem}
 """
 
-# Per-tier daily reward icons (mirrors deploy/datapacks loot tables) — surfaced
-# on /ranks so holders see exactly what each tier drops. Files under /game/items.
-TIER_DROPS = {
-    "holder": ["diamond", "gold_ingot", "experience_bottle"],
-    "bronze": ["diamond", "inferium_essence", "netherite_scrap", "experience_bottle"],
-    "silver": ["prudentium_essence", "diamond", "allthemodium_ingot", "netherite_scrap"],
-    "gold": ["tertium_essence", "netherite_ingot", "vibranium_ingot", "allthemodium_ingot"],
-    "diamond": ["imperium_essence", "ancient_debris_side", "unobtainium_ingot", "vibranium_ingot"],
-    "whale": ["supremium_essence", "nether_star", "unobtainium_ingot", "vibranium_ingot"],
-}
+# Single source of truth for the data the public pages display — DON'T hardcode
+# parallel copies, so editing the source syncs the site:
+#   - per-tier daily drops come from the datapack loot tables that the server
+#     actually rolls (deploy/datapacks/.../loot_table/daily/<tier>.json)
+#   - the floating-decor pool comes from whatever sprites live in the assets dir
+# Both are read at render time; the box re-renders on each R2 publish.
+
+_STATIC = Path(__file__).resolve().parent / "static" / "game"
+_ITEMS_DIR = _STATIC / "items"
+_DECOR_DIR = _STATIC / "decor"
+
+# Decor sprites that are textures/brand, not free-floating items — excluded from
+# the float pool. Everything else under decor/ is fair game (add a sprite → it
+# joins the rotation automatically).
+_DECOR_NON_FLOAT = {"brand", "end_sky", "end_stone", "end_banner"}
+
+
+def _loot_dir() -> Path:
+    """Daily-reward loot tables — the server's own source of truth for drops.
+    Overridable for tests/alt deployments via NDRCHST_LOOT_TABLES_DIR."""
+    env = os.environ.get("NDRCHST_LOOT_TABLES_DIR")
+    if env:
+        return Path(env)
+    repo_root = Path(__file__).resolve().parents[3]
+    return repo_root / "deploy" / "datapacks" / "ndrchst" / "data" / "ndrchst" / "loot_table" / "daily"
+
+
+def _pretty_item(item_id: str) -> str:
+    """`allthemodium:vibranium_ingot` / `..._side` → 'Vibranium Ingot'."""
+    base = item_id.split(":")[-1].removesuffix("_side")
+    return base.replace("_", " ").title()
+
+
+def _drops_from_loot(path: Path) -> list[dict]:
+    """Parse one tier's loot table into [{icon, name, min, max}], keeping only
+    items we actually have an icon for (so a missing sprite degrades to nothing
+    rather than a broken image). Dedupes by icon, first occurrence wins."""
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    for pool in data.get("pools", []):
+        for e in pool.get("entries", []):
+            name = e.get("name", "")
+            if e.get("type") != "minecraft:item" or not name:
+                continue
+            base = name.split(":")[-1]
+            if base in seen:
+                continue
+            # Block items often only ship a `_side` texture as their icon.
+            if (_ITEMS_DIR / f"{base}.png").exists():
+                icon = base
+            elif (_ITEMS_DIR / f"{base}_side.png").exists():
+                icon = f"{base}_side"
+            else:
+                continue
+            seen.add(base)
+            lo = hi = None
+            for fn in e.get("functions", []):
+                if fn.get("function") == "minecraft:set_count":
+                    c = fn.get("count", {})
+                    lo, hi = c.get("min"), c.get("max")
+            out.append({"icon": icon, "name": _pretty_item(name), "min": lo, "max": hi})
+    return out
+
+
+@lru_cache(maxsize=1)
+def _tier_drops() -> dict[str, list[dict]]:
+    """{tier_key: [drop, ...]} read from the loot tables. Cached: drops only
+    change on a datapack edit, which ships with a service restart."""
+    d = _loot_dir()
+    if not d.is_dir():
+        return {}
+    return {p.stem: _drops_from_loot(p) for p in d.glob("*.json")}
+
+
+@lru_cache(maxsize=1)
+def _float_pool() -> list[str]:
+    """Sprite basenames eligible to float in the background — every PNG under
+    decor/ that isn't a texture/brand. Add a sprite, it joins the rotation."""
+    if not _DECOR_DIR.is_dir():
+        return []
+    return sorted(
+        p.stem for p in _DECOR_DIR.glob("*.png") if p.stem not in _DECOR_NON_FLOAT
+    )
 
 # Vanilla wallet connect — no npm, no framework. Talks to the injected
 # Phantom / Solflare provider, signs the server's challenge, posts to
@@ -276,40 +379,75 @@ _WALLET_JS = """
     if(me.mc_name){ var mine=document.querySelector('.server[data-mc="'+
       (window.CSS&&CSS.escape?CSS.escape(me.mc_name):me.mc_name)+'"]');
       if(mine) mine.classList.add('me'); }
+    var face=$('skin-face'), clr=$('skin-clear');
+    if(face){
+      if(me.skin_url){ face.style.backgroundImage='url('+API+me.skin_url+'?t='+Date.now()+')';
+        face.classList.add('has'); if(clr) clr.style.display=''; }
+      else { face.style.backgroundImage=''; face.classList.remove('has'); if(clr) clr.style.display='none'; }
+    }
   }
   async function refresh(){
     try{ var r=await fetch(API+'/me',{credentials:'include'});
       render(r.ok?await r.json():null);}catch(e){ render(null);} }
-  async function connect(){
+  // Shared sign step: connect the wallet, fetch a challenge, sign it. Returns
+  // {pubkey, message, signature} so every flow (session sign-in here, device
+  // pairing on /link) drives ONE code path instead of duplicating provider
+  // detection + signing. Throws a tagged Error the caller can surface.
+  async function requestSignature(){
     var p=provider();
-    if(!p){ alert('No Solana wallet found. Install Phantom to sign in.'); return; }
+    if(!p){ var e=new Error('no wallet'); e.code='no-wallet'; throw e; }
+    var res=await p.connect(); var pk=(res&&res.publicKey?res.publicKey:p.publicKey).toString();
+    var ch=await fetch(API+'/auth/challenge',{method:'POST',
+      headers:{'content-type':'application/json'},body:JSON.stringify({pubkey:pk})});
+    if(!ch.ok){ var e2=new Error('challenge'); e2.code='challenge'; throw e2; }
+    var msg=(await ch.json()).message;
+    var signed=await p.signMessage(new TextEncoder().encode(msg),'utf8');
+    var sig=signed.signature||signed;
+    var b64=btoa(String.fromCharCode.apply(null,new Uint8Array(sig)));
+    return {pubkey:pk, message:msg, signature:b64};
+  }
+  async function connect(){
     try{
-      var res=await p.connect(); var pk=(res&&res.publicKey?res.publicKey:p.publicKey).toString();
-      var ch=await fetch(API+'/auth/challenge',{method:'POST',
-        headers:{'content-type':'application/json'},body:JSON.stringify({pubkey:pk})});
-      if(!ch.ok){ alert('Could not start sign-in'); return; }
-      var msg=(await ch.json()).message;
-      var enc=new TextEncoder().encode(msg);
-      var signed=await p.signMessage(enc,'utf8');
-      var sig=signed.signature||signed;
-      var b64=btoa(String.fromCharCode.apply(null,new Uint8Array(sig)));
+      var s=await requestSignature();
       var v=await fetch(API+'/auth/verify',{method:'POST',credentials:'include',
         headers:{'content-type':'application/json'},
-        body:JSON.stringify({pubkey:pk,message:msg,signature:b64})});
+        body:JSON.stringify({pubkey:s.pubkey,message:s.message,signature:s.signature})});
       render(v.ok?await v.json():null);
       if(!v.ok) alert('Sign-in failed');
-    }catch(e){ console.error(e); }
+    }catch(e){
+      if(e&&e.code==='no-wallet') alert('No Solana wallet found. Install Phantom to sign in.');
+      else console.error(e);
+    }
   }
   async function logout(){ try{await fetch(API+'/auth/logout',{method:'POST',credentials:'include'});}catch(e){} render(null); }
+  // Exposed so other pages (e.g. /link) reuse the exact same wallet plumbing.
+  window.ndrchstWallet = {provider:provider, requestSignature:requestSignature, refresh:refresh};
   document.addEventListener('DOMContentLoaded',function(){
     var b=$('wallet-connect'); if(b)b.addEventListener('click',connect);
     document.querySelectorAll('.connect-trigger').forEach(function(c){c.addEventListener('click',connect);});
     var o=$('wallet-logout'); if(o)o.addEventListener('click',logout);
     document.querySelectorAll('.client-dl').forEach(function(d){
       d.addEventListener('click',function(){
-        if(signedIn){ window.location.href = API + '/me/pilot/' + d.dataset.sid; }
+        if(signedIn){ window.location.href = API + '/me/client/' + d.dataset.sid; }
         else { connect(); }
       });
+    });
+    // Profile: skin upload / remove (only present on the play page).
+    var sf=$('skin-file'), st=$('skin-status');
+    if(sf) sf.addEventListener('change',async function(){
+      var f=sf.files[0]; sf.value=''; if(!f) return;
+      if(f.size>256*1024){ if(st)st.textContent='Too large — skins are tiny (max 256 KB).'; return; }
+      try{
+        var r=await fetch(API+'/me/skin',{method:'POST',credentials:'include',
+          headers:{'content-type':'image/png'},body:await f.arrayBuffer()});
+        if(r.ok){ if(st)st.textContent='Skin updated.'; refresh(); }
+        else if(st) st.textContent = r.status===400 ? 'That must be a 64x64 PNG skin.' : 'Upload failed.';
+      }catch(e){ if(st)st.textContent='Upload failed.'; }
+    });
+    var sc=$('skin-clear');
+    if(sc) sc.addEventListener('click',async function(){
+      try{ await fetch(API+'/me/skin',{method:'DELETE',credentials:'include'});
+        if(st)st.textContent='Skin removed.'; refresh(); }catch(e){}
     });
     refresh();
   });
@@ -327,6 +465,41 @@ _HEAD = """<!doctype html><html lang="en"><head>
 
 # Drifting End-void backdrop (two parallax layers), shared by every page.
 _STARS = '<div class="stars" aria-hidden="true"><i></i><i></i></div>'
+
+
+def _floats_html() -> str:
+    """The ambient floating-decor layer, shared by every page. The sprites
+    aren't hardcoded into the markup — JS scatters a random subset of the live
+    decor pool ([[_float_pool]]) at random size/position/timing on load, so each
+    visit differs and adding a sprite to decor/ joins the rotation for free."""
+    pool = json.dumps(_float_pool())
+    return (
+        '<div class="floats" aria-hidden="true"></div>\n'
+        "<script>\n(function(){\n"
+        "  try{\n"
+        "    if(matchMedia('(prefers-reduced-motion: reduce)').matches) return;\n"
+        "    if(innerWidth < 760) return;\n"
+        "    var host=document.querySelector('.floats'); if(!host) return;\n"
+        f"    var pool={pool};\n"
+        "    if(!pool.length) return;\n"
+        "    var bag=pool.slice();\n"
+        "    for(var i=bag.length-1;i>0;i--){var j=(Math.random()*(i+1))|0;var t=bag[i];bag[i]=bag[j];bag[j]=t;}\n"
+        "    var n=Math.min(bag.length, 3+((Math.random()*3)|0));\n"
+        "    var R=function(a,b){return a+Math.random()*(b-a);};\n"
+        "    for(var k=0;k<n;k++){\n"
+        "      var img=document.createElement('img');\n"
+        "      img.className='float '+(Math.random()<0.5?'bob':'spin');\n"
+        "      img.src='/game/decor/'+bag[k]+'.png'; img.alt='';\n"
+        "      img.style.width=R(30,54).toFixed(0)+'px';\n"
+        "      img.style.top=R(6,82).toFixed(1)+'vh';\n"
+        "      img.style[Math.random()<0.5?'left':'right']=R(1,10).toFixed(1)+'%';\n"
+        "      img.style.animationDuration=R(4.5,8).toFixed(2)+'s, '+R(20,40).toFixed(0)+'s';\n"
+        "      img.style.animationDelay='-'+R(0,7).toFixed(2)+'s';\n"
+        "      host.appendChild(img);\n"
+        "    }\n"
+        "  }catch(e){}\n"
+        "})();\n</script>"
+    )
 
 
 # Brand mark: the ender-eye glyph + wordmark, links to the marketing home.
@@ -367,41 +540,34 @@ def _nav(active: str) -> str:
 def _shell(title: str, body: str, *, active: str) -> str:
     return (
         _HEAD.format(title=html.escape(title), css=_CSS)
-        + _STARS + _nav(active) + body + _WALLET_JS + "</div></body></html>"
+        + _STARS + _floats_html() + _nav(active) + body + _WALLET_JS
+        + "</div></body></html>"
     )
 
 
-# Tiers teaser for the landing — one representative reward icon per tier.
-_TIER_TEASER = [
-    ("Holder", "diamond", "any holdings"),
-    ("Bronze", "inferium_essence", "≥ 0.1%"),
-    ("Silver", "allthemodium_ingot", "≥ 0.5%"),
-    ("Gold", "vibranium_ingot", "≥ 1%"),
-    ("Diamond", "unobtainium_ingot", "≥ 2.5%"),
-    ("Whale", "nether_star", "≥ 5%"),
-]
+def _teaser_chip_icons() -> list[str]:
+    """Four representative reward icons for the landing's deco strip, sampled
+    from the real per-tier drops (so it tracks the loot tables, not a hardcoded
+    list). One icon each from a low→high spread of tiers, deduped."""
+    drops = _tier_drops()
+    picks: list[str] = []
+    for key in ("holder", "bronze", "gold", "whale"):
+        for d in drops.get(key, []):
+            if d["icon"] not in picks:
+                picks.append(d["icon"])
+                break
+    return picks[:4]
 
 
-def render_landing(*, play_url: str | None = None) -> str:
-    play = html.escape(play_url or _play_url(), quote=True)
-    teaser = "".join(
-        '<a class="feature" href="/ranks">'
-        '<div class="lrow">'
-        f'<h3>{name}</h3><span class="thr">{thr}</span></div>'
-        f'<div class="drops"><img class="pixel" src="/game/items/{icon}.png" alt=""></div>'
-        "</a>"
-        for name, icon, thr in _TIER_TEASER
-    )
+def render_landing() -> str:
+    play = html.escape(_play_url(), quote=True)
     chips = "".join(
         f'<img class="pixel" src="/game/items/{i}.png" alt="">'
-        for i in ("diamond", "inferium_essence", "vibranium_ingot", "nether_star")
+        for i in _teaser_chip_icons()
     )
     body = f"""
 <section class="hero">
   <img class="hero-orb" src="/game/decor/end_crystal.png" alt="">
-  <img class="float bob" src="/game/decor/chorus_fruit.png" alt="" style="width:46px;top:7rem;left:-1.5rem">
-  <img class="float spin" src="/game/decor/ender_pearl.png" alt="" style="width:38px;bottom:1rem;left:34%">
-  <img class="float bob" src="/game/decor/purpur_block.png" alt="" style="width:40px;top:1.5rem;right:31%">
   <span class="eyebrow">$NDRCHST · modded Minecraft on Solana</span>
   <h1>Your wallet is your login.<br>Your holdings are your rank.</h1>
   <p class="lede">A modded Minecraft server gated by $NDRCHST. Sign in with your Solana
@@ -437,14 +603,6 @@ def render_landing(*, play_url: str | None = None) -> str:
 </section>
 
 <section class="section">
-  <div class="row" style="display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap">
-    <h2 style="margin:0">Six tiers, read from the chain</h2>
-    <a class="xlink" href="/ranks">See the full ladder →</a>
-  </div>
-  <div class="features ladder" style="margin-top:1.2rem">{teaser}</div>
-</section>
-
-<section class="section">
   <h2>A stack you actually own</h2>
   <div class="features">
     <div class="feature"><h3>One wallet, everywhere</h3>
@@ -469,10 +627,13 @@ def render_landing(*, play_url: str | None = None) -> str:
 
 def render_link(*, code: str = "") -> str:
     """Pairing page: the client opens this with ?code=…; the user connects a
-    wallet and signs to bind it to the client session."""
+    wallet and signs to bind it to the client session. Shares the same shell +
+    wallet plumbing (window.ndrchstWallet) as every other page — the only
+    difference is it posts the signature to /client/auth/approve with the code."""
     safe_code = html.escape(code, quote=True)
+    code_js = ('"' + safe_code + '"') if code else '""'
     body = f"""
-<section class="hero" style="padding:3.5rem 0 1rem;text-align:center">
+<section class="hero" style="padding:3rem 0 1rem;text-align:center">
   <span class="eyebrow">Link your client</span>
   <h1 style="font-size:1.9rem">Sign in to play</h1>
   <p class="lede" style="margin-left:auto;margin-right:auto">Connect your Solana wallet to
@@ -490,48 +651,60 @@ def render_link(*, code: str = "") -> str:
 <script>
 (function(){{
   var API = window.NDRCHST_API || '';
-  var code = {('"' + safe_code + '"') if code else '""'};
-  function provider(){{
-    if(window.phantom&&window.phantom.solana) return window.phantom.solana;
-    if(window.solana) return window.solana;
-    if(window.solflare) return window.solflare;
-    return null;
-  }}
+  var code = {code_js};
   function status(msg, ok){{
     var el=document.getElementById('link-status');
     el.style.display='block'; el.textContent=msg;
     el.style.borderColor = ok?'rgba(34,197,94,.4)':'var(--border)';
   }}
-  async function connect(){{
-    var p=provider();
-    if(!p){{ status('No Solana wallet found. Install Phantom to continue.',false); return; }}
+  async function link(){{
     if(!code){{ status('Missing pairing code — reopen the link from your client.',false); return; }}
     try{{
-      var res=await p.connect(); var pk=(res&&res.publicKey?res.publicKey:p.publicKey).toString();
-      var ch=await fetch(API+'/auth/challenge',{{method:'POST',
-        headers:{{'content-type':'application/json'}},body:JSON.stringify({{pubkey:pk}})}});
-      var msg=(await ch.json()).message;
-      var signed=await p.signMessage(new TextEncoder().encode(msg),'utf8');
-      var sig=signed.signature||signed;
-      var b64=btoa(String.fromCharCode.apply(null,new Uint8Array(sig)));
-      var v=await fetch(API+'/pilot/auth/approve',{{method:'POST',
+      var s=await window.ndrchstWallet.requestSignature();
+      var v=await fetch(API+'/client/auth/approve',{{method:'POST',
         headers:{{'content-type':'application/json'}},
-        body:JSON.stringify({{code:code,pubkey:pk,message:msg,signature:b64}})}});
+        body:JSON.stringify({{code:code,pubkey:s.pubkey,message:s.message,signature:s.signature}})}});
       if(v.ok){{ var d=await v.json();
         document.getElementById('link-connect').style.display='none';
         status('Linked as '+d.display+(d.tier_name?(' · '+d.tier_name):'')+'. Return to your client.',true);
       }} else {{ status('Could not link this device. The code may have expired.',false); }}
-    }}catch(e){{ console.error(e); status('Wallet sign-in was cancelled.',false); }}
+    }}catch(e){{
+      if(e&&e.code==='no-wallet') status('No Solana wallet found. Install Phantom to continue.',false);
+      else status('Wallet sign-in was cancelled.',false);
+    }}
   }}
   document.addEventListener('DOMContentLoaded',function(){{
-    document.getElementById('link-connect').addEventListener('click',connect);
+    document.getElementById('link-connect').addEventListener('click',link);
   }});
 }})();
 </script>
 """
-    return _HEAD.format(title=html.escape("ndrchst — link your client"), css=_CSS) \
-        + _STARS + '<nav class="top">' + _brand() + '</nav>' \
-        + '<div class="wrap-inner">' + body + "</div></div></body></html>"
+    return _shell("ndrchst — link your client", body, active="")
+
+
+def render_maintenance(*, message: str = "") -> str:
+    """Friendly stand-in served when the box origin is unreachable — the edge
+    Worker falls back to this static page so a downtime still looks like ndrchst
+    (same shell, nav and wallet control) instead of a raw error."""
+    msg = html.escape(message) or (
+        "We're doing a quick bit of maintenance. The site, your wallet session "
+        "and your rank are all fine — back in a moment.")
+    body = f"""
+<section class="hero" style="padding:5rem 0 2rem;text-align:center">
+  <img class="hero-orb" src="/game/decor/end_crystal.png" alt=""
+       style="position:static;display:block;margin:0 auto 1.4rem;right:auto;top:auto">
+  <span class="eyebrow">Status</span>
+  <h1 style="font-size:2.1rem">Be right back</h1>
+  <p class="lede" style="margin-left:auto;margin-right:auto">{msg}</p>
+  <div style="margin-top:1.5rem">
+    <a class="cta" href="/">Reload ndrchst →</a>
+    <a class="cta ghost" href="/ranks">View ranks</a>
+  </div>
+</section>
+<footer>The server, client and edge are open source. · <a href="/">Home</a> ·
+  <a href="/ranks">Ranks</a></footer>
+"""
+    return _shell("ndrchst — maintenance", body, active="")
 
 
 def _status_class(status: str) -> str:
@@ -540,7 +713,7 @@ def _status_class(status: str) -> str:
 
 def render_play(servers: list[dict], *, downloads_base: str = "") -> str:
     """servers: list of {name, version, port, status, cross_play,
-    bedrock_bridge_port, pilot_url, config_url}."""
+    bedrock_bridge_port, client_url, config_url}."""
     rows = []
     if not servers:
         rows.append('<div class="empty">No servers are online right now.</div>')
@@ -570,7 +743,7 @@ def render_play(servers: list[dict], *, downloads_base: str = "") -> str:
         base = downloads_base.rstrip("/")
         links = "".join(
             f'<li>{html.escape(label)}: <a href="{base}/{html.escape(fname)}">{html.escape(fname)}</a></li>'
-            for label, fname in PILOT_ASSETS
+            for label, fname in CLIENT_ASSETS
         )
         binaries_html = (
             '<p style="color:var(--fg2);font-size:.92rem">Prefer a standalone client? '
@@ -581,18 +754,30 @@ def render_play(servers: list[dict], *, downloads_base: str = "") -> str:
 
     body = f"""
 <section class="hero" style="padding:3rem 0 1.5rem">
-  <img class="float bob" src="/game/decor/purpur_block.png" alt="" style="width:48px;top:2rem;right:4%">
-  <img class="float spin" src="/game/decor/ender_eye.png" alt="" style="width:34px;bottom:.5rem;right:22%">
   <h1 style="font-size:2.1rem">Play on ndrchst</h1>
   <p class="lede">Connect your wallet to download the client — it arrives already linked to
      your wallet, so you just press Play. It installs the modpack and joins for you.</p>
-  <div class="when-out"><button class="wbtn connect-trigger"
-     style="font-size:.95rem;padding:.55rem 1.1rem">Connect Wallet to begin</button></div>
+  <div class="when-out">
+    <button class="wbtn connect-trigger"
+       style="font-size:.95rem;padding:.55rem 1.1rem">Connect Wallet to begin</button>
+    <a class="cta ghost" href="/ranks">See the ranks</a>
+  </div>
   <section class="rankcard when-in" style="margin:1.4rem 0 0;max-width:32rem">
     <div class="row"><span class="big rc-tier"></span><span class="pct rc-pct"></span></div>
-    <p style="margin:.55rem 0 .9rem;color:var(--fg2);font-size:.9rem">
+    <p style="margin:.55rem 0 .2rem;color:var(--fg2);font-size:.9rem">
       Signed in as <span class="mono rc-name" style="color:var(--fg)"></span> — you're cleared to join.</p>
-    <a class="xlink" href="/ranks">See where you stand on the ladder →</a>
+    <div class="profile-skin">
+      <div class="skin-face" id="skin-face" title="Your skin"></div>
+      <div class="skin-up">
+        <div class="row">
+          <label class="btn ghost" style="cursor:pointer">Upload skin
+            <input type="file" id="skin-file" accept="image/png" hidden></label>
+          <button class="btn ghost" id="skin-clear" style="display:none">Remove</button>
+        </div>
+        <div class="meta" id="skin-status">A 64x64 PNG — your face on your profile and in-game.</div>
+      </div>
+    </div>
+    <a class="xlink" href="/ranks" style="margin-top:1rem;display:inline-flex">See where you stand on the ladder →</a>
   </section>
 </section>
 
@@ -611,7 +796,7 @@ def render_play(servers: list[dict], *, downloads_base: str = "") -> str:
   <div class="os-panel" data-os="win">
     <ol>
       <li>Download a server's client above and unzip it.</li>
-      <li>Run <code>ndrchst-pilot.exe</code> (or <code>launch.bat</code>).</li>
+      <li>Run <code>ndrchst-client.exe</code> (or <code>launch.bat</code>).</li>
       <li>Enter your name, pick your RAM, and press <strong>Play</strong>.</li>
     </ol>
   </div>
@@ -624,7 +809,7 @@ def render_play(servers: list[dict], *, downloads_base: str = "") -> str:
   </div>
   <div class="os-panel" data-os="linux">
     <ol>
-      <li>Download a server's client above and unzip it: <code>unzip pilot.zip &amp;&amp; cd pilot</code></li>
+      <li>Download a server's client above and unzip it: <code>unzip client.zip &amp;&amp; cd client</code></li>
       <li>Run <code>./launch.sh</code>.</li>
       <li>Enter your name, pick your RAM (and Graphics, on hybrid laptops), and press <strong>Play</strong>.</li>
     </ol>
@@ -651,38 +836,53 @@ def render_play(servers: list[dict], *, downloads_base: str = "") -> str:
     return _shell("ndrchst — play", body, active="play")
 
 
-def _fmt_threshold(min_pct: float) -> str:
-    if min_pct <= 0:
-        return "any holdings"
-    # Trim trailing zeros: 0.10 -> 0.1, 2.50 -> 2.5
-    s = f"{min_pct:g}"
-    return f"≥ {s}% of supply"
+def _tier_band(tiers: list[dict], idx: int) -> str:
+    """Exact supply band for the tier at ascending index `idx`: the base tier is
+    open at the bottom, the top tier open at the top, the rest are [lo, hi)."""
+    lo = tiers[idx]["min_pct"]
+    if lo <= 0:
+        return "any holdings · base tier"
+    hi = tiers[idx + 1]["min_pct"] if idx + 1 < len(tiers) else None
+    return f"≥ {lo:g}% of supply" if hi is None else f"{lo:g}% – {hi:g}% of supply"  # noqa: RUF001
+
+
+def _drop_amount(d: dict) -> str:
+    """Count detail (e.g. ' x1-3' / ' x2') appended to a drop's tooltip text."""
+    lo, hi = d.get("min"), d.get("max")
+    if lo is None:
+        return ""
+    return f" ·×{lo}" if lo == hi else f" ·×{lo}–{hi}"  # noqa: RUF001
 
 
 def render_ranks(holders: list[dict], tiers: list[dict]) -> str:
     """tiers: list of {key, name, min_pct} ascending. holders: list of
     {display, mc_name, tier, tier_name, holdings_pct} sorted by holdings desc."""
     def _drops(key: str) -> str:
-        items = TIER_DROPS.get(key, [])
+        items = _tier_drops().get(key, [])
         if not items:
             return ""
-        icons = "".join(
-            f'<img class="pixel" src="/game/items/{i}.png" alt="" '
-            f'title="{html.escape(i.replace("_side", "").replace("_", " "))}">'
-            for i in items
+        chips = "".join(
+            f'<span class="tip" data-tip="{html.escape(d["name"] + _drop_amount(d), quote=True)}">'
+            f'<img class="pixel" src="/game/items/{html.escape(d["icon"], quote=True)}.png" alt=""></span>'
+            for d in items
         )
-        return f'<div class="drops">{icons}</div>'
+        n = len(items)
+        return (f'<div class="drops">{chips}</div>'
+                f'<div class="drop-note">{n} daily reward{"" if n == 1 else "s"} '
+                "· hover an item for the amount</div>")
 
-    ladder = "".join(
-        '<div class="feature">'
+    # Build ascending (so bands can see the next tier), display top-first.
+    cards = [
+        '<div class="feature tier-card">'
         '<div class="lrow">'
         f'<h3>{html.escape(t["name"])}</h3>'
-        f'<span class="thr">{_fmt_threshold(t["min_pct"])}</span>'
+        f'<span class="thr">{_tier_band(tiers, i)}</span>'
         "</div>"
         f'{_drops(t["key"])}'
         "</div>"
-        for t in reversed(tiers)  # show the top tier first
-    )
+        for i, t in enumerate(tiers)
+    ]
+    ladder = "".join(reversed(cards))
 
     rows = []
     if not holders:
@@ -709,8 +909,6 @@ def render_ranks(holders: list[dict], tiers: list[dict]) -> str:
     play = html.escape(_play_url(), quote=True)
     body = f"""
 <section class="hero" style="padding:3rem 0 1rem">
-  <img class="float spin" src="/game/decor/end_crystal.png" alt="" style="width:42px;top:1.5rem;right:6%">
-  <img class="float bob" src="/game/decor/ender_pearl.png" alt="" style="width:32px;bottom:.5rem;right:24%">
   <span class="eyebrow">$NDRCHST · ranks</span>
   <h1 style="font-size:2.1rem">Holdings are rank</h1>
   <p class="lede">Your tier is your share of $NDRCHST supply, read straight from the chain.

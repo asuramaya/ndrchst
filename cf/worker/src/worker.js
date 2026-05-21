@@ -1,42 +1,46 @@
 // ndrchst edge Worker — serves the public surface from the R2 bucket so
 // the residential box stays out of the per-client hot path, and proxies the
-// handful of DYNAMIC endpoints (wallet auth + pilot pairing) back to the box
+// handful of DYNAMIC endpoints (wallet auth + client pairing) back to the box
 // origin, which can't be static.
 //
+// The whole surface lives on ONE host (play.ndrchst.com); apex + www 301 here
+// (see fetch()), so every route below is served from that single origin.
+//
 // STATIC (from R2 bucket DL):
-//   GET /            → play.html (on play.*) | index.html (otherwise)
-//   GET /play        → play.html
-//   GET /pilot/<sid>/<...> → pilot/<sid>/<...>   (config, manifest, pilot.zip,
+//   GET /            → index.html    (the marketing landing)
+//   GET /play        → play.html     (the player / app page)
+//   GET /client/<sid>/<...> → client/<sid>/<...>   (config, manifest, client.zip,
 //                                                 mods/index.json, mods/<jar>)
-//   GET /<other>     → <other>       (servers.json, index.html, …)
+//   GET /<other>     → <other>       (servers.json, …)
 //   GET /healthz     → "ok"
 //
 // DYNAMIC (proxied to env.ORIGIN_BASE, any method incl. POST):
 //   /auth/challenge  /auth/verify  /auth/logout   (Sign-In-With-Solana)
 //   /me                                            (session check)
-//   /pilot/auth/start  /pilot/auth/approve  /pilot/auth/poll  (device pairing)
-//   /link                                          (pilot pairing approval page)
+//   /client/auth/start  /client/auth/approve  /client/auth/poll  (device pairing)
+//   /link                                          (client pairing approval page)
 //   /ranks                                         (live holders leaderboard)
 //
-// The box sets the session cookie with path=/ and NO Domain attribute, so the
-// browser scopes it to whatever host is in its address bar (play/www) — which
-// is the Worker. Proxying is therefore transparent: Set-Cookie flows straight
-// back through and lands on the right host.
+// The box sets the session cookie with path=/ and NO Domain attribute. With a
+// single host that's exactly right: the cookie scopes to play.ndrchst.com and
+// never has to follow the user across origins. Proxying is transparent —
+// Set-Cookie flows straight back through to the one host.
 //
 // Object Content-Type / Cache-Control come from what the box stored on
 // upload (writeHttpMetadata), so the box controls freshness centrally.
 
-// Distinct from the static /pilot/<sid>/* artifacts: a hex server id is never
-// "auth", so /pilot/auth/* can't collide with a real server's pilot bundle.
+// Distinct from the static /client/<sid>/* artifacts: a hex server id is never
+// "auth", so /client/auth/* can't collide with a real server's client bundle.
 function isDynamic(path) {
   return (
     path === "/me" ||
     path === "/link" ||
     path === "/ranks" ||
-    path.startsWith("/me/") ||        // /me/pilot/<sid> personalized download
+    path.startsWith("/me/") ||        // /me/client/<sid> download, /me/skin
+    path.startsWith("/skins/") ||     // per-wallet profile skins (box-stored)
     path.startsWith("/device/") ||    // /device/exchange
     path.startsWith("/auth/") ||
-    path.startsWith("/pilot/auth/")
+    path.startsWith("/client/auth/")
   );
 }
 
@@ -45,19 +49,14 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // Canonical marketing host is the apex (ndrchst.com); www 301s to it so we
-    // don't serve duplicate landings. play.ndrchst.com stays the app + the
-    // pilot's API/cookie host (never redirected).
-    if (url.hostname === "www.ndrchst.com") {
-      return Response.redirect("https://ndrchst.com" + path + url.search, 301);
-    }
-
-    // The app (wallet session + pilot pairing) is canonical on the play host.
-    // The session cookie has no Domain attr, so reaching the app via the apex
-    // marketing host would scope it to the wrong origin — send the app entry to
-    // the canonical host so a player who arrives via the landing stays signed in.
-    if (url.hostname === "ndrchst.com" && path === "/play") {
-      return Response.redirect("https://play.ndrchst.com/play" + url.search, 301);
+    // One canonical host: play.ndrchst.com. The app (wallet session + client
+    // pairing) lives here and the session cookie is host-scoped (no Domain
+    // attr), so keeping the WHOLE surface — landing included — on this single
+    // origin is what stops sign-in from stranding when a player moves between
+    // the landing and the app. apex + www therefore just 301 here, preserving
+    // path and query (so e.g. www.ndrchst.com/play → play.ndrchst.com/play).
+    if (url.hostname === "ndrchst.com" || url.hostname === "www.ndrchst.com") {
+      return Response.redirect("https://play.ndrchst.com" + path + url.search, 301);
     }
 
     if (path === "/healthz") {
@@ -67,12 +66,17 @@ export default {
     // Dynamic endpoints → proxy to the box origin (the box's own tunnel
     // hostname, set as ORIGIN_BASE; NOT play/www, which now hit this Worker).
     if (isDynamic(path)) {
-      if (!env.ORIGIN_BASE) {
-        return new Response("origin not configured", { status: 503 });
-      }
+      if (!env.ORIGIN_BASE) return originDown(env, request);
       const target = env.ORIGIN_BASE.replace(/\/+$/, "") + path + url.search;
-      // Preserve method, headers (Cookie, Content-Type, …) and body.
-      return fetch(new Request(target, request));
+      try {
+        // Preserve method, headers (Cookie, Content-Type, …) and body.
+        const resp = await fetch(new Request(target, request));
+        // Gateway-class failures mean the box is down → maintenance fallback.
+        if (resp.status >= 502 && resp.status <= 504) return originDown(env, request);
+        return resp;
+      } catch (e) {
+        return originDown(env, request);
+      }
     }
 
     // Everything else is a static asset from R2 — read-only.
@@ -80,12 +84,11 @@ export default {
       return new Response("Method Not Allowed", { status: 405 });
     }
 
-    const host = url.hostname;
     let key;
     if (path === "/") {
-      key = host.startsWith("play.") ? "play.html" : "index.html";
+      key = "index.html";   // root of the one host is the marketing landing
     } else if (path === "/play") {
-      key = "play.html";
+      key = "play.html";    // the player / app page
     } else if (path === "/favicon.ico") {
       key = "game/favicon.png";   // browsers auto-request /favicon.ico
     } else {
@@ -116,6 +119,27 @@ export default {
     return new Response(request.method === "HEAD" ? null : obj.body, { headers });
   },
 };
+
+// Origin (the box) is unreachable. For a top-level HTML navigation, fall back to
+// the published maintenance page so downtime still looks like ndrchst; for API
+// callers (XHR/fetch expecting JSON), return a terse 503 they can handle.
+async function originDown(env, request) {
+  const accept = request.headers.get("accept") || "";
+  if (request.method === "GET" && accept.includes("text/html")) {
+    const obj = await env.DL.get("maintenance.html");
+    if (obj) {
+      const headers = new Headers();
+      obj.writeHttpMetadata(headers);
+      headers.set("cache-control", "no-store");
+      headers.set("retry-after", "30");
+      return new Response(obj.body, { status: 503, headers });
+    }
+  }
+  return new Response("ndrchst is temporarily unavailable", {
+    status: 503,
+    headers: { "content-type": "text/plain", "retry-after": "30" },
+  });
+}
 
 function notFound() {
   const body = `<!doctype html><meta charset=utf-8>

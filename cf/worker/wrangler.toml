@@ -1,11 +1,15 @@
 # Cloudflare Worker that serves the ndrchst public surface from R2 and proxies
 # the dynamic auth/pairing endpoints back to the box.
 #
-#   play.ndrchst.com/*  → play page + /pilot/<sid>/* artifacts (from R2)
-#   www.ndrchst.com/*   → marketing landing (from R2)
-#   /auth/* /me /pilot/auth/* /link → proxied to ORIGIN_BASE (the box)
+# The whole surface lives on ONE host now — play.ndrchst.com:
+#   play.ndrchst.com/      → index.html (landing)  /play → play.html (app)
+#   play.ndrchst.com/client/<sid>/*  → R2 artifacts
+#   play.ndrchst.com/auth/* /me /client/auth/* /link /ranks → proxied to ORIGIN_BASE
+#   ndrchst.com/* and www.ndrchst.com/*  → 301 to play.ndrchst.com (same path)
+# The www/apex routes stay listed below ONLY so the Worker receives that traffic
+# and can issue the redirect; they serve no content of their own.
 #
-# The box publishes index.html / play.html / servers.json / pilot/<sid>/*
+# The box publishes index.html / play.html / servers.json / client/<sid>/*
 # into the bucket (see src/ndrchst/runtime/publish.py); this Worker maps
 # static URLs to R2 keys and forwards the dynamic endpoints to the box's own
 # tunnel hostname. Deploy: `wrangler deploy` (from this dir).
@@ -21,7 +25,7 @@ compatibility_date = "2024-11-01"
 #
 # CUTOVER PRECONDITIONS (both now satisfiable):
 #   1. The static pages + per-server artifacts are in R2 (light publish). The
-#      big modpack.zip is intentionally NOT in R2 anymore — the pilot pulls the
+#      big modpack.zip is intentionally NOT in R2 anymore — the client pulls the
 #      pack from CurseForge's CDN (see Lifecycle.modpack_cdn_url), so it's no
 #      longer a cutover blocker.
 #   2. ORIGIN_BASE below points at a tunnel hostname that still routes to the
@@ -37,7 +41,7 @@ routes = [
 ]
 
 [vars]
-# Box origin for the DYNAMIC endpoints (wallet auth + pilot pairing). Set this
+# Box origin for the DYNAMIC endpoints (wallet auth + client pairing). Set this
 # to the Cloudflare Tunnel hostname that fronts the box's public app on :8081 —
 # e.g. "https://origin.ndrchst.com". This MUST be a different hostname from
 # play/www (those resolve to this Worker now); create a tunnel ingress rule

@@ -1,6 +1,6 @@
-"""Self-update for the pilot.
+"""Self-update for the client.
 
-On launch the pilot checks a small manifest hosted at the downloads base
+On launch the client checks a small manifest hosted at the downloads base
 — a Cloudflare R2 bucket fronted by a custom domain (global CDN, off the
 operator's residential uplink, scales to any number of clients). If a
 newer build exists for this OS/arch it downloads + verifies it and swaps
@@ -12,9 +12,9 @@ Manifest layout (``<base>/latest.json``)::
       "version": "0.2.0",
       "notes": "what changed",
       "assets": {
-        "linux-x86_64":   {"file": "ndrchst-pilot-linux-x86_64",       "sha256": "…"},
-        "windows-x86_64": {"file": "ndrchst-pilot-windows-x86_64.exe",  "sha256": "…"},
-        "macos-arm64":    {"file": "ndrchst-pilot-macos-arm64",         "sha256": "…"}
+        "linux-x86_64":   {"file": "ndrchst-client-linux-x86_64",       "sha256": "…"},
+        "windows-x86_64": {"file": "ndrchst-client-windows-x86_64.exe",  "sha256": "…"},
+        "macos-arm64":    {"file": "ndrchst-client-macos-arm64",         "sha256": "…"}
       }
     }
 
@@ -38,7 +38,7 @@ from pathlib import Path
 
 from . import __version__
 
-_UA = "ndrchst-pilot-updater"
+_UA = "ndrchst-client-updater"
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +56,7 @@ def is_frozen() -> bool:
 
 
 def platform_key() -> str:
-    """Match the CI artifact naming in .github/workflows/build-pilot.yml."""
+    """Match the CI artifact naming in .github/workflows/build-client.yml."""
     sysname = platform.system()
     machine = platform.machine().lower()
     if sysname == "Windows":
@@ -145,7 +145,7 @@ def self_update(info: UpdateInfo, *, on_log: Callable[[str], None]) -> bool:
 
     exe = Path(sys.executable).resolve()
     staged = exe.parent / f".{exe.name}.new"
-    on_log(f"Downloading pilot {info.version}…")
+    on_log(f"Downloading client {info.version}…")
     try:
         _download_verified(info.url, info.sha256, staged)
     except Exception as e:

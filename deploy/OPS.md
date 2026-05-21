@@ -65,19 +65,19 @@ Notes:
   additive `ALTER TABLE ADD COLUMN`). No manual migration step. Just ship
   `db.py` + `schema.sql` and restart.
 - **`regenerate` + `r2-publish` are ADMIN (:8080) endpoints.** So changes to
-  `runtime/pilot.py` (bundle build), `runtime/publish.py`, or anything those
+  `runtime/client.py` (bundle build), `runtime/publish.py`, or anything those
   import only take effect after **`ndrchst-admin`** is restarted — restarting
   only `ndrchst-public` will run the *old* code and silently ship a stale
   bundle. Restart both, then regenerate + publish. (Got bitten: a themed-asset
-  bundle came out missing its assets because admin still had old `pilot.py`.)
+  bundle came out missing its assets because admin still had old `client.py`.)
 - **Game/UI assets are gitignored.** `src/ndrchst/web/static/game/` and
-  `pilot-client/src/ndrchst_pilot/assets/` are built by
+  `client/src/ndrchst_client/assets/` are built by
   `scripts/build_game_assets.py` (not committed). rsync both dirs to the box;
   the box serves `/game` (StaticFiles) and `publish.py` uploads them to R2,
-  and `build_bundle` folds the pilot assets into `pilot.zip`.
-- **Pilot-client drift:** the box's `pilot-client/` can lag dev. Pilot *bundles*
+  and `build_bundle` folds the client assets into `client.zip`.
+- **Client-client drift:** the box's `client/` can lag dev. Client *bundles*
   are built from the box's copy, so if you need fresh bundles, rsync
-  `pilot-client/` too and regenerate (below).
+  `client/` too and regenerate (below).
 - Backups land in `~/deploy-backups/<timestamp>/` on the box — restore by
   copying back and restarting.
 
@@ -86,17 +86,22 @@ Notes:
 - **Worker:** `cf/worker/` — name `ndrchst-edge`, R2 bucket binding `DL` →
   `ndrchst-dl`. Deploy **from dev**: `cd cf/worker && wrangler deploy` (wrangler
   4.88 installed on dev). `wrangler whoami` to check auth.
-- **What it does:** serves static pages + `pilot/<sid>/*` artifacts from R2;
-  **proxies the dynamic endpoints** (`/auth/*`, `/me`, `/pilot/auth/*`, `/link`,
-  `/ranks`) to `ORIGIN_BASE` (any method incl. POST). Cookies have no Domain
-  attr, so Set-Cookie flows back transparently on play/www.
-- **`routes` in `wrangler.toml`:** `play.ndrchst.com/*`, `www.ndrchst.com/*`.
-  Comment them out for a no-cutover validation deploy (lands on workers.dev).
+- **What it does:** serves static pages + `client/<sid>/*` artifacts from R2;
+  **proxies the dynamic endpoints** (`/auth/*`, `/me`, `/client/auth/*`, `/link`,
+  `/ranks`) to `ORIGIN_BASE` (any method incl. POST). **Single canonical host:**
+  the whole surface lives on `play.ndrchst.com` — `/` is the landing, `/play`
+  the app — and `ndrchst.com` + `www.ndrchst.com` **301 to play** (same path).
+  Cookies have no Domain attr, which is exactly right now: one host, host-scoped
+  session, no cross-origin stranding.
+- **`routes` in `wrangler.toml`:** `play.ndrchst.com/*`, `www.ndrchst.com/*`,
+  `ndrchst.com/*` — the www/apex routes exist ONLY so the Worker receives that
+  traffic to issue the 301; they serve no content. Comment them out for a
+  no-cutover validation deploy (lands on workers.dev).
 - **`ORIGIN_BASE` var:** MUST point at a tunnel hostname that routes to the
-  box's `:8081`, **separate from play/www** (those become the Worker). Blank →
+  box's `:8081`, **separate from play** (which becomes the Worker). Blank →
   the dynamic endpoints 503.
 
-### Cutover sequence (play/www → Worker)
+### Cutover sequence (play/www/apex → Worker)
 
 1. **Add an origin hostname for the box.** ⚠️ **The tunnel is DASHBOARD-MANAGED
    (remotely configured).** cloudflared loads creds from
@@ -111,14 +116,17 @@ Notes:
      DNS record together. (If a manual `origin` DNS record already exists, delete
      it first so the dashboard can create its own.)
    - Verify: `curl https://origin.ndrchst.com/healthz` → public-surface JSON (200).
-   - Same applies to `www.ndrchst.com` — no DNS yet; add a public hostname (or a
-     proxied record + Worker route) when you want it live. `play.ndrchst.com` is
-     the live surface.
+   - `www`/apex need proxied DNS records (or Worker routes) so the Worker can
+     301 them to play. `play.ndrchst.com` is the only content surface.
 2. Set `ORIGIN_BASE = "https://origin.ndrchst.com"` in `cf/worker/wrangler.toml`.
-3. `cd cf/worker && wrangler deploy` (routes uncommented → takes over play/www).
-4. **Republish pages** so R2 has the current static pages:
+3. `cd cf/worker && wrangler deploy` (routes uncommented → takes over play + the
+   www/apex redirectors).
+4. **Republish pages + artifacts** so R2 has the current static pages and the
+   `client/<sid>/*` keys (renamed from `pilot/<sid>/*`):
    `ssh ndrchst-01 'curl -X POST localhost:8080/servers/<sid>/r2-publish'`.
-5. Verify: `play.ndrchst.com/` (R2), `/ranks` + `/me` (proxied→box),
+   (Old `pilot/<sid>/*` keys are orphaned after — delete at leisure.)
+5. Verify: `play.ndrchst.com/` (landing, R2), `/play` (app), `/ranks` + `/me`
+   (proxied→box), `curl -I www.ndrchst.com/` → 301 to play,
    `origin.ndrchst.com/healthz` (box direct).
 
 ## Cloudflared tunnel (on the box)
@@ -151,9 +159,9 @@ S=<server_id>   # confirm with: curl -s localhost:8080/api/servers | jq '.[].id,
                 # ATM10 server is expected to be b757b2ea9cea — verify before use.
 
 # Pin the modpack pack to CurseForge CDN (box stops re-hosting the 200MB zip)
-curl -X POST localhost:8080/servers/$S/pilot/regenerate -d cf_project_id=925200 -d cf_file_id=8091114
+curl -X POST localhost:8080/servers/$S/client/regenerate -d cf_project_id=925200 -d cf_file_id=8091114
 
-# Rebuild the mods index, publish artifacts/pages to R2 (light), or heavy (+pilot.zip)
+# Rebuild the mods index, publish artifacts/pages to R2 (light), or heavy (+client.zip)
 curl -X POST localhost:8080/servers/$S/mods/build-index
 curl -X POST localhost:8080/servers/$S/r2-publish            # light: pages + index
 curl -X POST "localhost:8080/servers/$S/r2-publish?heavy=true"
@@ -165,7 +173,8 @@ curl -X POST localhost:8080/servers/$S/wallets/sync          # push whitelist (+
 
 ## Domains & token
 
-- `play.ndrchst.com` public surface · `www.ndrchst.com` landing · `mc.ndrchst.com`
+- `play.ndrchst.com` the whole public surface (landing `/` + app `/play`) ·
+  `ndrchst.com`/`www.ndrchst.com` 301 → play · `mc.ndrchst.com`
   MC game TCP (via tunnel, origin IP never exposed).
 - $NDRCHST mint `EUr2QnpmavMw51JiFYeTRnUywY7mPAtouzyY2P21pump`.
 - ATM10 modpack: CF project `925200`, pinned file `8091114`

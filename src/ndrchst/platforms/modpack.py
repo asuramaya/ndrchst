@@ -225,12 +225,12 @@ class Modpack(Platform):
         )
         if failures:
             # Modpack manifests rot — author deletes a mod, fileIDs go 404.
-            # Server is the source of truth for mods (pilots sync from the
+            # Server is the source of truth for mods (clients sync from the
             # server's mods/ dir at install time, and the operator can hand-
             # fix individual jars). So we surface the full failure list to
             # the operator but don't abort — let them fix specific mods after
             # the install lands. Server-side sync to clients ensures the
-            # post-fix state propagates to every pilot.
+            # post-fix state propagates to every client.
             for entry, err in failures:
                 log.warning("mod download failed: %s/%s: %s",
                             entry.project_id, entry.file_id, err)
@@ -244,7 +244,7 @@ class Modpack(Platform):
             missing_path.write_text(
                 f"# {len(failures)} mods from this modpack's manifest could not "
                 "be downloaded.\n"
-                "# Drop the jars into mods/ manually; pilots will pick them up\n"
+                "# Drop the jars into mods/ manually; clients will pick them up\n"
                 "# automatically via the server-driven mod sync on next launch.\n"
                 "# Manifest entries (projectID/fileID) and the reason:\n\n"
                 + "\n".join(

@@ -1,9 +1,9 @@
 """Server-driven asset sync.
 
-The server's index is the canonical client asset set. The pilot pulls
-it from <edge>/pilot/<sid>/mods/index.json and mirrors it locally. Each
+The server's index is the canonical client asset set. The client pulls
+it from <edge>/client/<sid>/mods/index.json and mirrors it locally. Each
 index entry carries a ``target`` dir (default ``mods``) telling the
-pilot where the file loads from on the client:
+client where the file loads from on the client:
 
   - ``mods``        → <profile>/mods/        (jars; server-authoritative)
   - ``shaderpacks`` → <profile>/shaderpacks/ (shader .zips)
@@ -54,7 +54,7 @@ class SyncResult:
     kept: int
 
 
-_UA = "Mozilla/5.0 (ndrchst-pilot)"
+_UA = "Mozilla/5.0 (ndrchst-client)"
 
 
 def _sha1_file(path: Path) -> str:
@@ -114,7 +114,7 @@ def sync_assets_from_server(
     hundreds of users.
 
     `sync_base_url` should NOT include a trailing slash; it's typically
-    `https://play.ndrchst.com/pilot/<sid>`."""
+    `https://play.ndrchst.com/client/<sid>`."""
     index_url = f"{sync_base_url}/mods/index.json"
     on_log(f"Fetching server asset index from {index_url}…")
     try:

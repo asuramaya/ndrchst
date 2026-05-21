@@ -298,7 +298,7 @@ async def test_install_cf_client_pack_continues_on_partial_failures(
     """Manifest rot is the operator's problem, not the install's. The
     install completes with a missing-mods sidecar; the operator drops
     the jars manually and the server-driven sync propagates them to
-    every pilot. No hard abort."""
+    every client. No hard abort."""
     entries = [
         {"required": True, "projectID": 100 + i, "fileID": 7000000 + i}
         for i in range(10)

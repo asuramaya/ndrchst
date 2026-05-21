@@ -1,27 +1,27 @@
-"""Per-server pilot client bundle generation.
+"""Per-server client client bundle generation.
 
-When a Java server is created, ndrchst writes a "pilot bundle" pinned to that
+When a Java server is created, ndrchst writes a "client bundle" pinned to that
 server's host + port + Minecraft version. The bundle is a zip containing:
 
-  ndrchst_pilot/    — the pilot-client source tree, with a generated config.py
+  ndrchst_client/    — the client source tree, with a generated config.py
                       that hard-codes this server's coordinates
   requirements.txt  — `portablemc>=4.4` (the only external dep)
   launch.sh / .bat  — convenience launchers
   README.txt        — instructions
 
 End users grab the zip from the public surface and run:
-    unzip pilot.zip && cd pilot
+    unzip client.zip && cd client
     pip install -r requirements.txt
-    python -m ndrchst_pilot
+    python -m ndrchst_client
 
-Bundles are regenerated whenever the source pilot-client/ tree changes;
+Bundles are regenerated whenever the source client/ tree changes;
 they're cheap (a few hundred KB, no compile step). Real native binaries
 would need PyInstaller per-OS; that's a future GH Actions job — the
 contract (zip layout + module entry-point) stays the same.
 
 Layout on disk:
-    ~/.ndrchst/pilots/<server_id>/
-        pilot.zip
+    ~/.ndrchst/clients/<server_id>/
+        client.zip
         config.json              # raw machine-readable
         manifest.json            # build metadata (ndrchst version, mtime, sha256)
 """
@@ -38,17 +38,17 @@ from pathlib import Path
 
 from ..domain.models import Family, Server
 
-PILOTS_ROOT_DEFAULT = Path.home() / ".ndrchst" / "pilots"
-PILOT_SOURCE_DIR = Path(__file__).resolve().parents[3] / "pilot-client"
+CLIENTS_ROOT_DEFAULT = Path.home() / ".ndrchst" / "clients"
+CLIENT_SOURCE_DIR = Path(__file__).resolve().parents[3] / "client"
 
 
-class PilotBuildError(Exception):
+class ClientBuildError(Exception):
     pass
 
 
 @dataclass(frozen=True, slots=True)
-class PilotBundle:
-    """Result of generating a pilot bundle for a server."""
+class ClientBundle:
+    """Result of generating a client bundle for a server."""
     server_id: str
     zip_path: Path
     config_path: Path
@@ -67,7 +67,7 @@ def _looks_like_mc_version(s: str) -> bool:
 
 
 def _public_host(server: Server, *, public_host: str) -> str:
-    """Pick the host the pilot should connect to. Defaults to `public_host`
+    """Pick the host the client should connect to. Defaults to `public_host`
     (set per-deployment via env or AppState). Falls back to a sentinel that
     end users will need to edit manually."""
     return public_host or "REPLACE_WITH_SERVER_HOST"
@@ -78,33 +78,33 @@ def build_bundle(
     *,
     public_host: str,
     edge_url: str = "",
-    pilots_root: Path | None = None,
+    clients_root: Path | None = None,
     source_dir: Path | None = None,
     tunnel_hostname: str = "",
     modpack_url: str = "",
     neoforge_version: str = "",
-) -> PilotBundle:
-    """Generate and persist a pilot zip for this server. Idempotent — running
+) -> ClientBundle:
+    """Generate and persist a client zip for this server. Idempotent — running
     twice overwrites with a fresh build.
 
     `public_host` is the address MC clients will dial for game traffic
     (e.g. "mc.ndrchst.com"). `edge_url` is the HTTP base URL where the
-    pilot zip + manifest live publicly (e.g. "https://play.ndrchst.com")
+    client zip + manifest live publicly (e.g. "https://play.ndrchst.com")
     — surfaced in the README so end-users know where to grab updates.
 
-    Only Java servers get a pilot. Bedrock servers raise PilotBuildError;
+    Only Java servers get a client. Bedrock servers raise ClientBuildError;
     callers should guard.
     """
     if server.family is not Family.JAVA:
-        raise PilotBuildError(
-            f"pilot is Java-only; server '{server.name}' is {server.family.value}"
+        raise ClientBuildError(
+            f"client is Java-only; server '{server.name}' is {server.family.value}"
         )
-    pilots_root = pilots_root or PILOTS_ROOT_DEFAULT
-    source_dir = source_dir or PILOT_SOURCE_DIR
+    clients_root = clients_root or CLIENTS_ROOT_DEFAULT
+    source_dir = source_dir or CLIENT_SOURCE_DIR
     if not source_dir.exists():
-        raise PilotBuildError(f"pilot source tree missing at {source_dir}")
+        raise ClientBuildError(f"client source tree missing at {source_dir}")
 
-    out_dir = pilots_root / server.id
+    out_dir = clients_root / server.id
     out_dir.mkdir(parents=True, exist_ok=True)
 
     host = _public_host(server, public_host=public_host)
@@ -116,14 +116,14 @@ def build_bundle(
     mc_version = server.version
     if not _looks_like_mc_version(mc_version):
         mc_version = "1.21.1"
-    # Mods sync URL: server is source of truth, pilot pulls its mod set from
+    # Mods sync URL: server is source of truth, client pulls its mod set from
     # this endpoint at install time. Defaults to the edge-served path; can
     # be overridden by the caller for testing or air-gapped setups.
     mods_sync_url = (
-        f"{edge_url.rstrip('/')}/pilot/{server.id}" if edge_url else None
+        f"{edge_url.rstrip('/')}/client/{server.id}" if edge_url else None
     )
     config = {
-        "app_name": f"ndrchst Pilot — {server.name}",
+        "app_name": f"ndrchst Client — {server.name}",
         "server_host": host,
         "server_port": server.port,
         "mc_version": mc_version,
@@ -140,14 +140,14 @@ def build_bundle(
     with zipfile.ZipFile(zip_buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         # 1. Generated config.py overrides the source's defaults.
         generated_config = _render_config_py(config)
-        zf.writestr("ndrchst_pilot/config.py", generated_config)
+        zf.writestr("ndrchst_client/config.py", generated_config)
 
-        # 2. Vendor the pilot-client source (everything except its own config.py).
-        src = source_dir / "src" / "ndrchst_pilot"
+        # 2. Vendor the client source (everything except its own config.py).
+        src = source_dir / "src" / "ndrchst_client"
         for path in sorted(src.rglob("*.py")):
             if path.name == "config.py":
                 continue  # we wrote our own above
-            arc = "ndrchst_pilot/" + str(path.relative_to(src))
+            arc = "ndrchst_client/" + str(path.relative_to(src))
             zf.writestr(arc, path.read_text())
 
         # 2b. Bundle the End-themed UI assets (banner GIF + brand glyph) so the
@@ -156,7 +156,7 @@ def build_bundle(
         if assets.is_dir():
             for path in sorted(assets.rglob("*")):
                 if path.is_file():
-                    arc = "ndrchst_pilot/" + str(path.relative_to(src))
+                    arc = "ndrchst_client/" + str(path.relative_to(src))
                     zf.writestr(arc, path.read_bytes())
 
         # 3. requirements.txt — portablemc for the launcher core, httpx
@@ -177,7 +177,7 @@ def build_bundle(
         zf.writestr("README.txt", _readme(config))
 
     zip_bytes = zip_buf.getvalue()
-    zip_path = out_dir / "pilot.zip"
+    zip_path = out_dir / "client.zip"
     zip_path.write_bytes(zip_bytes)
 
     config_path = out_dir / "config.json"
@@ -198,7 +198,7 @@ def build_bundle(
     manifest_path = out_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 
-    return PilotBundle(
+    return ClientBundle(
         server_id=server.id,
         zip_path=zip_path,
         config_path=config_path,
@@ -208,23 +208,23 @@ def build_bundle(
     )
 
 
-def remove_bundle(server_id: str, *, pilots_root: Path | None = None) -> None:
-    """Drop a server's pilot directory. Called when the server is deleted."""
-    pilots_root = pilots_root or PILOTS_ROOT_DEFAULT
-    target = pilots_root / server_id
+def remove_bundle(server_id: str, *, clients_root: Path | None = None) -> None:
+    """Drop a server's client directory. Called when the server is deleted."""
+    clients_root = clients_root or CLIENTS_ROOT_DEFAULT
+    target = clients_root / server_id
     if target.exists():
         shutil.rmtree(target, ignore_errors=True)
 
 
-def bundle_path(server_id: str, *, pilots_root: Path | None = None) -> Path | None:
+def bundle_path(server_id: str, *, clients_root: Path | None = None) -> Path | None:
     """Where the bundle for this server lives on disk, or None if missing."""
-    pilots_root = pilots_root or PILOTS_ROOT_DEFAULT
-    p = pilots_root / server_id / "pilot.zip"
+    clients_root = clients_root or CLIENTS_ROOT_DEFAULT
+    p = clients_root / server_id / "client.zip"
     return p if p.exists() else None
 
 
 def _render_config_py(cfg: dict) -> str:
-    """Generate a Python module mirroring pilot-client/src/ndrchst_pilot/config.py
+    """Generate a Python module mirroring client/src/ndrchst_client/config.py
     but with this server's coordinates baked in."""
     return (
         '"""Per-server build-time config. Generated by ndrchst — do not edit."""\n'
@@ -247,7 +247,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 python3 -m venv .venv
 .venv/bin/pip install -q -r requirements.txt
-exec .venv/bin/python -m ndrchst_pilot
+exec .venv/bin/python -m ndrchst_client
 """
 
 _LAUNCH_BAT = """\
@@ -255,7 +255,7 @@ _LAUNCH_BAT = """\
 cd /d %~dp0
 python -m venv .venv
 .venv\\Scripts\\pip install -q -r requirements.txt
-.venv\\Scripts\\python -m ndrchst_pilot
+.venv\\Scripts\\python -m ndrchst_client
 """
 
 
@@ -264,7 +264,7 @@ def _readme(cfg: dict) -> str:
     if cfg.get("edge_url"):
         edge_line = (
             f"\nGrab the latest copy of this bundle any time at:\n"
-            f"  {cfg['edge_url'].rstrip('/')}/pilot/{cfg['server_id']}/pilot.zip\n"
+            f"  {cfg['edge_url'].rstrip('/')}/client/{cfg['server_id']}/client.zip\n"
         )
     return f"""\
 {cfg['app_name']}
@@ -274,14 +274,14 @@ This bundle is pinned to Minecraft {cfg['mc_version']} connecting to
 {cfg['server_host']}:{cfg['server_port']}.
 
 Quick start:
-  unzip pilot.zip && cd pilot
+  unzip client.zip && cd client
   ./launch.sh             (Linux / Mac)
   launch.bat              (Windows)
 
 What this does:
   1. Creates a local Python venv (./.venv)
   2. Installs `portablemc` (the only dependency)
-  3. Launches the Minecraft offline-mode pilot GUI
+  3. Launches the Minecraft offline-mode client GUI
   4. Connects you to {cfg['server_host']}:{cfg['server_port']} on Minecraft {cfg['mc_version']}
 {edge_line}
 Server ID: {cfg['server_id']}

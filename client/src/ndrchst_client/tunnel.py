@@ -2,7 +2,7 @@
 
 Pattern:
   - On first launch we download a `cloudflared` binary for the local
-    platform and cache it in the pilot's data dir.
+    platform and cache it in the client's data dir.
   - At launch time we spawn `cloudflared access tcp` listening on
     127.0.0.1:<auto-port>, which tunnels every accepted TCP connection
     to `wss://<hostname>` at the Cloudflare edge → through the tunnel
@@ -12,7 +12,7 @@ Pattern:
 
 Cancellation: closing the Tunnel object terminates the cloudflared
 subprocess and waits for it. We don't manage tunnel state on disk —
-each pilot run starts a fresh listener and tears it down on exit.
+each client run starts a fresh listener and tears it down on exit.
 """
 from __future__ import annotations
 

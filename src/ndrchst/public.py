@@ -1,7 +1,7 @@
 """Public ndrchst surface — for end users, not admins.
 
 Boots as a second FastAPI app on a different port (env NDRCHST_PUBLIC_PORT,
-default 8081). Read-only: lists running servers, serves per-server pilot
+default 8081). Read-only: lists running servers, serves per-server client
 bundles. No admin routes, no mutation, no Docker access. Safe to expose
 publicly (behind Cloudflare or similar).
 
@@ -26,17 +26,23 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .domain import auth_session, device_token, join_token, pilot_pairing, wallet
+from .domain import auth_session, client_pairing, device_token, join_token, wallet
 from .domain.models import Family
 from .logging_setup import configure as configure_logging
 from .runtime import solana
+from .runtime.client import bundle_path as client_bundle_path
 from .runtime.holdings_refresh import refresh_all_holdings
-from .runtime.pilot import bundle_path as pilot_bundle_path
 from .store import daily_claims as dc_store
 from .store import servers as srv_store
 from .store import wallet_links as wl_store
 from .store.db import DEFAULT_DB_PATH, connect
-from .web.public_pages import render_landing, render_link, render_play, render_ranks
+from .web.public_pages import (
+    render_landing,
+    render_link,
+    render_maintenance,
+    render_play,
+    render_ranks,
+)
 
 _SNAPSHOT_INTERVAL = int(os.environ.get("NDRCHST_SNAPSHOT_INTERVAL", "3600"))
 # End-themed game assets (gitignored; staged to the box + R2). Served at /game
@@ -56,8 +62,8 @@ class _VerifyReq(BaseModel):
     signature: str  # base64 of the raw ed25519 signature bytes
 
 
-class _PilotApproveReq(_VerifyReq):
-    code: str  # the pairing user_code shown by the pilot
+class _ClientApproveReq(_VerifyReq):
+    code: str  # the pairing user_code shown by the client
 
 
 class _JoinVerifyReq(BaseModel):
@@ -65,7 +71,7 @@ class _JoinVerifyReq(BaseModel):
 
 
 class _DeviceExchangeReq(BaseModel):
-    device_token: str  # the pilot's long-lived credential
+    device_token: str  # the client's long-lived credential
 
 
 class _DailyClaimReq(BaseModel):
@@ -78,13 +84,6 @@ class _DailyResetReq(BaseModel):
 
 def _cookie_secure() -> bool:
     return os.environ.get("NDRCHST_COOKIE_SECURE", "1") != "0"
-
-
-def _cookie_domain() -> str | None:
-    """Optional cookie Domain. Set NDRCHST_COOKIE_DOMAIN=.ndrchst.com so one
-    sign-in is recognized across the apex landing, play, and www. Unset (the
-    default) scopes the cookie to the current host — correct for dev/tests."""
-    return os.environ.get("NDRCHST_COOKIE_DOMAIN") or None
 
 
 def _is_internal_caller(request: Request) -> bool:
@@ -111,7 +110,7 @@ def _site_base() -> str:
 
 
 def _verify_signed_or_raise(pubkey: str, message: str, signature_b64: str) -> None:
-    """Shared SIWS check used by /auth/verify and /pilot/auth/approve: the
+    """Shared SIWS check used by /auth/verify and /client/auth/approve: the
     message must carry a server-issued single-use nonce and be exactly the
     challenge we'd build, and the signature must verify for the wallet."""
     import base64
@@ -145,9 +144,36 @@ def _run_snapshot(db_path: Path) -> int:
         conn.close()
 
 
+# --- skins (basic per-wallet profile) ----------------------------------------
+SKINS_ROOT_DEFAULT = Path.home() / ".ndrchst" / "skins"
+_SKIN_DIMS_OK = {(64, 64), (64, 32)}  # modern + legacy Minecraft skin sizes
+_SKIN_MAX_BYTES = 256 * 1024
+
+
+def _skins_dir() -> Path:
+    return Path(os.environ.get("NDRCHST_SKINS_DIR", str(SKINS_ROOT_DEFAULT)))
+
+
+def _skin_path(pubkey: str) -> Path:
+    # Wallet pubkeys are base58 (alnum); strip anything else defensively so the
+    # filename can never escape the skins dir.
+    safe = "".join(c for c in pubkey if c.isalnum())
+    return _skins_dir() / f"{safe}.png"
+
+
+def _png_dims(data: bytes) -> tuple[int, int] | None:
+    """(width, height) read straight from a PNG's IHDR — no image lib needed,
+    so we can validate a skin upload without a Pillow dependency. None if the
+    bytes aren't a PNG."""
+    if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
+        return None
+    return (int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big"))
+
+
 def _identity(pubkey: str) -> dict:
     """Public identity view for a wallet: display handle, derived MC name,
-    holdings %, and rank tier. Holdings is a live RPC read (0.0 on any miss)."""
+    holdings %, rank tier, and (if set) the wallet's skin URL. Holdings is a
+    live RPC read (0.0 on any miss)."""
     pct = solana.holdings_pct(pubkey)
     tier = wallet.tier_for(pct)
     return {
@@ -157,6 +183,7 @@ def _identity(pubkey: str) -> dict:
         "holdings_pct": round(pct, 6),
         "tier": tier.key if tier else None,
         "tier_name": tier.name if tier else None,
+        "skin_url": f"/skins/{pubkey}.png" if _skin_path(pubkey).exists() else None,
     }
 
 
@@ -216,7 +243,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         return conn_holder["conn"]
 
     def _with_join_token(ident: dict) -> dict:
-        """Attach a short-lived join token to an identity for the pilot to
+        """Attach a short-lived join token to an identity for the client to
         carry — the credential the ndrchst-auth mod presents at connect time."""
         return {
             **ident,
@@ -256,16 +283,15 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         resp.set_cookie(
             _SESSION_COOKIE, token, max_age=7 * 24 * 3600, httponly=True,
             samesite="lax", secure=_cookie_secure(), path="/",
-            domain=_cookie_domain(),
         )
         return resp
 
-    # --- desktop pilot pairing (OAuth device-flow shape) ---------------------
-    @app.post("/pilot/auth/start")
-    def pilot_auth_start() -> JSONResponse:
-        """The pilot begins a pairing; it opens verify_url in a browser and
+    # --- desktop client pairing (OAuth device-flow shape) ---------------------
+    @app.post("/client/auth/start")
+    def client_auth_start() -> JSONResponse:
+        """The client begins a pairing; it opens verify_url in a browser and
         polls with pair_id until a wallet is bound."""
-        pair_id, user_code = pilot_pairing.start()
+        pair_id, user_code = client_pairing.start()
         return JSONResponse({
             "pair_id": pair_id,
             "user_code": user_code,
@@ -276,23 +302,23 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
 
     @app.get("/link", response_class=HTMLResponse)
     def link_page(code: str = "") -> HTMLResponse:
-        """Web page where the user connects a wallet to approve a pilot."""
+        """Web page where the user connects a wallet to approve a client."""
         return HTMLResponse(render_link(code=code))
 
-    @app.post("/pilot/auth/approve")
-    def pilot_auth_approve(req: _PilotApproveReq = Body(...)) -> JSONResponse:
+    @app.post("/client/auth/approve")
+    def client_auth_approve(req: _ClientApproveReq = Body(...)) -> JSONResponse:
         """Verify the wallet signature and bind it to the pairing code."""
         _verify_signed_or_raise(req.pubkey, req.message, req.signature)
-        if not pilot_pairing.approve(req.code, req.pubkey):
+        if not client_pairing.approve(req.code, req.pubkey):
             raise HTTPException(status_code=404, detail="unknown or expired pairing code")
         ident = _identity(req.pubkey)
         _record_link(ident)
         return JSONResponse({"ok": True, **_with_join_token(ident)}, headers=_NO_STORE)
 
-    @app.get("/pilot/auth/poll")
-    def pilot_auth_poll(pair_id: str) -> JSONResponse:
-        """The pilot polls until its pairing is approved."""
-        p = pilot_pairing.poll(pair_id)
+    @app.get("/client/auth/poll")
+    def client_auth_poll(pair_id: str) -> JSONResponse:
+        """The client polls until its pairing is approved."""
+        p = client_pairing.poll(pair_id)
         if p is None:
             raise HTTPException(status_code=404, detail="unknown or expired pairing")
         if not p.pubkey:
@@ -328,7 +354,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
 
     @app.post("/device/exchange")
     def device_exchange(req: _DeviceExchangeReq = Body(...)) -> JSONResponse:
-        """The pilot trades its long-lived device token for a FRESH short-lived
+        """The client trades its long-lived device token for a FRESH short-lived
         join token (tier re-read from chain) at Play — so the gate credential
         is never stale and there's no in-launcher device-flow round-trip."""
         wallet_pk = device_token.verify(req.device_token)
@@ -374,9 +400,9 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             conn.close()
         return JSONResponse({"ok": True}, headers=_NO_STORE)
 
-    @app.get("/me/pilot/{server_id}")
-    def me_pilot(server_id: str, request: Request) -> Response:
-        """Authenticated, personalized pilot download: requires a wallet session
+    @app.get("/me/client/{server_id}")
+    def me_client(server_id: str, request: Request) -> Response:
+        """Authenticated, personalized client download: requires a wallet session
         (sign in on the play page first) and bakes a device token into the
         bundle so the launcher is already linked — no separate sign-in step."""
         import io
@@ -388,16 +414,16 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         server = srv_store.get(_conn(), server_id)
         if server is None:
             raise HTTPException(status_code=404, detail="server not found")
-        base = pilot_bundle_path(server_id)
+        base = client_bundle_path(server_id)
         if base is None:
-            raise HTTPException(status_code=404, detail="pilot bundle not built for this server")
+            raise HTTPException(status_code=404, detail="client bundle not built for this server")
         buf = io.BytesIO()
         with zipfile.ZipFile(base) as src, \
                 zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as out:
             for item in src.infolist():
                 out.writestr(item, src.read(item.filename))
             out.writestr("ndrchst-device.token", device_token.issue(wallet_pk))
-        fname = f"ndrchst-pilot-{server.name.replace(' ', '_')}.zip"
+        fname = f"ndrchst-client-{server.name.replace(' ', '_')}.zip"
         return Response(
             content=buf.getvalue(),
             media_type="application/zip",
@@ -415,8 +441,45 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
     @app.post("/auth/logout")
     def auth_logout() -> JSONResponse:
         resp = JSONResponse({"ok": True}, headers=_NO_STORE)
-        resp.delete_cookie(_SESSION_COOKIE, path="/", domain=_cookie_domain())
+        resp.delete_cookie(_SESSION_COOKIE, path="/")
         return resp
+
+    # --- profile: per-wallet skin -------------------------------------------
+    @app.post("/me/skin")
+    async def set_skin(request: Request) -> JSONResponse:
+        """Store the signed-in wallet's skin (raw PNG body). Validated to a
+        64x64 / 64x32 PNG so we never persist arbitrary uploads."""
+        pubkey = auth_session.verify_session(request.cookies.get(_SESSION_COOKIE))
+        if not pubkey:
+            raise HTTPException(status_code=401, detail="not signed in")
+        body = await request.body()
+        if len(body) > _SKIN_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="skin too large (max 256 KB)")
+        if _png_dims(body) not in _SKIN_DIMS_OK:
+            raise HTTPException(status_code=400, detail="skin must be a 64x64 (or 64x32) PNG")
+        path = _skin_path(pubkey)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(body)
+        return JSONResponse({"ok": True, "skin_url": f"/skins/{pubkey}.png"}, headers=_NO_STORE)
+
+    @app.delete("/me/skin")
+    def clear_skin(request: Request) -> JSONResponse:
+        pubkey = auth_session.verify_session(request.cookies.get(_SESSION_COOKIE))
+        if not pubkey:
+            raise HTTPException(status_code=401, detail="not signed in")
+        _skin_path(pubkey).unlink(missing_ok=True)
+        return JSONResponse({"ok": True}, headers=_NO_STORE)
+
+    @app.get("/skins/{name}")
+    def get_skin(name: str) -> FileResponse:
+        """Public skin read (skins are public, like Minecraft's). `name` is the
+        wallet pubkey, optionally with a .png suffix."""
+        pubkey = name[:-4] if name.endswith(".png") else name
+        path = _skin_path(pubkey)
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="no skin set")
+        return FileResponse(path, media_type="image/png",
+                            headers={"Cache-Control": "no-cache"})
 
     def _play_servers() -> list[dict]:
         return [
@@ -428,30 +491,31 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
                 "status": s.status.value,
                 "cross_play": s.cross_play,
                 "bedrock_bridge_port": s.bedrock_bridge_port,
-                "pilot_url": f"/pilot/{s.id}/pilot.zip",
-                "config_url": f"/pilot/{s.id}/config.json",
+                "client_url": f"/client/{s.id}/client.zip",
+                "config_url": f"/client/{s.id}/config.json",
             }
             for s in srv_store.list_all(_conn())
             if s.family is Family.JAVA
         ]
 
     @app.get("/", response_class=HTMLResponse)
-    def index(request: Request) -> HTMLResponse:
-        # Domain-aware root: play.<domain> IS the play page; www / anything
-        # else gets the marketing landing. One app serves both hosts behind
-        # Cloudflare so each domain's root is "proper".
-        import os
-        host = (request.headers.get("host") or "").split(":")[0].lower()
-        if host.startswith("play."):
-            downloads_base = os.environ.get("NDRCHST_PILOT_DOWNLOADS_BASE", "")
-            return HTMLResponse(render_play(_play_servers(), downloads_base=downloads_base))
+    def index() -> HTMLResponse:
+        # The whole surface lives on one host now (play.ndrchst.com; apex + www
+        # 301 here), so the root is unambiguous: it's the marketing landing. The
+        # app is at /play. No more host-sniffing — one host, one meaning.
         return HTMLResponse(render_landing())
 
     @app.get("/play", response_class=HTMLResponse)
     def play() -> HTMLResponse:
         import os
-        downloads_base = os.environ.get("NDRCHST_PILOT_DOWNLOADS_BASE", "")
+        downloads_base = os.environ.get("NDRCHST_CLIENT_DOWNLOADS_BASE", "")
         return HTMLResponse(render_play(_play_servers(), downloads_base=downloads_base))
+
+    @app.get("/maintenance", response_class=HTMLResponse)
+    def maintenance() -> HTMLResponse:
+        # Also published to R2 as maintenance.html; the edge Worker serves that
+        # copy when this origin is unreachable. Here for direct access + tests.
+        return HTMLResponse(render_maintenance(), status_code=503)
 
     @app.get("/ranks", response_class=HTMLResponse)
     def ranks() -> HTMLResponse:
@@ -491,65 +555,65 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
                 "cross_play": s.cross_play,
                 "bedrock_bridge_port": s.bedrock_bridge_port,
                 "status": s.status.value,
-                "pilot_url": f"/pilot/{s.id}/pilot.zip",
-                "config_url": f"/pilot/{s.id}/config.json",
+                "client_url": f"/client/{s.id}/client.zip",
+                "config_url": f"/client/{s.id}/config.json",
             })
         return out
 
-    # Pilot bundles regenerate on demand (POST /servers/{id}/pilot/regenerate
+    # Client bundles regenerate on demand (POST /servers/{id}/client/regenerate
     # on the admin plane). If a CDN ahead of us caches the old copy, the new
     # config sits unreachable until TTL expiry. `no-store` opts every layer
     # — browsers + Cloudflare — out of caching these per-server files.
     _NO_STORE = {"Cache-Control": "no-store, no-cache, must-revalidate"}
 
-    @app.get("/pilot/{server_id}/pilot.zip")
-    def download_pilot(server_id: str) -> FileResponse:
+    @app.get("/client/{server_id}/client.zip")
+    def download_client(server_id: str) -> FileResponse:
         server = srv_store.get(_conn(), server_id)
         if server is None:
             raise HTTPException(status_code=404, detail="server not found")
-        path = pilot_bundle_path(server_id)
+        path = client_bundle_path(server_id)
         if path is None:
             raise HTTPException(
                 status_code=404,
-                detail="pilot bundle not built yet (Java servers only); recreate the server",
+                detail="client bundle not built yet (Java servers only); recreate the server",
             )
         return FileResponse(
             path,
             media_type="application/zip",
-            filename=f"ndrchst-pilot-{server.name.replace(' ', '_')}.zip",
+            filename=f"ndrchst-client-{server.name.replace(' ', '_')}.zip",
             headers=_NO_STORE,
         )
 
-    @app.get("/pilot/{server_id}/config.json")
-    def pilot_config(server_id: str) -> JSONResponse:
-        from .runtime.pilot import PILOTS_ROOT_DEFAULT
-        cfg_path = PILOTS_ROOT_DEFAULT / server_id / "config.json"
+    @app.get("/client/{server_id}/config.json")
+    def client_config(server_id: str) -> JSONResponse:
+        from .runtime.client import CLIENTS_ROOT_DEFAULT
+        cfg_path = CLIENTS_ROOT_DEFAULT / server_id / "config.json"
         if not cfg_path.exists():
             raise HTTPException(status_code=404, detail="config not found")
         import json
         return JSONResponse(json.loads(cfg_path.read_text()), headers=_NO_STORE)
 
-    @app.get("/pilot/{server_id}/manifest.json")
-    def pilot_manifest(server_id: str) -> JSONResponse:
-        from .runtime.pilot import PILOTS_ROOT_DEFAULT
-        mp = PILOTS_ROOT_DEFAULT / server_id / "manifest.json"
+    @app.get("/client/{server_id}/manifest.json")
+    def client_manifest(server_id: str) -> JSONResponse:
+        from .runtime.client import CLIENTS_ROOT_DEFAULT
+        mp = CLIENTS_ROOT_DEFAULT / server_id / "manifest.json"
         if not mp.exists():
             raise HTTPException(status_code=404, detail="manifest not found")
         import json
         return JSONResponse(json.loads(mp.read_text()), headers=_NO_STORE)
 
-    @app.get("/pilot/{server_id}/modpack.zip")
-    def pilot_modpack(server_id: str) -> FileResponse:
-        """Per-server modpack zip companion to pilot.zip — staged when
-        the operator wants the pilot to install a CF client pack that CF's
+    @app.get("/client/{server_id}/modpack.zip")
+    def client_modpack(server_id: str) -> FileResponse:
+        """Per-server modpack zip companion to client.zip — staged when
+        the operator wants the client to install a CF client pack that CF's
         own CDN won't serve directly (which is most client packs).
 
         Used for the overrides/* tree (configs, kubejs, defaultconfigs);
         the actual mod jars come from the /mods/ endpoints below so the
         client mirrors the server's curated set, not whatever the upstream
         CF manifest happens to point at."""
-        from .runtime.pilot import PILOTS_ROOT_DEFAULT
-        path = PILOTS_ROOT_DEFAULT / server_id / "modpack.zip"
+        from .runtime.client import CLIENTS_ROOT_DEFAULT
+        path = CLIENTS_ROOT_DEFAULT / server_id / "modpack.zip"
         if not path.exists():
             raise HTTPException(status_code=404, detail="modpack not staged for this server")
         return FileResponse(
@@ -559,9 +623,9 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             headers=_NO_STORE,
         )
 
-    @app.get("/pilot/{server_id}/mods/index.json")
-    def pilot_mods_index(server_id: str) -> JSONResponse:
-        """The mod set the pilot should mirror. Prefers the cached
+    @app.get("/client/{server_id}/mods/index.json")
+    def client_mods_index(server_id: str) -> JSONResponse:
+        """The mod set the client should mirror. Prefers the cached
         mods-index.json built by the admin (carries per-mod CDN download
         URLs so clients pull from CurseForge's global CDN, not the
         operator's uplink). Falls back to a live filename+sha1 listing
@@ -591,7 +655,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             with p.open("rb") as f:
                 for chunk in iter(lambda: f.read(64 * 1024), b""):
                     h.update(chunk)
-            origin = f"/pilot/{server_id}/mods/{urllib.parse.quote(p.name, safe='')}"
+            origin = f"/client/{server_id}/mods/{urllib.parse.quote(p.name, safe='')}"
             out.append({
                 "filename": p.name,
                 "size": p.stat().st_size,
@@ -603,8 +667,8 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             })
         return JSONResponse({"server_id": server_id, "mods": out}, headers=_NO_STORE)
 
-    @app.get("/pilot/{server_id}/mods/{filename}")
-    def pilot_mod_file(server_id: str, filename: str) -> FileResponse:
+    @app.get("/client/{server_id}/mods/{filename}")
+    def client_mod_file(server_id: str, filename: str) -> FileResponse:
         """Stream a single mod jar — used for incremental sync (a handful
         of changed mods). For first install, prefer mods.zip (one request
         instead of ~450, which the tunnel serves orders of magnitude faster)."""
@@ -624,8 +688,8 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             headers=_NO_STORE,
         )
 
-    @app.get("/pilot/{server_id}/mods.zip")
-    def pilot_mods_bundle(server_id: str) -> FileResponse:
+    @app.get("/client/{server_id}/mods.zip")
+    def client_mods_bundle(server_id: str) -> FileResponse:
         """Bundle the server's entire mods/ set into one zip. Bulk first-
         install path: pulling ~450 jars as individual requests through the
         tunnel is dominated by per-request overhead (~25s/file observed),

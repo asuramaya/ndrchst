@@ -20,14 +20,14 @@ and the data/build dirs as a backstop.
 
 Everything deployment-specific is read from env vars at boot, never hardcoded:
 `NDRCHST_R2_*`, `NDRCHST_EDGE_URL`, `NDRCHST_PUBLIC_HOST`,
-`NDRCHST_TUNNEL_HOSTNAME`, `NDRCHST_PILOT_DOWNLOADS_BASE`, `NDRCHST_PLAY_URL`.
+`NDRCHST_TUNNEL_HOSTNAME`, `NDRCHST_CLIENT_DOWNLOADS_BASE`.
 See [docs/distribution.md](docs/distribution.md). The `cf/worker/wrangler.toml`
 carries a bucket name + route hostnames — those are non-secret deployment
 identifiers; fork-and-edit them for your own deployment.
 
 ## Distribution trust
 
-- Pilot binaries published to R2 carry a **SHA-256** in `latest.json`; the
+- Client binaries published to R2 carry a **SHA-256** in `latest.json`; the
   self-updater verifies it before swapping the running binary.
 - The admin plane (`:8080`) is intended to be reachable on a private network
   only (e.g. Tailscale) — do **not** route it through a public tunnel. Only the

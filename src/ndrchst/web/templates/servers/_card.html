@@ -6,7 +6,7 @@
     <div class="name"
          tabindex="0"
          title="Click to rename"
-         onclick="this.outerHTML = `<form class='name-edit' hx-put='/servers/{{ server.id }}/name' hx-target='#server-{{ server.id }}' hx-swap='outerHTML'><input name='name' value='{{ server.name }}' autofocus onblur='this.form.requestSubmit()' onkeydown='if(event.key===&quot;Escape&quot;){htmx.ajax(&quot;GET&quot;,&quot;/servers/list&quot;,{target:&quot;#servers-grid&quot;,swap:&quot;outerHTML&quot;})}'></form>`">
+         onclick="this.outerHTML = `<form class='name-edit' hx-put='/servers/{{ server.id }}/name' hx-target='#server-{{ server.id }}' hx-swap='outerHTML'><input name='name' value='{{ server.name }}' autofocus onblur='this.form.requestSubmit()' onkeydown='if(event.key===&quot;Escape&quot;){htmx.ajax(&quot;GET&quot;,&quot;/servers/list&quot;,{target:&quot;#server-list&quot;,swap:&quot;innerHTML&quot;})}'></form>`">
       {{ server.name }}
     </div>
     <span class="status {{ server.status.value }}">{{ server.status.value }}</span>
@@ -25,6 +25,8 @@
     </div>
   {% endif %}
   <div class="actions">
+    <a class="btn btn-manage" href="/servers/{{ server.id }}/console"
+       title="Open console, files, players, assets…">⚙ Manage</a>
     {% if server.status.value == 'running' %}
       <button class="btn"
               hx-post="/servers/{{ server.id }}/stop"

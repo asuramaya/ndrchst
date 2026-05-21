@@ -23,12 +23,12 @@ from ..domain import config as cfg_mod
 from ..domain.models import Family, Server, ServerStatus
 from ..platforms import REGISTRY as PLATFORMS
 from ..store import servers as srv_store
+from .client import ClientBuildError
+from .client import build_bundle as build_client_bundle
+from .client import remove_bundle as remove_client_bundle
 from .docker import BEDROCK_IMAGE, ContainerSpec, Docker, java_image_for
 from .eula import accept_eula
 from .geyser import install_cross_play
-from .pilot import PilotBuildError
-from .pilot import build_bundle as build_pilot_bundle
-from .pilot import remove_bundle as remove_pilot_bundle
 from .ports import is_port_free
 
 SERVERS_ROOT_DEFAULT = Path.home() / ".ndrchst" / "servers"
@@ -241,12 +241,12 @@ class Lifecycle:
         # Address MC clients should dial. Set via `NDRCHST_PUBLIC_HOST` env;
         # falls back to a placeholder users have to edit by hand.
         self._public_host = public_host or ""
-        # HTTPS base URL where the public surface lives — used in the pilot
+        # HTTPS base URL where the public surface lives — used in the client
         # bundle README so end-users know where to fetch fresh copies.
         # Set via `NDRCHST_EDGE_URL` (e.g. "https://play.ndrchst.com").
         self._edge_url = edge_url or ""
         # Cloudflare Tunnel hostname for cloudflared access tcp — when set,
-        # the pilot dials this through CF edge instead of the raw
+        # the client dials this through CF edge instead of the raw
         # public_host:port. Set via `NDRCHST_TUNNEL_HOSTNAME`.
         self._tunnel_hostname = tunnel_hostname or ""
 
@@ -349,22 +349,22 @@ class Lifecycle:
 
         srv_store.insert(self._conn, server)
 
-        # Generate the per-server pilot bundle for Java servers. Cheap (no
+        # Generate the per-server client bundle for Java servers. Cheap (no
         # compile step), version-locked, so the public surface can serve a
         # client guaranteed to match this exact server.
         if server.family is Family.JAVA:
             try:
-                build_pilot_bundle(
+                build_client_bundle(
                     server,
                     public_host=self._public_host,
                     edge_url=self._edge_url,
                     tunnel_hostname=self._tunnel_hostname,
                 )
-            except PilotBuildError:
-                # Pilot is best-effort — log but don't fail server create
+            except ClientBuildError:
+                # Client is best-effort — log but don't fail server create
                 import logging
                 logging.getLogger("ndrchst").warning(
-                    "pilot bundle build failed for %s; server created anyway", server.id,
+                    "client bundle build failed for %s; server created anyway", server.id,
                     exc_info=True,
                 )
 
@@ -397,15 +397,15 @@ class Lifecycle:
         return await self._docker.engine_info()
 
     async def publish_to_r2(self, server_id: str) -> dict:
-        """Push this server's pilot artifacts (incl. the small pilot.zip) + the
+        """Push this server's client artifacts (incl. the small client.zip) + the
         public pages to R2 so Cloudflare's edge serves them instead of the box.
         No-op (and says so) when R2 isn't configured. The big modpack is never
-        pushed — the pilot pulls it from CurseForge's CDN."""
+        pushed — the client pulls it from CurseForge's CDN."""
         import asyncio
         import os
 
         from . import r2
-        from .pilot import PILOTS_ROOT_DEFAULT
+        from .client import CLIENTS_ROOT_DEFAULT
         from .publish import publish_server
 
         cfg = r2.config_from_env()
@@ -416,9 +416,8 @@ class Lifecycle:
         summary = await asyncio.to_thread(
             publish_server,
             cfg=cfg, server=server, servers_root=self._root,
-            pilots_root=PILOTS_ROOT_DEFAULT, java_servers=java,
-            play_url=os.environ.get("NDRCHST_PLAY_URL"),
-            downloads_base=os.environ.get("NDRCHST_PILOT_DOWNLOADS_BASE", ""),
+            clients_root=CLIENTS_ROOT_DEFAULT, java_servers=java,
+            downloads_base=os.environ.get("NDRCHST_CLIENT_DOWNLOADS_BASE", ""),
         )
         return {"published": True, **summary}
 
@@ -426,10 +425,10 @@ class Lifecycle:
         """Build a cached `mods-index.json` in the server's data dir. Each
         mod gets {filename, size, sha1, url}. The URL points at CurseForge's
         CDN (edge.forgecdn.net) when the staged client manifest resolves the
-        file, and at our own /pilot/<sid>/mods/<file> endpoint otherwise
+        file, and at our own /client/<sid>/mods/<file> endpoint otherwise
         (substitutions like the cc-tweaked version bump).
 
-        This is what makes the pilot scale to hundreds of users: the heavy
+        This is what makes the client scale to hundreds of users: the heavy
         ~1.25 GB of mod jars streams from CF's global CDN, not through the
         operator's residential uplink (which caps the tunnel at ~200 KB/s).
         Returns the number of mods indexed."""
@@ -440,7 +439,7 @@ class Lifecycle:
         import httpx
 
         from . import curseforge as cf
-        from .pilot import PILOTS_ROOT_DEFAULT
+        from .client import CLIENTS_ROOT_DEFAULT
 
         self._must_get(server_id)
         mods_dir = self._root / server_id / "mods"
@@ -452,7 +451,7 @@ class Lifecycle:
         # where target is "mods" for jars and shaderpacks/resourcepacks/saves
         # for non-jar CF assets.
         resolved: dict[str, dict] = {}
-        modpack_zip = PILOTS_ROOT_DEFAULT / server_id / "modpack.zip"
+        modpack_zip = CLIENTS_ROOT_DEFAULT / server_id / "modpack.zip"
         if modpack_zip.exists():
             try:
                 manifest = cf.read_manifest(modpack_zip)
@@ -478,7 +477,7 @@ class Lifecycle:
                     h.update(chunk)
             url = (resolved.get(p.name) or {}).get("url")
             origin_url = (
-                f"{edge}/pilot/{server_id}/mods/{urllib.parse.quote(p.name, safe='')}"
+                f"{edge}/client/{server_id}/mods/{urllib.parse.quote(p.name, safe='')}"
                 if edge else None
             )
             entries.append({
@@ -487,7 +486,7 @@ class Lifecycle:
                 "sha1": h.hexdigest(),
                 # CF CDN if resolvable, else our origin (small substitution set).
                 "url": url or origin_url,
-                # Always provide the origin fallback so the pilot can retry
+                # Always provide the origin fallback so the client can retry
                 # if a CDN URL 403s (third-party-downloads-disabled mods).
                 "origin_url": origin_url,
                 "from_cdn": url is not None,
@@ -502,7 +501,7 @@ class Lifecycle:
         # client mods, but the client needs them to render the world AND to
         # match the modpack's expected mod count (Crash Assistant nags
         # otherwise). They come straight from CF's CDN; we have no local copy
-        # to hash, so sha1 is null and the pilot trusts the CDN bytes.
+        # to hash, so sha1 is null and the client trusts the CDN bytes.
         server_filenames = {e["filename"] for e in entries}
         for filename, info in resolved.items():
             if filename in server_filenames:
@@ -583,9 +582,9 @@ class Lifecycle:
             data_dir = self._root / server_id
             if data_dir.exists():
                 shutil.rmtree(data_dir, ignore_errors=True)
-        # Always drop the pilot bundle — once the server is gone, the bundle
+        # Always drop the client bundle — once the server is gone, the bundle
         # points at a dead address and serves no one.
-        remove_pilot_bundle(server_id)
+        remove_client_bundle(server_id)
         srv_store.delete(self._conn, server_id)
 
     def _pick_rcon_port(self) -> int:
@@ -621,13 +620,13 @@ class Lifecycle:
         self, server_id: str, project_id: int | None, file_id: int | None,
     ) -> None:
         """Pin (or clear) this server's CurseForge client-pack coordinates.
-        The pilot build resolves these to a CF CDN URL so the box never
+        The client build resolves these to a CF CDN URL so the box never
         re-hosts the ~200MB pack zip."""
         self._must_get(server_id)
         srv_store.set_cf_pack(self._conn, server_id, project_id, file_id)
 
     def set_neoforge_version(self, server_id: str, version: str | None) -> None:
-        """Pin (or clear) the NeoForge version the pilot installs. Persisted so
+        """Pin (or clear) the NeoForge version the client installs. Persisted so
         a later bare regenerate keeps the modloader instead of reverting to
         vanilla."""
         self._must_get(server_id)
@@ -636,7 +635,7 @@ class Lifecycle:
     async def modpack_cdn_url(self, server_id: str) -> str | None:
         """Resolve the CF CDN URL for this server's pinned client pack, or
         None if no pack is pinned. The filename is fetched live from CF so
-        the URL tracks the pack — re-resolve (rebuild the pilot) to stay
+        the URL tracks the pack — re-resolve (rebuild the client) to stay
         synced when the operator bumps the pinned fileId."""
         import httpx
 
@@ -653,27 +652,27 @@ class Lifecycle:
                 client, server.cf_project_id, server.cf_file_id,
             )
 
-    def regenerate_pilot(
+    def regenerate_client(
         self,
         server_id: str,
         *,
         modpack_url: str = "",
         neoforge_version: str = "",
     ):
-        """Rebuild the pilot bundle from the current server record + lifespan
+        """Rebuild the client bundle from the current server record + lifespan
         env. Cheap (no compile step) — exists so the user can pick up a new
         public_host / edge_url / tunnel without recreating the server.
 
         ``modpack_url`` and ``neoforge_version`` let callers pin a
-        client-side modpack and modloader version for the pilot that may
+        client-side modpack and modloader version for the client that may
         not be derivable from the server record alone (server holds the
         server-pack URL; client wants the client-pack URL). When
         ``neoforge_version`` is empty it falls back to the value persisted on
         the server, so a bare regenerate keeps installing the modloader."""
         server = self._must_get(server_id)
         if server.family is not Family.JAVA:
-            raise LifecycleError("pilot bundles are Java-only")
-        return build_pilot_bundle(
+            raise LifecycleError("client bundles are Java-only")
+        return build_client_bundle(
             server,
             public_host=self._public_host,
             edge_url=self._edge_url,

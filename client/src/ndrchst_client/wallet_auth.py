@@ -1,5 +1,5 @@
-"""Wallet sign-in for the pilot via the web pairing flow (OAuth device-flow
-shape). The pilot never sees a private key: it starts a pairing, opens the
+"""Wallet sign-in for the client via the web pairing flow (OAuth device-flow
+shape). The client never sees a private key: it starts a pairing, opens the
 browser to the /link page, and polls until the user connects + signs their
 Solana wallet there. Stdlib only (urllib) to keep the frozen build lean.
 """
@@ -20,7 +20,7 @@ DEFAULT_BASE = "https://play.ndrchst.com"
 
 # Cloudflare's WAF 403s the default `Python-urllib/x.y` UA in front of the
 # public surface, so present a browser-ish one (same trick as modpack.py).
-_UA = "Mozilla/5.0 (ndrchst-pilot)"
+_UA = "Mozilla/5.0 (ndrchst-client)"
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +58,7 @@ _DEVICE_TOKEN_FILE = "ndrchst-device.token"
 
 
 def read_device_token() -> str | None:
-    """The auth-first download bakes a device token into the bundle. The pilot
+    """The auth-first download bakes a device token into the bundle. The client
     runs from the bundle dir, so look there (cwd) + next to this package."""
     here = Path(__file__).resolve().parent
     for p in (Path(_DEVICE_TOKEN_FILE), here / _DEVICE_TOKEN_FILE,
@@ -103,7 +103,7 @@ def begin(
     identity. Raises WalletAuthError on timeout/failure."""
     base = (base_url or DEFAULT_BASE).rstrip("/")
     try:
-        start = _post_json(f"{base}/pilot/auth/start")
+        start = _post_json(f"{base}/client/auth/start")
     except (urllib.error.URLError, OSError, ValueError) as e:
         raise WalletAuthError(f"could not reach sign-in service: {e}") from e
 
@@ -119,7 +119,7 @@ def begin(
             webbrowser.open(verify_url)
     on_log(f"If the browser didn't open, visit: {verify_url}")
 
-    poll_url = f"{base}/pilot/auth/poll?pair_id={urllib.parse.quote(pair_id)}"
+    poll_url = f"{base}/client/auth/poll?pair_id={urllib.parse.quote(pair_id)}"
     while time.time() < deadline:
         time.sleep(interval)
         try:

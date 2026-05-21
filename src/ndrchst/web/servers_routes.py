@@ -211,7 +211,7 @@ async def build_mods_index(
     lifecycle: Lifecycle = Depends(require_lifecycle),
 ) -> HTMLResponse:
     """(Re)build the cached mods-index.json: resolves each mod to a
-    CurseForge CDN URL (or our origin for substitutions) so pilots pull
+    CurseForge CDN URL (or our origin for substitutions) so clients pull
     bytes from CF's global CDN instead of through the operator's uplink.
     Run after the mod set changes (install, substitution, version bump)."""
     try:
@@ -240,8 +240,8 @@ async def r2_publish(
     server_id: str,
     lifecycle: Lifecycle = Depends(require_lifecycle),
 ) -> HTMLResponse:
-    """Publish pilot artifacts (incl. pilot.zip) + public pages to Cloudflare
-    R2. The big modpack is never pushed — the pilot pulls it from CF's CDN."""
+    """Publish client artifacts (incl. client.zip) + public pages to Cloudflare
+    R2. The big modpack is never pushed — the client pulls it from CF's CDN."""
     try:
         result = await lifecycle.publish_to_r2(server_id)
     except LifecycleError as e:
@@ -316,8 +316,8 @@ async def container_recreate(
     return _render_card(request, conn, server.id)
 
 
-@router.post("/servers/{server_id}/pilot/regenerate", response_class=HTMLResponse)
-async def regenerate_pilot(
+@router.post("/servers/{server_id}/client/regenerate", response_class=HTMLResponse)
+async def regenerate_client(
     request: Request,
     server_id: str,
     modpack_url: str = Form(""),
@@ -327,7 +327,7 @@ async def regenerate_pilot(
     lifecycle: Lifecycle = Depends(require_lifecycle),
     conn: sqlite3.Connection = Depends(db),
 ) -> HTMLResponse:
-    """Rebuild the pilot bundle for this server from the *current* lifespan
+    """Rebuild the client bundle for this server from the *current* lifespan
     env (NDRCHST_PUBLIC_HOST + NDRCHST_EDGE_URL + NDRCHST_TUNNEL_HOSTNAME).
 
     Modpack source: pass ``cf_project_id`` + ``cf_file_id`` to pin a
@@ -336,7 +336,7 @@ async def regenerate_pilot(
     ``modpack_url`` still wins as a manual override. ``neoforge_version`` is
     likewise persisted, so a later bare regenerate keeps the modloader instead
     of reverting to vanilla."""
-    from ..runtime.pilot import PilotBuildError
+    from ..runtime.client import ClientBuildError
     if cf_project_id and cf_file_id:
         lifecycle.set_modpack_pack(server_id, cf_project_id, cf_file_id)
     if neoforge_version:
@@ -352,18 +352,18 @@ async def regenerate_pilot(
         if resolved:
             modpack_url = resolved
     try:
-        bundle = lifecycle.regenerate_pilot(
+        bundle = lifecycle.regenerate_client(
             server_id,
             modpack_url=modpack_url,
             neoforge_version=neoforge_version,
         )
     except LifecycleError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    except PilotBuildError as e:
+    except ClientBuildError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     src = f" · modpack from {modpack_url}" if modpack_url else ""
     return HTMLResponse(
-        f"Rebuilt pilot bundle ({bundle.size} bytes, "
+        f"Rebuilt client bundle ({bundle.size} bytes, "
         f"sha256={bundle.sha256[:12]}…){src}",
     )
 

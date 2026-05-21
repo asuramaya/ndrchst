@@ -1,6 +1,6 @@
-name: build-pilot
+name: build-client
 
-# Cross-platform single-file pilot launcher builds. PyInstaller can't
+# Cross-platform single-file client launcher builds. PyInstaller can't
 # cross-compile, so we run it on each OS runner and upload the artifact.
 # Players download the binary for their OS — no Python required on their
 # machine.
@@ -9,10 +9,10 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - "pilot-v*"
+      - "client-v*"
     paths:
-      - "pilot-client/**"
-      - ".github/workflows/build-pilot.yml"
+      - "client/**"
+      - ".github/workflows/build-client.yml"
 
 jobs:
   build:
@@ -21,18 +21,18 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            asset: ndrchst-pilot-linux-x86_64
-            bin: ndrchst-pilot
+            asset: ndrchst-client-linux-x86_64
+            bin: ndrchst-client
           - os: windows-latest
-            asset: ndrchst-pilot-windows-x86_64.exe
-            bin: ndrchst-pilot.exe
+            asset: ndrchst-client-windows-x86_64.exe
+            bin: ndrchst-client.exe
           - os: macos-latest
-            asset: ndrchst-pilot-macos-arm64
-            bin: ndrchst-pilot
+            asset: ndrchst-client-macos-arm64
+            bin: ndrchst-client
     runs-on: ${{ matrix.os }}
     defaults:
       run:
-        working-directory: pilot-client
+        working-directory: client
     steps:
       - uses: actions/checkout@v4
 
@@ -45,19 +45,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller portablemc httpx
 
-      # Stamp the binary's __version__ from the tag (pilot-vX.Y.Z → X.Y.Z) so
+      # Stamp the binary's __version__ from the tag (client-vX.Y.Z → X.Y.Z) so
       # the self-updater compares against the version it actually shipped as.
       - name: Stamp version
-        if: startsWith(github.ref, 'refs/tags/pilot-v')
+        if: startsWith(github.ref, 'refs/tags/client-v')
         shell: bash
         run: |
-          V="${GITHUB_REF_NAME#pilot-v}"
-          sed -i.bak "s/__version__ = \"[^\"]*\"/__version__ = \"$V\"/" src/ndrchst_pilot/__init__.py
-          rm -f src/ndrchst_pilot/__init__.py.bak
+          V="${GITHUB_REF_NAME#client-v}"
+          sed -i.bak "s/__version__ = \"[^\"]*\"/__version__ = \"$V\"/" src/ndrchst_client/__init__.py
+          rm -f src/ndrchst_client/__init__.py.bak
           echo "stamped version $V"
 
       - name: Build
-        run: pyinstaller ndrchst-pilot.spec
+        run: pyinstaller ndrchst-client.spec
 
       - name: Stage binary
         shell: bash
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
-          path: pilot-client/out/${{ matrix.asset }}
+          path: client/out/${{ matrix.asset }}
           if-no-files-found: error
 
   # Publish the built binaries + an update manifest to Cloudflare R2 so
@@ -77,9 +77,9 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/pilot-v') && vars.PUBLISH_R2 == 'true'
+    if: startsWith(github.ref, 'refs/tags/client-v') && vars.PUBLISH_R2 == 'true'
     env:
-      R2_PREFIX: ${{ vars.R2_PREFIX || 'pilot' }}
+      R2_PREFIX: ${{ vars.R2_PREFIX || 'client' }}
     steps:
       - name: Download built assets
         uses: actions/download-artifact@v4
@@ -90,21 +90,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#pilot-v}"
+          VERSION="${GITHUB_REF_NAME#client-v}"
           mkdir -p release
           # download-artifact nests each under <name>/<name>; flatten.
-          for f in ndrchst-pilot-linux-x86_64 ndrchst-pilot-windows-x86_64.exe ndrchst-pilot-macos-arm64; do
+          for f in ndrchst-client-linux-x86_64 ndrchst-client-windows-x86_64.exe ndrchst-client-macos-arm64; do
             cp "dl/$f/$f" "release/$f"
           done
           sha() { sha256sum "release/$1" | cut -d' ' -f1; }
           cat > release/latest.json <<JSON
           {
             "version": "${VERSION}",
-            "notes": "ndrchst pilot ${VERSION}",
+            "notes": "ndrchst client ${VERSION}",
             "assets": {
-              "linux-x86_64":   {"file": "ndrchst-pilot-linux-x86_64",       "sha256": "$(sha ndrchst-pilot-linux-x86_64)"},
-              "windows-x86_64": {"file": "ndrchst-pilot-windows-x86_64.exe",  "sha256": "$(sha ndrchst-pilot-windows-x86_64.exe)"},
-              "macos-arm64":    {"file": "ndrchst-pilot-macos-arm64",         "sha256": "$(sha ndrchst-pilot-macos-arm64)"}
+              "linux-x86_64":   {"file": "ndrchst-client-linux-x86_64",       "sha256": "$(sha ndrchst-client-linux-x86_64)"},
+              "windows-x86_64": {"file": "ndrchst-client-windows-x86_64.exe",  "sha256": "$(sha ndrchst-client-windows-x86_64.exe)"},
+              "macos-arm64":    {"file": "ndrchst-client-macos-arm64",         "sha256": "$(sha ndrchst-client-macos-arm64)"}
             }
           }
           JSON
@@ -122,7 +122,7 @@ jobs:
           set -euo pipefail
           # Binaries are immutable per version → cache hard. The manifest
           # must always be fresh → no-cache so clients see new releases.
-          for f in ndrchst-pilot-linux-x86_64 ndrchst-pilot-windows-x86_64.exe ndrchst-pilot-macos-arm64; do
+          for f in ndrchst-client-linux-x86_64 ndrchst-client-windows-x86_64.exe ndrchst-client-macos-arm64; do
             aws s3 cp "release/$f" "s3://${R2_BUCKET}/${R2_PREFIX}/$f" \
               --endpoint-url "$R2_ENDPOINT" \
               --content-type application/octet-stream \

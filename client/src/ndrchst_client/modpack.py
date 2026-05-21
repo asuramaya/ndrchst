@@ -25,7 +25,7 @@ from pathlib import Path
 
 from . import curseforge as cf
 
-log = logging.getLogger("ndrchst_pilot.modpack")
+log = logging.getLogger("ndrchst_client.modpack")
 
 
 class ModpackInstallError(RuntimeError):
@@ -54,7 +54,7 @@ def fetch_modpack_zip(
     # CF's CDN rejects Python's default urllib UA with 403; spoof a
     # browser-ish UA the way every other modpack launcher does.
     req = urllib.request.Request(
-        url, headers={"User-Agent": "Mozilla/5.0 (ndrchst-pilot)"},
+        url, headers={"User-Agent": "Mozilla/5.0 (ndrchst-client)"},
     )
     try:
         with urllib.request.urlopen(req) as resp, tmp.open("wb") as f:

@@ -2,10 +2,10 @@
 modded server.
 
 After a wallet completes Sign-In-With-Solana on the web surface, the box mints
-a join token binding `{wallet, mc_name, tier}` with a short expiry. The pilot
+a join token binding `{wallet, mc_name, tier}` with a short expiry. The client
 carries it into the game dir; the `ndrchst-auth` NeoForge mod sends it during
 the connection handshake and the server side POSTs it back to `/join/verify`.
-A client with no valid token never gets onto the server — the pilot becomes
+A client with no valid token never gets onto the server — the client becomes
 the only way in, and the token's `mc_name` binding stops anyone joining under
 someone else's wallet handle.
 

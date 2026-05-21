@@ -1,8 +1,8 @@
-"""Desktop integration — make the pilot a real installed app.
+"""Desktop integration — make the client a real installed app.
 
 A downloaded binary on its own gives the player nothing to click. This
 module registers an application entry / shortcut for the current OS so
-the pilot shows up in the launcher / Start menu and (where the desktop
+the client shows up in the launcher / Start menu and (where the desktop
 supports it) on the desktop:
 
   - Linux:   ~/.local/share/applications/<slug>.desktop  (+ ~/Desktop)
@@ -28,11 +28,11 @@ def is_frozen() -> bool:
 
 def _exec_command() -> str:
     """The command a shortcut should run. Frozen → the binary itself;
-    dev checkout → `python -m ndrchst_pilot` (so shortcuts work in dev too)."""
+    dev checkout → `python -m ndrchst_client` (so shortcuts work in dev too)."""
     exe = sys.executable
     if is_frozen():
         return f'"{exe}"'
-    return f'"{exe}" -m ndrchst_pilot'
+    return f'"{exe}" -m ndrchst_client'
 
 
 def _bundled_icon() -> Path | None:
@@ -46,12 +46,12 @@ def _bundled_icon() -> Path | None:
 
 
 def _slug(app_name: str) -> str:
-    return "".join(c if c.isalnum() else "-" for c in app_name.lower()).strip("-") or "ndrchst-pilot"
+    return "".join(c if c.isalnum() else "-" for c in app_name.lower()).strip("-") or "ndrchst-client"
 
 
 def install_shortcut(
     *,
-    app_name: str = "ndrchst Pilot",
+    app_name: str = "ndrchst Client",
     exec_command: str | None = None,
     on_log: Callable[[str], None] = lambda _m: None,
     apps_dir: Path | None = None,

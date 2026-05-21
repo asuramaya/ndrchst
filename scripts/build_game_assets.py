@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Process raw Minecraft/ATM10 textures into the End-themed web + client asset
 set. Output is gitignored (we don't commit game binaries to the OSS repo); it's
-staged to the box + R2 at deploy time and bundled into the pilot.
+staged to the box + R2 at deploy time and bundled into the client.
 
 PROVENANCE of the raw inputs (not committed; re-extract to regenerate):
   - Vanilla 1.21.1 client jar (Mojang piston-data CDN): end_sky, end_stone,
@@ -24,8 +24,8 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parent.parent
 RAW = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/ndrchst-assets/raw")
 OUT = ROOT / "src/ndrchst/web/static/game"
-# The pilot (Tkinter) bundles these for its themed, offline header.
-PILOT_ASSETS = ROOT / "pilot-client/src/ndrchst_pilot/assets"
+# The client (Tkinter) bundles these for its themed, offline header.
+CLIENT_ASSETS = ROOT / "client/src/ndrchst_client/assets"
 
 # Reward item sprites surfaced on /ranks tier cards (filename in RAW == out name).
 ITEMS = [
@@ -50,7 +50,7 @@ def _crisp(im: Image.Image, size: int) -> Image.Image:
 
 
 def build_banner(dst: Path) -> None:
-    """A seamless panning End-starfield strip for the pilot's header. Tkinter's
+    """A seamless panning End-starfield strip for the client's header. Tkinter's
     PhotoImage cycles GIF frames natively, so the client gets a live backdrop
     with no extra deps."""
     sky = _load("end_sky")  # 128x128 tileable
@@ -83,12 +83,12 @@ def main() -> None:
     _crisp(_load("ender_eye"), 128).save(OUT / "decor" / "brand.png")
     _crisp(_load("ender_eye"), 32).save(OUT / "favicon.png")
     build_banner(OUT / "decor" / "end_banner.gif")
-    # Pilot UI assets (banner GIF + brand glyph) for the Tkinter header.
-    PILOT_ASSETS.mkdir(parents=True, exist_ok=True)
-    build_banner(PILOT_ASSETS / "end_banner.gif")
-    _crisp(_load("ender_eye"), 48).save(PILOT_ASSETS / "brand.png")
+    # Client UI assets (banner GIF + brand glyph) for the Tkinter header.
+    CLIENT_ASSETS.mkdir(parents=True, exist_ok=True)
+    build_banner(CLIENT_ASSETS / "end_banner.gif")
+    _crisp(_load("ender_eye"), 48).save(CLIENT_ASSETS / "brand.png")
     n = sum(1 for _ in OUT.rglob("*.*"))
-    print(f"built {n} web assets -> {OUT}\nbuilt 2 pilot assets -> {PILOT_ASSETS}")
+    print(f"built {n} web assets -> {OUT}\nbuilt 2 client assets -> {CLIENT_ASSETS}")
 
 
 if __name__ == "__main__":

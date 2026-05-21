@@ -1,9 +1,9 @@
 """Write Minecraft's servers.dat (the Multiplayer server list) so the
-pilot's target server is pre-listed and one click to join.
+client's target server is pre-listed and one click to join.
 
 servers.dat is uncompressed NBT. We only need a tiny subset of the
 spec (compound / list / string / byte), so we encode it by hand rather
-than pull an NBT dependency into the pilot.
+than pull an NBT dependency into the client.
 
 Layout:
   TAG_Compound ""

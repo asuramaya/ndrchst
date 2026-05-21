@@ -19,27 +19,27 @@
     {% endfor %}
   </div>
 
-  <h2 class="section-title">Pilot wiring</h2>
+  <h2 class="section-title">Client wiring</h2>
   <p class="muted" style="margin-top: 0; font-size: 0.85rem;">
-    Per-server readiness of the public-edge pieces a pilot needs. Rebuild from a
+    Per-server readiness of the public-edge pieces a client needs. Rebuild from a
     server's Mods tab (mods index) or recreate the server (bundle / config).
   </p>
-  {% if not pilots %}
-    <div class="empty">No Java servers yet — pilots are generated per Java server.</div>
+  {% if not clients %}
+    <div class="empty">No Java servers yet — clients are generated per Java server.</div>
   {% else %}
     <div class="card" style="padding: 0;">
       <table class="grid">
         <thead>
           <tr>
             <th>Server</th>
-            <th class="center">Pilot bundle</th>
+            <th class="center">Client bundle</th>
             <th class="center">Config</th>
             <th class="center">Modpack</th>
             <th class="center">Mods index</th>
           </tr>
         </thead>
         <tbody>
-          {% for p in pilots %}
+          {% for p in clients %}
             <tr>
               <td><a href="/servers/{{ p.id }}/config">{{ p.name }}</a></td>
               <td class="center">{% if p.bundle %}<span class="ok">✓</span>{% else %}<span class="no">✗</span>{% endif %}</td>

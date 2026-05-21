@@ -5,7 +5,7 @@ Two user-level services run the box:
 | Unit | Port | Purpose |
 |---|---|---|
 | `ndrchst-admin.service` | 8080 | Management plane. Tailscale-only — DO NOT route through Cloudflare. |
-| `ndrchst-public.service` | 8081 | Public surface — pilot bundle downloads + read-only server list. Cloudflare Tunnel fronts this at `play.ndrchst.com`. |
+| `ndrchst-public.service` | 8081 | Public surface — client bundle downloads + read-only server list. Cloudflare Tunnel fronts this at `play.ndrchst.com`. |
 
 ## Install
 
@@ -37,7 +37,7 @@ sudo systemctl restart user@$(id -u).service
   - `NDRCHST_PUBLIC_HOST` — hostname MC clients dial (e.g. `mc.ndrchst.com`).
     A DNS-only (grey-cloud) A record pointing at the server.
   - `NDRCHST_EDGE_URL` — HTTPS base of the public surface (e.g.
-    `https://play.ndrchst.com`). Surfaced in the pilot bundle README.
+    `https://play.ndrchst.com`). Surfaced in the client bundle README.
 
 `ndrchst-public.service` reads `~/.config/ndrchst/public.env` (optional, chmod
 600 — secrets never live in the repo or the unit file). Set at least:
@@ -59,8 +59,8 @@ sudo systemctl restart user@$(id -u).service
   (RCON rank template, e.g. `lp user {name} parent set {tier}`).
 
 To change them: edit the unit, `daemon-reload`, then restart. Existing
-pilot bundles can be regenerated without recreating the server:
+client bundles can be regenerated without recreating the server:
 
 ```bash
-curl -X POST http://127.0.0.1:8080/servers/<sid>/pilot/regenerate
+curl -X POST http://127.0.0.1:8080/servers/<sid>/client/regenerate
 ```
