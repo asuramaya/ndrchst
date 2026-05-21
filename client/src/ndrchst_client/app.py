@@ -481,32 +481,47 @@ def run() -> None:
         threading.Thread(target=worker, daemon=True).start()
 
     # ---- Self-update -------------------------------------------------
-    def do_update(info) -> None:
+    def do_update(upd) -> None:
         update_btn.config(state=tk.DISABLED, text="Updating…")
+        # Block Play while the binary swaps so a launch can't race the re-exec.
+        launch_btn.config(state=tk.DISABLED, text="Updating…")
+        phase_var.set(f"Updating client to {upd.version}…")
 
         def worker() -> None:
-            ok = updater.self_update(info, on_log=emit_from_worker)
-            # On success the process re-execs (POSIX) or exits (Windows);
-            # if we're still here it didn't apply — re-enable the button.
+            ok = updater.self_update(upd, on_log=emit_from_worker)
+            # On success the process re-execs (POSIX) or exits (Windows); if
+            # we're still here it didn't apply — re-enable and let them play.
             if not ok:
-                root.after(0, lambda: update_btn.config(
-                    state=tk.NORMAL, text="Update & restart"))
+                root.after(0, lambda: (
+                    update_btn.config(state=tk.NORMAL, text="Update & restart"),
+                    launch_btn.config(
+                        state=tk.NORMAL if wallet_id["mc_name"] else tk.DISABLED,
+                        text="Play"),
+                    phase_var.set("Update failed — see details below")))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def show_update(info) -> None:
-        update_msg.set(f"Update available — client {info.version}   ")
-        update_btn.config(command=lambda: do_update(info))
+    def show_update(upd) -> None:
+        # NB: the parameter is the UpdateInfo; `info` (below) is the header
+        # frame the bar packs after — keep them distinct (this shadowing was
+        # the bug that silently broke the whole update prompt).
+        update_msg.set(f"Update available — client {upd.version}   ")
+        update_btn.config(command=lambda: do_update(upd))
         update_bar.pack(fill=tk.X, after=info)
         append_log(
-            f"Update {info.version} available"
-            + (f" — {info.notes}" if info.notes else "")
+            f"Update {upd.version} available"
+            + (f" — {upd.notes}" if upd.notes else "")
         )
 
     def check_updates() -> None:
         found = updater.check(cfg.update_base_url or "")
-        if found is not None:
-            root.after(0, show_update, found)
+        if found is None:
+            return
+        # Surface the bar, and on a real (frozen) build apply it automatically:
+        # the client keeps ITSELF up to date with no manual click.
+        root.after(0, show_update, found)
+        if updater.is_frozen():
+            root.after(0, lambda: do_update(found))
 
     if cfg.update_base_url:
         threading.Thread(target=check_updates, daemon=True).start()
