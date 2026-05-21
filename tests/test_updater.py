@@ -6,6 +6,7 @@ at all, so it's the part worth locking down.)
 """
 from __future__ import annotations
 
+import inspect
 import json
 import sys
 from pathlib import Path
@@ -71,6 +72,15 @@ def test_check_no_asset_for_platform_is_none(monkeypatch):
 
 def test_check_no_base_url_is_none():
     assert updater.check("", current="0.2.0") is None
+
+
+def test_windows_apply_exits_process_not_thread():
+    """self_update runs on a worker thread; _apply_windows must terminate the
+    PROCESS (os._exit) not just the thread (sys.exit), or the running .exe stays
+    locked and the swap helper spins forever waiting to delete it."""
+    src = inspect.getsource(updater._apply_windows)
+    assert "os._exit" in src
+    assert "sys.exit" not in src
 
 
 def test_show_update_does_not_shadow_header_frame():

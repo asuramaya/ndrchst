@@ -195,4 +195,8 @@ def _apply_windows(exe: Path, staged: Path) -> None:
         | getattr(subprocess, "CREATE_NO_WINDOW", 0),
         close_fds=True,
     )
-    sys.exit(0)
+    # self_update runs on a WORKER thread, where raising SystemExit only unwinds
+    # that thread — the process (and its lock on the .exe) would survive and the
+    # helper would spin forever waiting to delete it. os._exit terminates the
+    # whole process from any thread, releasing the file so the swap completes.
+    os._exit(0)
