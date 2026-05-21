@@ -12,6 +12,7 @@ import platform
 import sys
 import threading
 import tkinter as tk
+import webbrowser
 from pathlib import Path
 from tkinter import ttk
 
@@ -20,6 +21,14 @@ from .launcher import launch
 from .settings import load as load_config
 
 APP_SLUG = "ndrchst-client"
+
+# Where players get help when Minecraft crashes — the modpack's own crash screen
+# is out of support, so we just send them here.
+_TELEGRAM_URL = "https://t.me/ndrchst"
+
+# Hard cap on the log pane so a long session can't grow the Text widget without
+# bound (the memory creep that eventually took the window down).
+_MAX_LOG_LINES = 2000
 
 # End x Solana palette — matches the web surfaces (void purple + ender green).
 _BG = "#0a0613"
@@ -302,6 +311,11 @@ def run() -> None:
     def append_log(line: str) -> None:
         log_box.config(state=tk.NORMAL)
         log_box.insert(tk.END, line + "\n")
+        # Trim from the top so the widget can't grow without bound over a long
+        # session; keep the most recent _MAX_LOG_LINES.
+        excess = int(log_box.index("end-1c").split(".")[0]) - _MAX_LOG_LINES
+        if excess > 0:
+            log_box.delete("1.0", f"{excess + 1}.0")
         log_box.see(tk.END)
         log_box.config(state=tk.DISABLED)
         for i, (kw, label) in enumerate(_PHASES):
@@ -413,7 +427,7 @@ def run() -> None:
                 except wallet_auth.WalletAuthError as exc:
                     emit_from_worker(f"(couldn't refresh join token: {exc}; using cached)")
             try:
-                launch(
+                code = launch(
                     app_slug=APP_SLUG,
                     mc_version=cfg.mc_version,
                     username=username,
@@ -428,8 +442,17 @@ def run() -> None:
                     client_ram_mb=ram_gb * 1024,
                     gpu=gpu,
                 )
-                emit_from_worker("Minecraft exited.")
-                root.after(0, lambda: phase_var.set("Minecraft exited"))
+                if code != 0:
+                    # MC crashed. Skip the modpack's out-of-support crash screen
+                    # and send the player straight to the Telegram help channel.
+                    emit_from_worker("Minecraft crashed — opening the ndrchst Telegram for help.")
+                    with contextlib.suppress(Exception):
+                        webbrowser.open(_TELEGRAM_URL)
+                    root.after(0, lambda: (phase_var.set("Minecraft crashed — opened Telegram"),
+                                           toggle_log(True)))
+                else:
+                    emit_from_worker("Minecraft exited.")
+                    root.after(0, lambda: phase_var.set("Minecraft exited"))
             except Exception as exc:
                 emit_from_worker(f"Error: {exc!r}")
                 root.after(0, lambda: (phase_var.set("Error — see details below"),

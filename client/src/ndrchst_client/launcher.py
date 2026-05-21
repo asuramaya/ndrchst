@@ -201,7 +201,13 @@ def launch(
     # modded heap + G1GC.
     ram_mb = max(client_ram_mb, 2048)
     xms_mb = min(2048, ram_mb)
-    # env.jvm_args[0] is the java executable path; flags go AFTER it.
+    # The full Aikar G1GC flag set. The earlier partial set (no DisableExplicitGC,
+    # no early-IHOP, no heap-waste/mixed-GC tuning) let a 400+ mod heap fill faster
+    # than G1 reclaimed it during dimension/world load+unload — the OOM crash the
+    # player hit. These make G1 start mixed collections early and keep them short,
+    # and stop mods' System.gc() calls from stalling. Region/new-size scale up past
+    # 12 GB per Aikar's guidance.
+    big = ram_mb >= 12000
     flags = [
         f"-Xmx{ram_mb}m",
         f"-Xms{xms_mb}m",
@@ -209,14 +215,26 @@ def launch(
         "-XX:+ParallelRefProcEnabled",
         "-XX:MaxGCPauseMillis=200",
         "-XX:+UnlockExperimentalVMOptions",
-        "-XX:G1NewSizePercent=30",
-        "-XX:G1MaxNewSizePercent=40",
-        "-XX:G1HeapRegionSize=8M",
-        "-XX:G1ReservePercent=20",
+        "-XX:+DisableExplicitGC",
+        f"-XX:G1NewSizePercent={40 if big else 30}",
+        f"-XX:G1MaxNewSizePercent={50 if big else 40}",
+        f"-XX:G1HeapRegionSize={16 if big else 8}M",
+        f"-XX:G1ReservePercent={15 if big else 20}",
+        "-XX:G1HeapWastePercent=5",
+        "-XX:G1MixedGCCountTarget=4",
+        f"-XX:InitiatingHeapOccupancyPercent={20 if big else 15}",
+        "-XX:G1MixedGCLiveThresholdPercent=90",
+        "-XX:G1RSetUpdatingPauseTimePercent=5",
+        "-XX:SurvivorRatio=32",
+        "-XX:+PerfDisableSharedMem",
+        "-XX:MaxTenuringThreshold=1",
+        "-Dusing.aikars.flags=https://mcflags.emc.gs",
+        "-Daikars.new.flags=true",
     ]
+    # env.jvm_args[0] is the java executable path; flags go AFTER it.
     insert_at = 1 if env.jvm_args else 0
     env.jvm_args[insert_at:insert_at] = flags
-    on_log(f"Client heap: -Xmx{ram_mb}m (G1GC)")
+    on_log(f"Client heap: -Xmx{ram_mb}m (G1GC, Aikar flags)")
 
     # GPU selection. Both GPUs work for connecting + playing — the iGPU
     # is just slower rendering a heavy modpack world. On hybrid laptops
@@ -250,9 +268,19 @@ def launch(
         + (f" (via {tunnel_hostname})" if tunnel_hostname else "")
         + "…",
     )
+    # Crash detection: MC writes crash-reports/crash-*.txt on a hard crash. We
+    # diff the directory across the run so the caller can react (open the help
+    # channel) instead of leaning on the modpack's out-of-support crash screen.
+    crash_dir = data_dir / "crash-reports"
+    before = {p.name for p in crash_dir.glob("*.txt")} if crash_dir.is_dir() else set()
     try:
         env.run()
-        return 0
     finally:
         if tunnel is not None:
             tunnel.stop()
+    after = {p.name for p in crash_dir.glob("*.txt")} if crash_dir.is_dir() else set()
+    if after - before:
+        newest = max(after - before)
+        on_log(f"Minecraft crashed — see crash-reports/{newest}")
+        return 1
+    return 0

@@ -478,9 +478,19 @@ class Lifecycle:
                 server_id, modpack_zip.exists())
 
         edge = self._edge_url.rstrip("/")
+
+        # CrashAssistant is the modpack's out-of-support crash SCREEN: it dead-ends
+        # a crash in an unsupported window and nags about mod-count mismatches.
+        # Drop it from the canonical index so every client prunes it on next sync;
+        # the client opens the Telegram help channel on a crash instead.
+        def _excluded(name: str) -> bool:
+            return name.lower().startswith("crashassistant")
+
         entries = []
         for p in sorted(mods_dir.iterdir()):
             if not p.is_file() or not p.name.endswith(".jar"):
+                continue
+            if _excluded(p.name):
                 continue
             h = hashlib.sha1()
             with p.open("rb") as f:
@@ -509,13 +519,13 @@ class Lifecycle:
         # has that the server's mods/ doesn't — client mods (rendering, UI,
         # minimaps, JEI addons) AND non-jar assets (shaderpacks, resourcepacks)
         # routed to their own client dirs. The dedicated server can't run the
-        # client mods, but the client needs them to render the world AND to
-        # match the modpack's expected mod count (Crash Assistant nags
-        # otherwise). They come straight from CF's CDN; we have no local copy
-        # to hash, so sha1 is null and the client trusts the CDN bytes.
+        # client mods, but the client needs them to render the world. They come
+        # straight from CF's CDN; we have no local copy to hash, so sha1 is null
+        # and the client trusts the CDN bytes. CrashAssistant is excluded here
+        # too (see above).
         server_filenames = {e["filename"] for e in entries}
         for filename, info in resolved.items():
-            if filename in server_filenames:
+            if filename in server_filenames or _excluded(filename):
                 continue
             entries.append({
                 "filename": filename,

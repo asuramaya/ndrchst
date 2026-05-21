@@ -3,9 +3,16 @@ config so one cross-platform build serves any server.
 
 Resolution order (first hit wins):
   1. $NDRCHST_CLIENT_CONFIG — path to a JSON config file.
-  2. A `client-config.json` sitting next to the executable / cwd.
-  3. The baked-in `config.py` defaults (back-compat with the old
-     per-server source bundles).
+  2. A `client-config.json` sitting next to the executable.
+  3. The remembered pin at ~/.ndrchst-client/client-config.json — written by a
+     ndrchst:// deep link (deeplink.fetch_server_config). This is what lets the
+     standalone exe AUTODETECT the server it was linked to on later launches,
+     instead of forgetting it and forcing another browser round-trip to Play.
+     Only consulted for a GENERIC build (no baked server_id); a per-server .zip
+     is already pinned and ignores it so a stray pin can't hijack it.
+  4. A `client-config.json` in the cwd.
+  5. The baked-in `config.py` defaults (back-compat with the old per-server
+     source bundles).
 
 A config JSON mirrors the config.py field names (lowercase ok too):
   {
@@ -67,12 +74,20 @@ def _from_baked() -> dict:
     }
 
 
-def _candidate_paths() -> list[Path]:
+# Where a deep link remembers the pinned server (mirrors deeplink._DATA_DIR).
+_REMEMBERED_CONFIG = Path.home() / ".ndrchst-client" / "client-config.json"
+
+
+def _candidate_paths(*, generic: bool) -> list[Path]:
     paths: list[Path] = []
     env = os.environ.get("NDRCHST_CLIENT_CONFIG")
     if env:
         paths.append(Path(env))
     paths.append(_exe_dir() / "client-config.json")
+    # A generic build remembers the server a deep link pinned it to so it
+    # autodetects on relaunch — no browser round-trip needed once authenticated.
+    if generic:
+        paths.append(_REMEMBERED_CONFIG)
     paths.append(Path.cwd() / "client-config.json")
     return paths
 
@@ -80,7 +95,8 @@ def _candidate_paths() -> list[Path]:
 def load() -> ClientConfig:
     """Merge baked defaults with the first JSON config found (if any)."""
     merged = _from_baked()
-    for p in _candidate_paths():
+    generic = not merged.get("server_id")
+    for p in _candidate_paths(generic=generic):
         if p.is_file():
             try:
                 data = json.loads(p.read_text())
