@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import ipaddress
+import json
 import logging
 import os
 import sqlite3
@@ -38,7 +39,7 @@ from .domain import (
 )
 from .domain.models import Family
 from .logging_setup import configure as configure_logging
-from .runtime import mojang, solana
+from .runtime import mojang, op_config, solana, token_price
 from .runtime.client import bundle_path as client_bundle_path
 from .runtime.holdings_refresh import refresh_all_holdings
 from .store import daily_claims as dc_store
@@ -53,7 +54,12 @@ from .web.public_pages import (
     render_ranks,
 )
 
-_SNAPSHOT_INTERVAL = int(os.environ.get("NDRCHST_SNAPSHOT_INTERVAL", "3600"))
+# Refresh cadences live in op_config (env/default fallback) so an operator can
+# retune them live: `snapshot_interval_s` (chain holdings → daily snapshot, the
+# metered RPC) and `price_interval_s` (the DexScreener ticker — NOT the RPC; a
+# cached decoration, ~4.3k calls/mo at 600s to a free, keyless API). A loop
+# re-reads its knob each pass; 0 pauses it.
+_PAUSED_RECHECK_S = 60
 # End-themed game assets (gitignored; staged to the box + R2). Served at /game
 # for origin/local; the edge Worker serves the same keys from R2.
 _GAME_DIR = Path(__file__).resolve().parent / "web" / "static" / "game"
@@ -95,8 +101,18 @@ class _DailyResetReq(BaseModel):
     wallet: str
 
 
+class _TierReq(BaseModel):
+    wallet: str  # the verified wallet the mod stashed at login
+
+
+class _OpConfigSetReq(BaseModel):
+    key: str
+    value: int
+
+
 class _SkinImportReq(BaseModel):
     texture: str  # 64-hex texture hash from a /me/skin/search result
+    model: str = "classic"  # 'slim' or 'classic' — for the in-game arm model
 
 
 def _cookie_secure() -> bool:
@@ -176,6 +192,28 @@ def _skin_path(pubkey: str) -> Path:
     # filename can never escape the skins dir.
     safe = "".join(c for c in pubkey if c.isalnum())
     return _skins_dir() / f"{safe}.png"
+
+
+def _skin_meta_path(pubkey: str) -> Path:
+    """Sidecar holding the Mojang texture hash + model for an IMPORTED skin, so
+    the mod can apply it in-game (offline-mode servers can't fetch skins). Only
+    imported skins have this — uploaded custom PNGs have no Mojang-hosted hash."""
+    return _skin_path(pubkey).with_suffix(".json")
+
+
+def _skin_meta(pubkey: str) -> dict | None:
+    """{texture, model} for the wallet's in-game skin, or None. Read by the join
+    gate so the mod can set the player's texture property at connect time."""
+    p = _skin_meta_path(pubkey)
+    try:
+        m = json.loads(p.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    tex = m.get("texture")
+    if not isinstance(tex, str) or not mojang.is_texture_hash(tex):
+        return None
+    model = "slim" if m.get("model") == "slim" else "classic"
+    return {"texture": tex, "model": model}
 
 
 def _png_dims(data: bytes) -> tuple[int, int] | None:
@@ -262,17 +300,38 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
 
     async def _snapshot_loop() -> None:
         """Re-read every linked wallet's chain holdings on a fixed cadence and
-        persist the hourly snapshot daily rewards read from. Runs on its own
-        connection (the blocking RPC + writes go through to_thread so the event
-        loop isn't stalled)."""
+        persist the hourly snapshot daily rewards read from. Sleeps BEFORE the
+        first run (a launch flash-borrow must not mint a snapshot). Cadence is
+        re-read each pass (op-tunable); 0 pauses. Runs on its own connection (the
+        blocking RPC + writes go through to_thread so the event loop isn't stalled)."""
         while True:
-            await asyncio.sleep(_SNAPSHOT_INTERVAL)
+            interval = op_config.get("snapshot_interval_s")
+            if interval <= 0:
+                await asyncio.sleep(_PAUSED_RECHECK_S)
+                continue
+            await asyncio.sleep(interval)
             try:
                 n = await asyncio.to_thread(_run_snapshot, _db_path)
                 _log.info("holdings snapshot: refreshed %d wallet(s)", n)
             except Exception:
                 # A flaky RPC or transient DB error must not kill the loop.
                 _log.exception("holdings snapshot failed")
+
+    async def _price_loop() -> None:
+        """Refresh the cached $NDRCHST ticker on a slow cadence. Best-effort and
+        off the metered RPC (DexScreener); refresh FIRST so the ticker shows soon
+        after boot, then sleep. The cadence is re-read each pass (op-tunable); 0
+        pauses. The blocking HTTP goes through to_thread."""
+        while True:
+            interval = op_config.get("price_interval_s")
+            if interval <= 0:
+                await asyncio.sleep(_PAUSED_RECHECK_S)
+                continue
+            try:
+                await asyncio.to_thread(token_price.refresh)
+            except Exception:
+                _log.exception("price refresh failed")  # never kills the loop
+            await asyncio.sleep(interval)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -286,14 +345,20 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
                 "secret; all wallet logins will drop on restart. Set it in the "
                 "service EnvironmentFile to persist sessions.")
         conn_holder["conn"] = connect(_db_path)
-        task = asyncio.create_task(_snapshot_loop()) if _SNAPSHOT_INTERVAL > 0 else None
+        # Start a loop unless its knob is 0 at boot; a paused loop also self-idles
+        # if it's later set to 0 live, so this gate is just to avoid a dead task.
+        task = (asyncio.create_task(_snapshot_loop())
+                if op_config.get("snapshot_interval_s") > 0 else None)
+        price_task = (asyncio.create_task(_price_loop())
+                      if op_config.get("price_interval_s") > 0 else None)
         try:
             yield
         finally:
-            if task is not None:
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
+            for t in (task, price_task):
+                if t is not None:
+                    t.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await t
             conn_holder["conn"].close()
             conn_holder.clear()
 
@@ -419,6 +484,9 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
                 "wallet": claims["wallet"],
                 "mc_name": claims["mc_name"],
                 "tier": tier_key,
+                # Imported skin (Mojang hash + model) so the mod can apply it
+                # in-game; null for uploaded/no skin (offline mode can't fetch).
+                "skin": _skin_meta(claims["wallet"]),
             },
             headers=_NO_STORE,
         )
@@ -452,7 +520,8 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         tier_key = link.snapshot_tier if (link and link.snapshot_tier) else "holder"
         conn = connect(_db_path)
         try:
-            ok, seconds_left = dc_store.try_claim(conn, req.wallet)
+            ok, seconds_left = dc_store.try_claim(
+                conn, req.wallet, cooldown_s=op_config.get("daily_cooldown_s"))
         finally:
             conn.close()
         return JSONResponse(
@@ -472,6 +541,83 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         finally:
             conn.close()
         return JSONResponse({"ok": True}, headers=_NO_STORE)
+
+    @app.post("/tier")
+    def tier_lookup(request: Request, req: _TierReq = Body(...)) -> JSONResponse:
+        """Called by the mod's `/tier`: the player's standing for an in-game
+        readout — current tier + holdings % + the next threshold to climb. Reads
+        the latest known holdings from the DB (kept fresh by sign-in + the hourly
+        snapshot); does NO live RPC, so it can't burn the metered cap. Mod-only
+        (bridge): floored to the base tier so a linked wallet always has a tier."""
+        if not _is_internal_caller(request):
+            raise HTTPException(status_code=403, detail="not an internal caller")
+        link = wl_store.get(_conn(), req.wallet)
+        pct = link.holdings_pct if (link and link.holdings_pct is not None) else 0.0
+        cur = wallet.tier_for(pct) or wallet.DEFAULT_TIERS[0]
+        nxt = wallet.next_tier(pct)
+        price = token_price.get()  # cached decoration; None until first refresh
+        return JSONResponse(
+            {
+                "ok": True,
+                "wallet": req.wallet,
+                "pct": round(pct, 6),
+                "tier": cur.key,
+                "tier_name": cur.name,
+                "next": (
+                    {"key": nxt.key, "name": nxt.name, "min_pct": nxt.min_pct}
+                    if nxt
+                    else None
+                ),
+                "price": (
+                    {"usd": price["price_usd"], "market_cap": price["market_cap"]}
+                    if price
+                    else None
+                ),
+            },
+            headers=_NO_STORE,
+        )
+
+    @app.post("/ops/config")
+    def ops_config(request: Request) -> JSONResponse:
+        """List the operator-tunable runtime knobs + their effective values (for
+        the in-game `/ndrchst config`). Mod-only (bridge); read-only."""
+        if not _is_internal_caller(request):
+            raise HTTPException(status_code=403, detail="not an internal caller")
+        return JSONResponse(
+            {"ok": True, "config": op_config.all_values()}, headers=_NO_STORE)
+
+    @app.post("/ops/config/set")
+    def ops_config_set(request: Request, req: _OpConfigSetReq = Body(...)) -> JSONResponse:
+        """Set a runtime knob live (`/ndrchst config <key> <value>`): the daily
+        cooldown or a refresh cadence. Persists across restart and clamps to the
+        knob's floor. Mod-only (bridge) — and the mod gates the command to ops."""
+        if not _is_internal_caller(request):
+            raise HTTPException(status_code=403, detail="not an internal caller")
+        try:
+            applied = op_config.set(req.key, req.value)
+        except KeyError:
+            raise HTTPException(
+                status_code=400, detail=f"unknown knob: {req.key}") from None
+        return JSONResponse(
+            {"ok": True, "key": req.key, "value": applied,
+             "config": op_config.all_values()},
+            headers=_NO_STORE,
+        )
+
+    @app.get("/price")
+    def price_lookup(request: Request) -> JSONResponse:
+        """The cached $NDRCHST ticker for the in-game tab menu (DexScreener cache,
+        0 RPC). Mod-only (bridge) — public market data, but no need for a new
+        public surface since the website renders it server-side."""
+        if not _is_internal_caller(request):
+            raise HTTPException(status_code=403, detail="not an internal caller")
+        p = token_price.get()
+        return JSONResponse(
+            {"ok": True,
+             "price": ({"usd": p["price_usd"], "market_cap": p["market_cap"]}
+                       if p else None)},
+            headers=_NO_STORE,
+        )
 
     @app.post("/me/handoff")
     def me_handoff(request: Request) -> JSONResponse:
@@ -562,6 +708,9 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         path = _skin_path(pubkey)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(body)
+        # An uploaded PNG isn't Mojang-hosted, so it can't be applied in-game by
+        # hash — drop any stale imported-skin sidecar so the gate won't reuse it.
+        _skin_meta_path(pubkey).unlink(missing_ok=True)
         return JSONResponse({"ok": True, "skin_url": f"/skins/{pubkey}.png"}, headers=_NO_STORE)
 
     @app.delete("/me/skin")
@@ -570,6 +719,7 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         if not pubkey:
             raise HTTPException(status_code=401, detail="not signed in")
         _skin_path(pubkey).unlink(missing_ok=True)
+        _skin_meta_path(pubkey).unlink(missing_ok=True)
         return JSONResponse({"ok": True}, headers=_NO_STORE)
 
     @app.get("/skins/{name}")
@@ -628,6 +778,10 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         path = _skin_path(pubkey)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
+        # Record the Mojang hash + model so the mod can apply it in-game.
+        model = "slim" if req.model == "slim" else "classic"
+        _skin_meta_path(pubkey).write_text(
+            json.dumps({"texture": req.texture, "model": model}))
         return JSONResponse({"ok": True, "skin_url": f"/skins/{pubkey}.png"}, headers=_NO_STORE)
 
     def _play_servers() -> list[dict]:
@@ -688,7 +842,9 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             if link.holdings_pct and link.holdings_pct > 0
         ]
         holders.sort(key=lambda h: h["holdings_pct"], reverse=True)
-        return HTMLResponse(render_ranks(holders, tiers))
+        return HTMLResponse(render_ranks(
+            holders, tiers, ticker=token_price.get(),
+            claim_cooldown_s=op_config.get("daily_cooldown_s")))
 
     @app.get("/servers")
     def list_servers() -> list[dict]:

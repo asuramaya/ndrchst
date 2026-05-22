@@ -384,10 +384,12 @@ def test_ranks_has_bands_and_transparency_table():
     assert "0.1% – 0.5% of supply" in html   # bronze: exact band  # noqa: RUF001
     assert "any holdings · base tier" in html  # holder floor
     # Transparency presentation: per-roll breakdown with amounts + exact odds.
-    assert "<code>/daily</code>" in html and "real loot tables" in html
+    assert "<code>/claim</code>" in html and "real loot tables" in html
     assert "Roll 1" in html and 'class="rpct mono"' in html  # odds column
     # Additive demonstration is shown as a compact chip, not prose copy.
-    assert "+ every lower tier, daily" in html
+    assert "+ every lower tier" in html
+    # The crate leans on Artifacts — surfaced as a chip on every tier.
+    assert "+ a random Artifact" in html
     assert "no holders yet" in html  # per-tier count replaces the leaderboard
 
 
@@ -521,12 +523,12 @@ def test_ranks_shows_random_treasure_pull():
     assert P._tier_treasure("diamond") == ["End City"]
 
 
-def test_ranks_themed_as_daily_crate():
-    """Daily IS the crate now — /ranks frames the additive daily as the crate,
-    with no separate keys/crate mechanic surfaced."""
+def test_ranks_themed_as_crate():
+    """/ranks frames the additive tier reward as the crate (/claim), with no
+    separate keys/crate mechanic surfaced."""
     from ndrchst.web.public_pages import render_ranks
     html = render_ranks([], _tiers())
-    assert "daily crate" in html.lower()
+    assert "crate" in html.lower()
     assert "Crates &amp; keys" not in html       # separate crate section gone
     assert 'data-crate=' not in html             # no key-balance slots
     assert "/crate common|rare|legendary" not in html

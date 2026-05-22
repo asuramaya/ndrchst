@@ -144,6 +144,14 @@ a.feature:hover{color:var(--fg)}
 .eyebrow{display:inline-block;font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;
   color:var(--accent);border:1px solid rgba(20,241,149,.4);border-radius:999px;
   padding:.32rem .75rem;margin-bottom:1.1rem}
+.ticker{display:inline-flex;align-items:center;gap:.4rem;margin:0 0 1.1rem .5rem;
+  font-family:'JetBrains Mono',ui-monospace,monospace;font-size:.8rem;color:var(--fg2);
+  background:var(--bg3);border:1px solid var(--border);border-radius:999px;
+  padding:.3rem .75rem;text-decoration:none;vertical-align:middle}
+a.ticker:hover{border-color:var(--accent);color:var(--fg)}
+.tk-sym{color:var(--accent);font-weight:600}
+.tk-price{color:var(--fg)}
+.tk-sep{color:var(--border)}
 .feature .num{font-family:'JetBrains Mono',ui-monospace,monospace;color:var(--accent);
   font-size:.8rem;letter-spacing:.05em}
 .callout{background:linear-gradient(135deg,rgba(36,26,64,.6),rgba(22,16,41,.6));
@@ -242,12 +250,14 @@ html.signed-in .wchip{display:inline-flex}
 /* Ranks ladder detail. */
 .tier-card .thr{white-space:nowrap}
 .drop-note{margin-top:.5rem;color:var(--muted);font-size:.74rem;letter-spacing:.01em}
-/* Profile / skin. The face is the 8x8 region at (8,8) of a 64px skin, shown at
-   72px (scale 9 → 576px sheet, -72px,-72px origin). */
+/* Profile / skin. The face is the 8x8 region at (8,8) of a 64-wide skin, shown
+   at 72px (scale 9 → 576px wide, -72,-72 origin). Height is `auto` so legacy
+   64x32 skins keep the SAME scale (no vertical stretch) — else the face crop
+   slips to the top-of-head band. */
 .profile-skin{display:flex;align-items:center;gap:1rem;margin-top:1.1rem;flex-wrap:wrap}
 .skin-face{width:72px;height:72px;flex:none;border:1px solid var(--border);border-radius:10px;
   background-color:rgba(10,6,19,.6);background-repeat:no-repeat;
-  background-size:576px 576px;background-position:-72px -72px;image-rendering:pixelated;
+  background-size:576px auto;background-position:-72px -72px;image-rendering:pixelated;
   position:relative}
 .skin-face:not(.has)::after{content:"?";position:absolute;inset:0;display:flex;
   align-items:center;justify-content:center;color:var(--muted);font-size:1.6rem;font-weight:700}
@@ -266,7 +276,7 @@ html.signed-in .wchip{display:inline-flex}
   border:1px solid var(--border);border-radius:10px;background:rgba(22,16,41,.6)}
 .skin-pick .face{width:56px;height:56px;image-rendering:pixelated;border-radius:6px;
   background-color:rgba(10,6,19,.6);background-repeat:no-repeat;
-  background-size:448px 448px;background-position:-56px -56px}
+  background-size:448px auto;background-position:-56px -56px}
 .skin-pick .nm{font-size:.76rem;color:var(--fg2);max-width:6rem;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis}
 .skin-pick .btn{padding:.3rem .8rem;font-size:.8rem}
@@ -313,7 +323,7 @@ html.signed-in .wchip{display:inline-flex}
 .wprofile{position:relative}
 .wchip{cursor:pointer;gap:.45rem;padding-left:.4rem}
 .wchip-face{width:20px;height:20px;flex:none;border-radius:5px;image-rendering:pixelated;
-  background-color:var(--bg3);background-repeat:no-repeat;background-size:160px 160px;
+  background-color:var(--bg3);background-repeat:no-repeat;background-size:160px auto;
   background-position:-20px -20px;border:1px solid var(--border)}
 .profile-pop{position:absolute;top:calc(100% + .55rem);right:0;width:312px;max-width:88vw;z-index:40;
   background:linear-gradient(135deg,rgba(36,26,64,.98),rgba(14,10,26,.98));
@@ -419,7 +429,7 @@ def _icon_for(base: str) -> str | None:
 
 def _loot_pools(path: Path) -> list[list[dict]]:
     """Parse one tier's loot table into ROLLS: a list of pools, each a list of
-    {icon, name, min, max, weight, pct}. /daily rolls once per pool, picking one
+    {icon, name, min, max, weight, pct}. /claim rolls once per pool, picking one
     entry by weight — so pct = this entry's share of its pool's total weight.
     This is the real source the transparency table renders; nothing hardcoded."""
     try:
@@ -487,7 +497,7 @@ _TREASURE_NAMES = {
 
 
 def _tier_treasure(key: str) -> list[str]:
-    """Human names of the vanilla treasure tables a tier's daily crate pulls a
+    """Human names of the vanilla treasure tables a tier's crate pulls a
     random bonus from (the built-in random-loot 'system'). From the loot table's
     own minecraft: refs — additive tiers chain lower tiers' treasure too."""
     try:
@@ -502,6 +512,19 @@ def _tier_treasure(key: str) -> list[str]:
                 out.append(_TREASURE_NAMES.get(
                     v, v.rsplit("/", 1)[-1].replace("_", " ").title()))
     return out
+
+
+def _tier_has_artifact(key: str) -> bool:
+    """True if this tier's crate rolls a random Artifact (the artifacts:artifact
+    table — a wearable trinket). Read from the real loot table, single source."""
+    try:
+        data = json.loads((_loot_dir() / f"{key}.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return any(
+        e.get("value") == "artifacts:artifact"
+        for pool in data.get("pools", []) for e in pool.get("entries", [])
+    )
 
 
 @lru_cache(maxsize=1)
@@ -681,7 +704,7 @@ _WALLET_JS = """
             use.disabled=true; use.textContent='…';
             try{
               var im=await fetch(API+'/me/skin/import',{method:'POST',credentials:'include',
-                headers:{'content-type':'application/json'},body:JSON.stringify({texture:s.texture})});
+                headers:{'content-type':'application/json'},body:JSON.stringify({texture:s.texture,model:s.model})});
               if(im.ok){ if(st)st.textContent='Skin applied from '+s.name+'.'; sres.innerHTML=''; bustSkin(); }
               else { use.disabled=false; use.textContent='Use'; if(st)st.textContent='Could not apply that skin.'; }
             }catch(e){ use.disabled=false; use.textContent='Use'; }
@@ -864,12 +887,12 @@ def render_landing() -> str:
   <h1>Your wallet is your login.<br>Your holdings are your rank.</h1>
   <p class="lede">A modded Minecraft server gated by $NDRCHST. Sign in with your Solana
      wallet, grab a client that's already linked, and press Play — your tier, ranks
-     and daily rewards follow you straight in-game.</p>
+     and crate rewards follow you straight in-game.</p>
   <div>
     <a class="cta" href="{play}">Play now →</a>
     <a class="cta ghost" href="/ranks">Explore the ranks</a>
   </div>
-  <div class="deco-row"><span class="chips">{chips}</span> daily drops scale with your tier</div>
+  <div class="deco-row"><span class="chips">{chips}</span> crate drops scale with your tier</div>
 </section>
 
 <section class="section" style="border-top:none;padding-top:1rem">
@@ -883,7 +906,7 @@ def render_landing() -> str:
          and keeps it in sync — you never touch a config file.</p></div>
     <div class="feature"><div class="num">STEP 03</div><h3>Press Play</h3>
       <p>A cryptographic gate verifies your wallet at connect time and drops you in at
-         your rank, with your perks and <code>/daily</code> ready.</p></div>
+         your rank, with your perks and <code>/claim</code> ready.</p></div>
   </div>
 </section>
 
@@ -1199,13 +1222,64 @@ def _rolls_html(rolls: list[list[dict]]) -> str:
     return f'<div class="rolls">{blocks}</div>'
 
 
-def render_ranks(holders: list[dict], tiers: list[dict]) -> str:
+def _fmt_price(v: float | None) -> str:
+    if not v:
+        return "—"
+    if v >= 1:
+        return f"${v:,.2f}"
+    if v >= 0.01:
+        return f"${v:.4f}"
+    s = f"{v:.8f}".rstrip("0")
+    return f"${s}" if s not in ("0.", "") else "<$0.00000001"
+
+
+def _fmt_usd(v: float | None) -> str | None:
+    if not v:
+        return None
+    v = float(v)
+    if v >= 1e9:
+        return f"${v / 1e9:.1f}B"
+    if v >= 1e6:
+        return f"${v / 1e6:.1f}M"
+    if v >= 1e3:
+        return f"${v / 1e3:.0f}K"
+    return f"${v:.0f}"
+
+
+def _ticker_html(ticker: dict | None) -> str:
+    """A small $NDRCHST price/market-cap chip — pure decoration. Hidden entirely
+    when nothing is cached (best-effort, off the metered RPC)."""
+    if not ticker or ticker.get("price_usd") in (None, 0):
+        return ""
+    price = html.escape(_fmt_price(ticker.get("price_usd")))
+    mc = _fmt_usd(ticker.get("market_cap"))
+    mc_html = f' <span class="tk-sep">·</span> MC {html.escape(mc)}' if mc else ""
+    inner = f'<span class="tk-sym">$NDRCHST</span> <span class="tk-price">{price}</span>{mc_html}'
+    url = ticker.get("url")
+    if url:
+        href = html.escape(url, quote=True)
+        return (f'<a class="ticker" href="{href}" target="_blank" rel="noopener" '
+                f'title="Live chart (DexScreener)">{inner}</a>')
+    return f'<span class="ticker">{inner}</span>'
+
+
+def _fmt_cooldown(s: int) -> str:
+    if s % 3600 == 0:
+        return f"{s // 3600}h"
+    if s % 60 == 0:
+        return f"{s // 60}m"
+    return f"{s}s"
+
+
+def render_ranks(holders: list[dict], tiers: list[dict], *, ticker: dict | None = None,
+                 claim_cooldown_s: int | None = None) -> str:
     """tiers: list of {key, name, min_pct} ascending. holders: list of
-    {display, mc_name, tier, tier_name, holdings_pct}.
+    {display, mc_name, tier, tier_name, holdings_pct}. ticker: optional cached
+    {price_usd, market_cap, …} decoration.
 
     The ladder IS the page: each tier is one self-explanatory nested card —
     name + supply band, how many holders sit in it, and a demonstration of its
-    real daily crate (item icons + exact odds). The signed-in wallet's own card
+    real crate (item icons + exact odds). The signed-in wallet's own card
     is highlighted client-side. No separate leaderboard: a tier's name already
     says what its holders are, so we show a per-tier count, not a roster."""
     counts: dict[str, int] = {}
@@ -1223,8 +1297,10 @@ def render_ranks(holders: list[dict], tiers: list[dict]) -> str:
         rolls = _tier_loot().get(key, [])
         demo = _rolls_html(rolls) if rolls else ""
         chips = []
+        if _tier_has_artifact(key):
+            chips.append('<span class="tc-chip">+ a random Artifact</span>')
         if has_lower:
-            chips.append('<span class="tc-chip">+ every lower tier, daily</span>')
+            chips.append('<span class="tc-chip">+ every lower tier</span>')
         treas = _tier_treasure(key)
         if treas:
             chips.append('<span class="tc-chip">+ treasure: '
@@ -1248,12 +1324,15 @@ def render_ranks(holders: list[dict], tiers: list[dict]) -> str:
     ladder = "".join(reversed(cards))
 
     play = html.escape(_play_url(), quote=True)
+    claim_every = f" every {_fmt_cooldown(claim_cooldown_s)}" if claim_cooldown_s else ""
     body = f"""
 <section class="hero" style="padding:3rem 0 1rem">
   <span class="eyebrow">$NDRCHST · ranks</span>
+  {_ticker_html(ticker)}
   <h1 style="font-size:2.1rem">Holdings are rank</h1>
   <p class="lede">Your tier is your share of $NDRCHST supply, read from the chain. Each tier opens a
-     bigger daily crate — and it's additive, so you also get every tier below.</p>
+     bigger crate — random Artifacts, treasure and resources — and it's additive, so you also get
+     every tier below.</p>
   <p class="when-in" style="color:var(--accent);font-size:.95rem;margin:.2rem 0 0">
     You're <span class="mono rc-tier" style="color:var(--fg)"></span> ·
     <span class="mono rc-pct"></span> — your card is highlighted below.</p>
@@ -1265,8 +1344,9 @@ def render_ranks(holders: list[dict], tiers: list[dict]) -> str:
 
 <section class="section" style="border-top:none;padding-top:.2rem">
   <p class="callout" style="margin:0 0 1.3rem;font-size:.9rem">
-    Run <code>/daily</code> in-game to open your tier's crate — additive (you also get every lower
-    tier) plus a vanilla treasure pull. The icons and odds below are the real loot tables.</p>
+    Run <code>/claim</code> in-game{claim_every} to open your tier's crate — a random Artifact,
+    additive lower-tier loot, and a vanilla treasure pull. The icons and odds below are the
+    real loot tables.</p>
   <div class="features ladder detailed">{ladder}</div>
 </section>
 

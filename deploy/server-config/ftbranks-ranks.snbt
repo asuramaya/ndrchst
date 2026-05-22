@@ -4,9 +4,12 @@
 // The 6 holdings tiers have NO condition, so they're assigned manually — the
 // ndrchst-auth mod runs `ftbranks add <player> <tier>` on verified login.
 // `member` (always_active) is the baseline; `admin` is op. Power ascends so a
-// tier's prefix + perks win over `member`. Perk nodes are FTB Essentials
-// (home/back max + cooldowns, documented overridable in ftbessentials config);
-// FTB Chunks claim limits + command gating are a later pass.
+// tier's prefix + perks win over `member`. Perk nodes: FTB Essentials
+// (home/back max + cooldowns) + FTB Chunks land. max_claimed (protection) keeps
+// the 500 default and rises mildly per tier. max_force_loaded (the real cost —
+// 24/7 offline automation) follows the economy: ~10 chunks per 1% of supply at
+// the tier's entry threshold → holder 0, bronze 1, silver 5, gold 10,
+// diamond 25, whale 50. Command gating is a later pass.
 {
 	member: {
 		name: "Member"
@@ -16,56 +19,68 @@
 	holder: {
 		name: "Holder"
 		power: 10
-		ftbranks.name_format: "&7[Holder] &r{name}"
+		ftbranks.name_format: "&7◆ Holder &r{name}"
 		ftbessentials.home.max: 1
 		ftbessentials.home.cooldown: 30
 		ftbessentials.back.max: 3
 		ftbessentials.back.cooldown: 60
+		ftbchunks.max_claimed: 500
+		ftbchunks.max_force_loaded: 0
 	}
 	bronze: {
 		name: "Bronze"
 		power: 20
-		ftbranks.name_format: "&e[Bronze] &r{name}"
+		ftbranks.name_format: "&6◆ Bronze &r{name}"
 		ftbessentials.home.max: 2
 		ftbessentials.home.cooldown: 20
 		ftbessentials.back.max: 5
 		ftbessentials.back.cooldown: 45
+		ftbchunks.max_claimed: 750
+		ftbchunks.max_force_loaded: 1
 	}
 	silver: {
 		name: "Silver"
 		power: 30
-		ftbranks.name_format: "&f[Silver] &r{name}"
+		ftbranks.name_format: "&f◆ Silver &r{name}"
 		ftbessentials.home.max: 3
 		ftbessentials.home.cooldown: 15
 		ftbessentials.back.max: 8
 		ftbessentials.back.cooldown: 30
+		ftbchunks.max_claimed: 1100
+		ftbchunks.max_force_loaded: 5
 	}
 	gold: {
 		name: "Gold"
 		power: 40
-		ftbranks.name_format: "&6[Gold] &r{name}"
+		ftbranks.name_format: "&e★ Gold &r{name}"
 		ftbessentials.home.max: 5
 		ftbessentials.home.cooldown: 10
 		ftbessentials.back.max: 12
 		ftbessentials.back.cooldown: 20
+		ftbchunks.max_claimed: 1600
+		ftbchunks.max_force_loaded: 10
 	}
 	diamond: {
 		name: "Diamond"
 		power: 50
-		ftbranks.name_format: "&b[Diamond] &r{name}"
+		ftbranks.name_format: "&b❖ Diamond &r{name}"
 		ftbessentials.home.max: 10
 		ftbessentials.home.cooldown: 5
 		ftbessentials.back.max: 20
 		ftbessentials.back.cooldown: 10
+		ftbchunks.max_claimed: 2400
+		ftbchunks.max_force_loaded: 25
 	}
 	whale: {
 		name: "Whale"
 		power: 60
-		ftbranks.name_format: "&6&l[Whale] &r{name}"
+		ftbranks.name_format: "&d&l✦ Whale &r{name}"
 		ftbessentials.home.max: 25
 		ftbessentials.home.cooldown: 0
 		ftbessentials.back.max: 50
 		ftbessentials.back.cooldown: 5
+		ftbchunks.max_claimed: 4000
+		ftbchunks.max_force_loaded: 50
 	}
 	admin: {
 		name: "Admin"

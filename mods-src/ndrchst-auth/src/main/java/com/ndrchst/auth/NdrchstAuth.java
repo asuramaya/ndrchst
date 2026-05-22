@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerConfigurationPacketListenerImpl;
 import net.neoforged.bus.api.IEventBus;
@@ -16,6 +17,7 @@ import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.network.event.RegisterConfigurationTasksEvent;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
@@ -52,14 +54,29 @@ public final class NdrchstAuth {
         modBus.addListener(NdrchstAuth::onRegisterConfigTasks);
         NeoForge.EVENT_BUS.addListener(NdrchstAuth::onPlayerLogin);
         NeoForge.EVENT_BUS.addListener(NdrchstAuth::onRegisterCommands);
+        NeoForge.EVENT_BUS.addListener(NdrchstAuth::onServerTick);
         LOG.info("[ndrchst-auth] loaded — wallet-gated join + ranks + /daily");
+    }
+
+    /** Slow tab-menu ticker refresh: prime it ~10s after boot, then every ~5 min.
+     *  The actual fetch + push happens off the tick (TabList.refresh). */
+    private static long tickCount = 0;
+    private static void onServerTick(ServerTickEvent.Post event) {
+        long c = ++tickCount;
+        if (c == 200L || c % 6000L == 0L) {
+            TabList.refresh(event.getServer());
+        }
     }
 
     private static void onRegisterCommands(RegisterCommandsEvent event) {
         DailyCommand.register(event.getDispatcher());
+        TierCommand.register(event.getDispatcher());
+        OpsCommand.register(event.getDispatcher());
     }
 
-    /** Once the verified player is in, set their FTB Ranks rank from the tier. */
+    /** Once the verified player is in, set their FTB Ranks rank from the tier
+     *  and surface that tier: a personal welcome + (for paying tiers) a
+     *  server-wide arrival flare. */
     private static void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
         JoinVerifier.Result res = VERIFIED.remove(event.getEntity().getUUID());
         if (res == null || res.tier() == null) {
@@ -68,16 +85,31 @@ public final class NdrchstAuth {
         if (!(event.getEntity() instanceof ServerPlayer player)) {
             return;
         }
-        // Stash the verified wallet so /daily can ask the box (authoritative
-        // cooldown + snapshot tier); the box, not the mod, holds claim state.
+        // Stash the verified wallet so /daily + /tier can ask the box (it holds
+        // the authoritative cooldown + holdings); the mod keeps no claim state.
         DailyCommand.WALLET.put(player.getUUID(), res.wallet());
+        String tier = res.tier();
         try {
-            Ranks.apply(player, res.tier());
-            LOG.info("[ndrchst-auth] rank {} -> {}", res.tier(),
+            Ranks.apply(player, tier);
+            LOG.info("[ndrchst-auth] rank {} -> {}", tier,
                     player.getGameProfile().getName());
         } catch (Throwable t) {
             // FTB Ranks absent or command error — the gate still held; skip rank.
             LOG.warn("[ndrchst-auth] rank assign skipped: {}", t.toString());
+        }
+        try {
+            MinecraftServer server = player.getServer();
+            // Gamertag: tier color + glyph on the nameplate, tab list, and chat.
+            TierTeams.assign(server, player, tier);
+            TabList.apply(player);  // ambient $NDRCHST ticker in the tab menu
+            player.sendSystemMessage(Flares.welcome(tier));
+            // Bronze+ (a real holder, not the open base tier) gets announced.
+            if (server != null && Tiers.rank(tier) >= 1) {
+                server.getPlayerList().broadcastSystemMessage(
+                        Flares.arrival(player.getGameProfile().getName(), tier), false);
+            }
+        } catch (Throwable t) {
+            LOG.warn("[ndrchst-auth] tier surface skipped: {}", t.toString());
         }
     }
 
@@ -113,8 +145,9 @@ public final class NdrchstAuth {
     private static void onServerResponse(JoinResponsePayload payload, IPayloadContext ctx) {
         String username = null;
         UUID uuid = null;
+        GameProfile profile = null;
         if (ctx.listener() instanceof ServerConfigurationPacketListenerImpl scpl) {
-            GameProfile profile = scpl.getOwner();
+            profile = scpl.getOwner();
             if (profile != null) {
                 username = profile.getName();
                 uuid = profile.getId();
@@ -136,8 +169,18 @@ public final class NdrchstAuth {
         if (uuid != null) {
             VERIFIED.put(uuid, res);
         }
-        LOG.info("[ndrchst-auth] verified {} ({}) tier={}",
-                username, res.wallet(), res.tier());
+        // Apply the wallet's imported skin to the GameProfile NOW, during config —
+        // the spawned ServerPlayer inherits it, so it renders for everyone with no
+        // post-login refresh. Offline-mode servers can't fetch skins otherwise.
+        if (profile != null && res.skinTexture() != null) {
+            try {
+                Skins.apply(profile, res.skinTexture(), res.skinModel());
+            } catch (Throwable t) {
+                LOG.warn("[ndrchst-auth] skin apply skipped: {}", t.toString());
+            }
+        }
+        LOG.info("[ndrchst-auth] verified {} ({}) tier={} skin={}",
+                username, res.wallet(), res.tier(), res.skinTexture() != null);
         ctx.finishCurrentTask(JoinConfigTask.TYPE);
     }
 }

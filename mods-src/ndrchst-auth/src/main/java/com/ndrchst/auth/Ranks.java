@@ -19,9 +19,9 @@ import net.minecraft.server.level.ServerPlayer;
 final class Ranks {
     private Ranks() {}
 
-    /** The holdings tiers, ascending — also the FTB Ranks rank ids. */
-    static final List<String> TIERS =
-            List.of("holder", "bronze", "silver", "gold", "diamond", "whale");
+    /** The holdings tiers, ascending — also the FTB Ranks rank ids. Shared with
+     *  the badge/flare layer so the ladder is defined once. */
+    static final List<String> TIERS = Tiers.ORDER;
 
     static void apply(ServerPlayer player, String tier) {
         MinecraftServer server = player.getServer();

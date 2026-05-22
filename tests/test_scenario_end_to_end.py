@@ -83,8 +83,8 @@ def test_worlds_full_page_includes_tab_nav(seeded):
     client, sid, _ = seeded
     r = client.get(f"/servers/{sid}/worlds")
     assert r.status_code == 200
-    # All 7 tabs present in nav (now includes worlds)
-    for label in ("Console", "Properties", "Players", "World", "Files", "Marketplace", "Backups"):
+    # All 7 tabs present in nav (now includes worlds; Marketplace folded into Assets)
+    for label in ("Console", "Properties", "Players", "World", "Files", "Assets", "Backups"):
         assert label in r.text
 
 

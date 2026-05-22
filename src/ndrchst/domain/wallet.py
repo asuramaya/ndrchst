@@ -177,3 +177,14 @@ def tier_for(pct: float, tiers: tuple[Tier, ...] = DEFAULT_TIERS) -> Tier | None
         if pct >= t.min_pct:
             chosen = t
     return chosen
+
+
+def next_tier(pct: float, tiers: tuple[Tier, ...] = DEFAULT_TIERS) -> Tier | None:
+    """The next tier above the holder's current standing — the lowest tier whose
+    threshold `pct` has NOT yet met. None at the top of the ladder. Lets the
+    in-game `/tier` show "Gold at 1.00% — hold 0.58% more" from a single source
+    of truth (the ladder lives here, not duplicated in the mod)."""
+    for t in tiers:
+        if t.min_pct > pct:
+            return t
+    return None

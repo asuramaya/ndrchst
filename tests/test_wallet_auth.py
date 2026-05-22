@@ -214,6 +214,26 @@ def test_join_verify_rejects_bad_token(client):
     assert client.post("/join/verify", json={"token": "garbage"}).status_code == 401
 
 
+def test_join_verify_carries_imported_skin(client, monkeypatch, tmp_path):
+    """The gate hands the mod the wallet's imported skin (Mojang hash + model)
+    so it can apply it in-game; null when none is set."""
+    import json as _json
+
+    from ndrchst.domain import device_token as dt
+    monkeypatch.setenv("NDRCHST_SKINS_DIR", str(tmp_path))
+    wallet = "EUr2QnpmavMw51JiFYeTRnUywY7mPAtouzyY2P21pump"
+    token = client.post("/device/exchange",
+                        json={"device_token": dt.issue(wallet)}).json()["join_token"]
+    # No skin sidecar yet → null.
+    assert client.post("/join/verify", json={"token": token}).json()["skin"] is None
+    # Simulate an import: write the sidecar the gate reads.
+    safe = "".join(c for c in wallet if c.isalnum())
+    (tmp_path / f"{safe}.json").write_text(
+        _json.dumps({"texture": "a" * 64, "model": "slim"}))
+    skin = client.post("/join/verify", json={"token": token}).json()["skin"]
+    assert skin == {"texture": "a" * 64, "model": "slim"}
+
+
 def test_device_exchange_returns_fresh_join_token(client):
     """The client trades its device token for a fresh join token at Play."""
     from ndrchst.domain import device_token as dt
@@ -232,6 +252,95 @@ def test_device_exchange_returns_fresh_join_token(client):
 
 def test_device_exchange_rejects_bad_token(client):
     assert client.post("/device/exchange", json={"device_token": "nope"}).status_code == 401
+
+
+def test_tier_lookup_seeded_wallet(client):
+    """`/tier` (the in-game readout source) returns the player's standing from
+    the DB: current tier, holdings %, and the next threshold to climb."""
+    from ndrchst.domain import device_token as dt
+    wallet = "EUr2QnpmavMw51JiFYeTRnUywY7mPAtouzyY2P21pump"
+    # Seed the link (device_exchange upserts holdings_pct=0.7 -> silver).
+    client.post("/device/exchange", json={"device_token": dt.issue(wallet)})
+    r = client.post("/tier", json={"wallet": wallet})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["tier"] == "silver"
+    assert body["tier_name"] == "Silver"
+    assert body["pct"] == 0.7
+    # Next rung up the ladder is Gold at 1.0% — the mod renders the delta.
+    assert body["next"] == {"key": "gold", "name": "Gold", "min_pct": 1.0}
+
+
+def test_tier_lookup_unlinked_wallet_is_holder(client):
+    """A wallet with no link (never signed in) floors to the base tier — the
+    mod always has something to show, never a rankless/None state."""
+    r = client.post("/tier", json={"wallet": "1nEvErLinKeDwaLLeT1111111111111111111111111"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["tier"] == "holder"
+    assert body["pct"] == 0.0
+    assert body["next"] == {"key": "bronze", "name": "Bronze", "min_pct": 0.1}
+
+
+def test_tier_lookup_includes_cached_price(client, monkeypatch):
+    """The in-game readout carries the cached $NDRCHST ticker when present, and
+    null when the box has nothing cached (decoration hides)."""
+    from ndrchst.domain import device_token as dt
+    from ndrchst.runtime import token_price
+    wallet = "EUr2QnpmavMw51JiFYeTRnUywY7mPAtouzyY2P21pump"
+    client.post("/device/exchange", json={"device_token": dt.issue(wallet)})
+    # conftest stubs the fetch → nothing cached → price is null.
+    assert client.post("/tier", json={"wallet": wallet}).json()["price"] is None
+    # A cached value flows through (no RPC — pure decoration read).
+    monkeypatch.setattr(token_price, "get", lambda: {
+        "price_usd": 0.0012, "market_cap": 1_200_000, "symbol": "NDRCHST",
+        "url": "u", "age_s": 5})
+    body = client.post("/tier", json={"wallet": wallet}).json()
+    assert body["price"] == {"usd": 0.0012, "market_cap": 1_200_000}
+
+
+def test_ops_config_get_and_set(client):
+    """The op surface lists the runtime knobs and sets one live (persisted),
+    with the new value reflected back."""
+    cfg = client.post("/ops/config").json()
+    assert cfg["ok"] is True
+    assert "daily_cooldown_s" in cfg["config"]
+
+    r = client.post("/ops/config/set", json={"key": "daily_cooldown_s", "value": 3600})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["value"] == 3600
+    assert body["config"]["daily_cooldown_s"] == 3600
+    # negative clamps to the floor (0)
+    assert client.post("/ops/config/set",
+                       json={"key": "price_interval_s", "value": -1}).json()["value"] == 0
+
+
+def test_ops_config_set_rejects_unknown_knob(client):
+    assert client.post("/ops/config/set",
+                       json={"key": "bogus", "value": 1}).status_code == 400
+
+
+def test_price_endpoint_for_tab_menu(client, monkeypatch):
+    """GET /price feeds the in-game tab ticker: null when nothing cached, the
+    cached value otherwise (no RPC)."""
+    from ndrchst.runtime import token_price
+    assert client.get("/price").json() == {"ok": True, "price": None}
+    monkeypatch.setattr(token_price, "get", lambda: {
+        "price_usd": 0.0012, "market_cap": 1_200_000, "symbol": "NDRCHST",
+        "url": "u", "age_s": 3})
+    assert client.get("/price").json() == {
+        "ok": True, "price": {"usd": 0.0012, "market_cap": 1_200_000}}
+
+
+def test_next_tier_ladder():
+    """next_tier returns the lowest rung above the current holdings; None at top."""
+    assert W.next_tier(0.0).key == "bronze"
+    assert W.next_tier(0.42).key == "silver"   # 0.42% is bronze, next is silver
+    assert W.next_tier(0.7).key == "gold"      # 0.7% is silver, next is gold
+    assert W.next_tier(1.0).key == "diamond"   # exactly gold -> diamond is next
+    assert W.next_tier(5.0) is None            # whale is the cap
 
 
 def test_me_client_requires_session(client):

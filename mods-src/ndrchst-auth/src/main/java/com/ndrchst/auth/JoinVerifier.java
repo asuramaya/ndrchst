@@ -27,7 +27,8 @@ public final class JoinVerifier {
             .connectTimeout(Duration.ofSeconds(5))
             .build();
 
-    public record Result(boolean ok, String wallet, String mcName, String tier) {}
+    public record Result(boolean ok, String wallet, String mcName, String tier,
+                         String skinTexture, String skinModel) {}
 
     private JoinVerifier() {}
 
@@ -58,11 +59,24 @@ public final class JoinVerifier {
             }
             String tier = (o.has("tier") && !o.get("tier").isJsonNull())
                     ? o.get("tier").getAsString() : null;
+            String skinTex = null;
+            String skinModel = "classic";
+            if (o.has("skin") && o.get("skin").isJsonObject()) {
+                JsonObject sk = o.getAsJsonObject("skin");
+                if (sk.has("texture") && !sk.get("texture").isJsonNull()) {
+                    skinTex = sk.get("texture").getAsString();
+                }
+                if (sk.has("model") && !sk.get("model").isJsonNull()) {
+                    skinModel = sk.get("model").getAsString();
+                }
+            }
             return new Result(
                     true,
                     o.get("wallet").getAsString(),
                     o.get("mc_name").getAsString(),
-                    tier);
+                    tier,
+                    skinTex,
+                    skinModel);
         } catch (Exception e) {
             return null;
         }
