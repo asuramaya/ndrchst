@@ -1,0 +1,30 @@
+plugins {
+    id 'java'
+}
+
+group = 'com.ndrchst.paper'
+version = '0.1.0'
+base { archivesName = 'ndrchst-paper' }
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://repo.papermc.io/repository/maven-public/' }
+}
+
+dependencies {
+    // Provided by the server at runtime; compile-only here.
+    compileOnly 'io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT'
+    compileOnly 'com.google.code.gson:gson:2.11.0'  // Paper bundles Gson
+}
+
+// Shared platform-neutral core (../core): the SAME sources compiled into the
+// NeoForge mod — one source of truth for the box client + tier model. Compiled
+// straight into the plugin jar (core is Minecraft-free). In the build container
+// `${projectDir}/../core` resolves to /core (see ndrchst-paper build note).
+sourceSets.main.java.srcDir "${projectDir}/../core/src/main/java"
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}

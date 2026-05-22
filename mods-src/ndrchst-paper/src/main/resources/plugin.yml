@@ -1,0 +1,16 @@
+name: ndrchst
+version: 0.1.0
+main: com.ndrchst.paper.NdrchstPaperPlugin
+api-version: '1.21'
+authors: [ndrchst]
+description: Wallet-gated tiers for the cross-play (Paper) path — shares the box + core with the modded server.
+commands:
+  link:
+    description: Link your wallet to unlock your $NDRCHST tier.
+    usage: /link
+  tier:
+    description: Show your $NDRCHST standing.
+    usage: /tier
+  price:
+    description: Show the $NDRCHST ticker.
+    usage: /price
