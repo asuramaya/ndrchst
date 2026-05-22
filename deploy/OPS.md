@@ -176,7 +176,8 @@ curl -X POST localhost:8080/servers/$S/wallets/sync          # push whitelist (+
 - `play.ndrchst.com` the whole public surface (landing `/` + app `/play`) ·
   `ndrchst.com`/`www.ndrchst.com` 301 → play · `mc.ndrchst.com`
   MC game TCP (via tunnel, origin IP never exposed).
-- $NDRCHST mint `EUr2QnpmavMw51JiFYeTRnUywY7mPAtouzyY2P21pump`.
+- $NDRCHST mint `FCNoxy62oN9HhjqM49StjRAzXqehquNRwNpRVL6qpump`
+  (pump.fun: https://pump.fun/coin/FCNoxy62oN9HhjqM49StjRAzXqehquNRwNpRVL6qpump).
 - ATM10 modpack: CF project `925200`, pinned file `8091114`
   (`All the Mods 10-7.0.zip`).
 

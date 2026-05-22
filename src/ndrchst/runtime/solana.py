@@ -18,7 +18,7 @@ import time
 import httpx
 
 DEFAULT_RPC = "https://api.mainnet-beta.solana.com"
-DEFAULT_MINT = "EUr2QnpmavMw51JiFYeTRnUywY7mPAtouzyY2P21pump"
+DEFAULT_MINT = "FCNoxy62oN9HhjqM49StjRAzXqehquNRwNpRVL6qpump"
 
 _TIMEOUT = httpx.Timeout(connect=10.0, read=15.0, write=10.0, pool=10.0)
 
