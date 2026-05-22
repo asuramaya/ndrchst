@@ -456,9 +456,10 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
         }, headers=_NO_STORE)
 
     @app.get("/link", response_class=HTMLResponse)
-    def link_page(code: str = "") -> HTMLResponse:
-        """Web page where the user connects a wallet to approve a client."""
-        return HTMLResponse(render_link(code=code))
+    def link_page(code: str = "", m: str = "") -> HTMLResponse:
+        """Web page where the user connects a wallet to approve a code. `m=g`
+        switches it to the in-game /link (Paper) flow → /gate/link/approve."""
+        return HTMLResponse(render_link(code=code, mode=m))
 
     @app.post("/client/auth/approve")
     def client_auth_approve(req: _ClientApproveReq = Body(...)) -> JSONResponse:

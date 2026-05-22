@@ -919,13 +919,16 @@ def render_landing() -> str:
     return _shell("ndrchst — your wallet is your rank in Minecraft", body, active="home")
 
 
-def render_link(*, code: str = "") -> str:
-    """Pairing page: the client opens this with ?code=…; the user connects a
-    wallet and signs to bind it to the client session. Shares the same shell +
-    wallet plumbing (window.ndrchstWallet) as every other page — the only
-    difference is it posts the signature to /client/auth/approve with the code."""
+def render_link(*, code: str = "", mode: str = "") -> str:
+    """Pairing page: opened with ?code=…; the user connects a wallet and signs to
+    bind it. Two modes share this page and the wallet plumbing
+    (window.ndrchstWallet): the default desktop-client pairing posts to
+    /client/auth/approve; mode "g" (the in-game /link on the Paper / cross-play
+    path, opened as ?code=…&m=g) posts to /gate/link/approve to bind the player's
+    real Minecraft identity to the wallet."""
     safe_code = html.escape(code, quote=True)
     code_js = ('"' + safe_code + '"') if code else '""'
+    mode_js = '"' + html.escape(mode, quote=True) + '"'
     body = f"""
 <section class="hero" style="padding:3rem 0 1rem;text-align:center">
   <span class="eyebrow">Link your client</span>
@@ -946,6 +949,8 @@ def render_link(*, code: str = "") -> str:
 (function(){{
   var API = window.NDRCHST_API || '';
   var code = {code_js};
+  var mode = {mode_js};
+  var approveUrl = (mode==='g') ? '/gate/link/approve' : '/client/auth/approve';
   function status(msg, ok){{
     var el=document.getElementById('link-status');
     el.style.display='block'; el.textContent=msg;
@@ -955,13 +960,14 @@ def render_link(*, code: str = "") -> str:
     if(!code){{ status('Missing pairing code — reopen the link from your client.',false); return; }}
     try{{
       var s=await window.ndrchstWallet.requestSignature();
-      var v=await fetch(API+'/client/auth/approve',{{method:'POST',
+      var v=await fetch(API+approveUrl,{{method:'POST',
         headers:{{'content-type':'application/json'}},
         body:JSON.stringify({{code:code,pubkey:s.pubkey,message:s.message,signature:s.signature}})}});
       if(v.ok){{ var d=await v.json();
         document.getElementById('link-connect').style.display='none';
-        status('Linked as '+d.display+(d.tier_name?(' · '+d.tier_name):'')+'. Return to your client.',true);
-      }} else {{ status('Could not link this device. The code may have expired.',false); }}
+        if(mode==='g') status('Linked! You are tier '+(d.tier||'holder')+'. Return to Minecraft.',true);
+        else status('Linked as '+d.display+(d.tier_name?(' · '+d.tier_name):'')+'. Return to your client.',true);
+      }} else {{ status('Could not link. The code may have expired.',false); }}
     }}catch(e){{
       if(e&&e.code==='no-wallet') status('No Solana wallet found. Install Phantom to continue.',false);
       else status('Wallet sign-in was cancelled.',false);
