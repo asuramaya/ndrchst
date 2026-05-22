@@ -9,7 +9,11 @@
 // the 500 default and rises mildly per tier. max_force_loaded (the real cost —
 // 24/7 offline automation) follows the economy: ~10 chunks per 1% of supply at
 // the tier's entry threshold → holder 0, bronze 1, silver 5, gold 10,
-// diamond 25, whale 50. Command gating is a later pass.
+// diamond 25, whale 50. chunk_load_offline is REQUIRED for force-loaded chunks
+// to keep ticking once the owner logs off (server force_load_mode = "default"
+// gates offline loading on this node) — granted to every tier that can
+// force-load (bronze+). Without it, max_force_loaded is dead weight. Command
+// gating is a later pass.
 {
 	member: {
 		name: "Member"
@@ -37,6 +41,7 @@
 		ftbessentials.back.cooldown: 45
 		ftbchunks.max_claimed: 750
 		ftbchunks.max_force_loaded: 1
+		ftbchunks.chunk_load_offline: true
 	}
 	silver: {
 		name: "Silver"
@@ -48,6 +53,7 @@
 		ftbessentials.back.cooldown: 30
 		ftbchunks.max_claimed: 1100
 		ftbchunks.max_force_loaded: 5
+		ftbchunks.chunk_load_offline: true
 	}
 	gold: {
 		name: "Gold"
@@ -59,6 +65,7 @@
 		ftbessentials.back.cooldown: 20
 		ftbchunks.max_claimed: 1600
 		ftbchunks.max_force_loaded: 10
+		ftbchunks.chunk_load_offline: true
 	}
 	diamond: {
 		name: "Diamond"
@@ -70,6 +77,7 @@
 		ftbessentials.back.cooldown: 10
 		ftbchunks.max_claimed: 2400
 		ftbchunks.max_force_loaded: 25
+		ftbchunks.chunk_load_offline: true
 	}
 	whale: {
 		name: "Whale"
@@ -81,6 +89,7 @@
 		ftbessentials.back.cooldown: 5
 		ftbchunks.max_claimed: 4000
 		ftbchunks.max_force_loaded: 50
+		ftbchunks.chunk_load_offline: true
 	}
 	admin: {
 		name: "Admin"

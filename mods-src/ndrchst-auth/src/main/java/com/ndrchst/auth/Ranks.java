@@ -39,5 +39,13 @@ final class Ranks {
             }
         }
         commands.performPrefixedCommand(src, "ftbranks add " + name + " " + tier);
+        // FTB Chunks caches a player's claim/force-load caps at LOGIN — a beat
+        // before this handler runs — so a freshly-changed tier wouldn't apply
+        // until the *next* relog. Poking the per-player "extra force-load" bonus
+        // (set to 0: a no-op, since we grant land through ranks, never bonuses)
+        // calls FTB Chunks' updateLimits(), which recomputes BOTH caps from the
+        // rank we just applied. Suppressed; no-ops if FTB Chunks is absent.
+        commands.performPrefixedCommand(src,
+                "ftbchunks admin extra_force_load_chunks " + name + " set 0");
     }
 }
