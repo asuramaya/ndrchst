@@ -1,4 +1,5 @@
 package com.ndrchst.auth;
+import com.ndrchst.core.TierClient;
 
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.ChatFormatting;

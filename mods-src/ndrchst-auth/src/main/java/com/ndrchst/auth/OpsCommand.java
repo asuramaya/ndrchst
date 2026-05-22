@@ -1,4 +1,6 @@
 package com.ndrchst.auth;
+import com.ndrchst.core.OpsClient;
+import com.ndrchst.core.DailyClient;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;

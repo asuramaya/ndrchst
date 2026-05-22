@@ -1,4 +1,5 @@
 package com.ndrchst.auth;
+import com.ndrchst.core.JoinVerifier;
 
 import com.mojang.authlib.GameProfile;
 import com.mojang.logging.LogUtils;

@@ -1,4 +1,5 @@
 package com.ndrchst.auth;
+import com.ndrchst.core.TierClient;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.context.CommandContext;

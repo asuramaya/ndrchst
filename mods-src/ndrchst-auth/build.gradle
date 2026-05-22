@@ -9,6 +9,12 @@ base { archivesName = mod_id }
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
+// Shared platform-neutral core (../core), compiled straight into this mod jar.
+// The SAME sources are compiled into the Paper plugin — one source of truth for
+// the box client + tier model, no jar-in-jar, no published artifact. Core is
+// Minecraft-free so it compiles fine inside the NeoForge build's classpath.
+sourceSets.main.java.srcDir "${projectDir}/../core/src/main/java"
+
 repositories {
     mavenCentral()
 }

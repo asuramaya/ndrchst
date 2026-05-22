@@ -1,4 +1,4 @@
-package com.ndrchst.auth;
+package com.ndrchst.core;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
