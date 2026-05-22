@@ -345,3 +345,70 @@ def test_next_tier_ladder():
 
 def test_me_client_requires_session(client):
     assert client.get("/me/client/anyserver").status_code == 401
+
+
+# --- Paper / cross-play identity gate (online-mode path) ---------------------
+
+def _gate_approve(client, pubkey, seed, code):
+    """Approve an in-game /link code on the web side (wallet-signed)."""
+    msg = client.post("/auth/challenge", json={"pubkey": pubkey}).json()["message"]
+    sig = base64.b64encode(_sign(seed, msg.encode())).decode()
+    return client.post("/gate/link/approve",
+                       json={"code": code, "pubkey": pubkey, "message": msg, "signature": sig})
+
+
+def test_gate_identity_unlinked_returns_ok_false(client):
+    """An authenticated UUID with no wallet link is a clean deny, not an error —
+    the plugin uses it to kick with a 'link your wallet' prompt."""
+    r = client.post("/gate/identity", json={"uuid": "00000000-0000-0000-0000-000000000001"})
+    assert r.status_code == 200
+    assert r.json() == {"ok": False, "reason": "unlinked"}
+
+
+def test_identity_link_flow_then_gate(client):
+    """In-game /link → wallet approve → gate now resolves the identity to a tier."""
+    pubkey, seed = _keypair(b"\x20" * 32)
+    uuid = "11111111-2222-3333-4444-555555555555"
+
+    start = client.post("/gate/link/start", json={
+        "uuid": uuid, "xuid": "2535400000000001", "username": "Steve"}).json()
+    assert start["user_code"] and start["pair_id"]
+    assert start["verify_url"].endswith(f"code={start['user_code']}&m=g")
+
+    # still pending before approval
+    pending = client.get("/gate/link/poll", params={"pair_id": start["pair_id"]})
+    assert pending.json()["status"] == "pending"
+
+    approved = _gate_approve(client, pubkey, seed, start["user_code"])
+    assert approved.status_code == 200
+    assert approved.json()["ok"] is True
+    assert approved.json()["tier"] == "silver"  # holdings stub 0.7 -> silver
+
+    # plugin poll now sees the binding (so it can re-gate live, no rejoin)
+    polled = client.get("/gate/link/poll", params={"pair_id": start["pair_id"]}).json()
+    assert polled["status"] == "approved" and polled["wallet"] == pubkey
+    assert polled["tier"] == "silver"
+
+    # the gate now resolves the UUID to the wallet + tier
+    g = client.post("/gate/identity", json={"uuid": uuid}).json()
+    assert g["ok"] is True and g["wallet"] == pubkey and g["tier"] == "silver"
+
+    # and by Bedrock xuid alone (synthetic uuid may differ across sessions)
+    gx = client.post("/gate/identity", json={
+        "uuid": "ffffffff-0000-0000-0000-000000000000", "xuid": "2535400000000001"}).json()
+    assert gx["ok"] is True and gx["wallet"] == pubkey
+
+
+def test_gate_link_approve_rejects_unknown_code(client):
+    pubkey, seed = _keypair(b"\x21" * 32)
+    r = _gate_approve(client, pubkey, seed, "ZZZZ-ZZZZ")
+    assert r.status_code == 404
+
+
+def test_gate_endpoints_are_bridge_gated(client, monkeypatch):
+    """The plugin-facing gate endpoints reject non-internal callers (like
+    /join/verify). TestClient counts as internal; force a public source IP."""
+    monkeypatch.setattr("ndrchst.public._is_internal_caller", lambda *_a, **_k: False)
+    assert client.post("/gate/identity", json={"uuid": "x"}).status_code == 403
+    assert client.post("/gate/link/start", json={"uuid": "x"}).status_code == 403
+    assert client.get("/gate/link/poll", params={"pair_id": "x"}).status_code == 403

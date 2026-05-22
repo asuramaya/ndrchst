@@ -56,3 +56,18 @@ CREATE TABLE IF NOT EXISTS daily_claims (
     wallet      TEXT PRIMARY KEY,
     claimed_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Real Minecraft identity -> wallet, for the ONLINE-MODE (Paper/cross-play)
+-- path. The modded path derives an offline name from the wallet and gates on a
+-- signed join token, so it never needs this; here the player keeps their real
+-- Mojang UUID (or Bedrock xuid via Floodgate) and links it to a wallet once.
+-- Tier still lives in wallet_links — the gate composes identity -> wallet -> tier.
+CREATE TABLE IF NOT EXISTS identity_links (
+    mc_uuid    TEXT PRIMARY KEY,
+    xuid       TEXT,
+    username   TEXT,
+    wallet     TEXT NOT NULL,
+    linked_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_identity_links_xuid ON identity_links(xuid);
+CREATE INDEX IF NOT EXISTS idx_identity_links_wallet ON identity_links(wallet);

@@ -34,6 +34,7 @@ from .domain import (
     client_handoff,
     client_pairing,
     device_token,
+    identity_pairing,
     join_token,
     wallet,
 )
@@ -43,6 +44,7 @@ from .runtime import mojang, op_config, solana, token_price
 from .runtime.client import bundle_path as client_bundle_path
 from .runtime.holdings_refresh import refresh_all_holdings
 from .store import daily_claims as dc_store
+from .store import identity_links as id_store
 from .store import servers as srv_store
 from .store import wallet_links as wl_store
 from .store.db import DEFAULT_DB_PATH, connect
@@ -83,6 +85,26 @@ class _ClientApproveReq(_VerifyReq):
 
 class _JoinVerifyReq(BaseModel):
     token: str  # the join token the ndrchst-auth mod received from the client
+
+
+class _GateIdentityReq(BaseModel):
+    # The Paper plugin's pre-login gate sends the player's real, authenticated
+    # identity (online-mode UUID; Bedrock players also carry an xuid).
+    uuid: str
+    xuid: str | None = None
+    username: str | None = None
+
+
+class _GateLinkStartReq(BaseModel):
+    # In-game /link on the Paper path: the plugin hands us the authenticated
+    # identity to bind, and we mint a code the player approves with their wallet.
+    uuid: str
+    xuid: str | None = None
+    username: str | None = None
+
+
+class _GateLinkApproveReq(_VerifyReq):
+    code: str  # the /link code shown in-game, approved here with a wallet sig
 
 
 class _DeviceExchangeReq(BaseModel):
@@ -490,6 +512,80 @@ def create_public_app(*, db_path: Path | None = None) -> FastAPI:
             },
             headers=_NO_STORE,
         )
+
+    @app.post("/gate/identity")
+    def gate_identity(request: Request, req: _GateIdentityReq = Body(...)) -> JSONResponse:
+        """Paper / cross-play pre-login gate: map a real MC identity to its
+        linked wallet and return the rank. `{ok: false}` (not an error) means
+        unlinked — the plugin kicks with a "link at ndrchst.com" prompt.
+        Bridge-gated like /join/verify; the Paper server's plugin is the only
+        caller. Identity is Mojang-/Floodgate-authenticated upstream (online
+        mode), so the UUID/xuid is trustworthy without a signed token."""
+        if not _is_internal_caller(request):
+            raise HTTPException(status_code=403, detail="not an internal caller")
+        link = id_store.get(_conn(), req.uuid)
+        if link is None and req.xuid:
+            link = id_store.get_by_xuid(_conn(), req.xuid)
+        if link is None:
+            return JSONResponse({"ok": False, "reason": "unlinked"}, headers=_NO_STORE)
+        wl = wl_store.get(_conn(), link.wallet)
+        tier_key = wl.tier if (wl and wl.tier) else "holder"
+        return JSONResponse(
+            {"ok": True, "wallet": link.wallet, "tier": tier_key,
+             "skin": _skin_meta(link.wallet)},
+            headers=_NO_STORE,
+        )
+
+    @app.post("/gate/link/start")
+    def gate_link_start(request: Request, req: _GateLinkStartReq = Body(...)) -> JSONResponse:
+        """In-game /link (Paper): mint a pairing code bound to the player's
+        authenticated identity. Bridge-gated; the plugin shows verify_url to the
+        player and polls pair_id until they approve."""
+        if not _is_internal_caller(request):
+            raise HTTPException(status_code=403, detail="not an internal caller")
+        identity = {"uuid": req.uuid, "xuid": req.xuid, "username": req.username}
+        pair_id, code = identity_pairing.start(identity)
+        return JSONResponse({
+            "pair_id": pair_id,
+            "user_code": code,
+            "verify_url": f"{_site_base()}/link?code={code}&m=g",
+            "interval": 2,
+            "expires_in": 600,
+        }, headers=_NO_STORE)
+
+    @app.post("/gate/link/approve")
+    def gate_link_approve(req: _GateLinkApproveReq = Body(...)) -> JSONResponse:
+        """Web side of the /link flow: the player approves the in-game code by
+        signing with their wallet, which persists the identity → wallet binding.
+        Browser-reached (NOT bridge-gated) but gated by the wallet signature,
+        exactly like /client/auth/approve."""
+        _verify_signed_or_raise(req.pubkey, req.message, req.signature)
+        identity = identity_pairing.approve(req.code, req.pubkey)
+        if identity is None:
+            raise HTTPException(status_code=404, detail="unknown or expired link code")
+        _refresh_holdings_if_stale(req.pubkey, _conn())
+        id_store.upsert(_conn(), identity["uuid"], req.pubkey,
+                        xuid=identity.get("xuid"), username=identity.get("username"))
+        ident = _identity(req.pubkey, conn=_conn())
+        _record_link(ident)
+        return JSONResponse({"ok": True, "tier": ident.get("tier") or "holder"},
+                            headers=_NO_STORE)
+
+    @app.get("/gate/link/poll")
+    def gate_link_poll(request: Request, pair_id: str) -> JSONResponse:
+        """The plugin polls until the player approves, then re-gates them live
+        (no rejoin needed). Bridge-gated."""
+        if not _is_internal_caller(request):
+            raise HTTPException(status_code=403, detail="not an internal caller")
+        p = identity_pairing.poll(pair_id)
+        if p is None:
+            raise HTTPException(status_code=404, detail="unknown or expired link")
+        if not p.pubkey:
+            return JSONResponse({"status": "pending"}, headers=_NO_STORE)
+        wl = wl_store.get(_conn(), p.pubkey)
+        tier_key = wl.tier if (wl and wl.tier) else "holder"
+        return JSONResponse({"status": "approved", "wallet": p.pubkey, "tier": tier_key},
+                            headers=_NO_STORE)
 
     @app.post("/device/exchange")
     def device_exchange(req: _DeviceExchangeReq = Body(...)) -> JSONResponse:
