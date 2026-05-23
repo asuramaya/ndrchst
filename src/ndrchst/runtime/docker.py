@@ -10,7 +10,7 @@ Per-server layout on the host:
       Java:    server.jar, world/, plugins/, mods/, server.properties, ...
       Bedrock: bedrock_server, worlds/, server.properties, valid_known_packs.json
 
-Java image:    eclipse-temurin:21-jre   (covers MC 1.20.5+; 1.17-1.20.4 uses :17-jre)
+Java image:    eclipse-temurin:21-jre   (MC 1.20.5..25.x; 26.1+ uses :25-jre, 1.17-1.20.4 :17-jre)
 Bedrock image: ubuntu:24.04             (BDS is a native ELF; only needs glibc)
 """
 from __future__ import annotations
@@ -28,9 +28,14 @@ from docker.errors import ImageNotFound, NotFound
 
 from ..domain.models import Family, ServerStatus
 
-# Java major-version cutover. 1.20.5+ wants Java 21.
+# Java major-version cutovers. The 2026 year-based releases (26.1+) require
+# Java 25; 1.20.5 .. 25.x want Java 21; older wants Java 17. Note the version
+# scheme jump (1.x → 26.x) still orders correctly under tuple comparison since
+# 26 > 1.
+_JAVA25_MIN_MC = (26, 1, 0)
 _JAVA21_MIN_MC = (1, 20, 5)
 
+JAVA_IMAGE_25 = "eclipse-temurin:25-jre"
 JAVA_IMAGE_21 = "eclipse-temurin:21-jre"
 JAVA_IMAGE_17 = "eclipse-temurin:17-jre"
 BEDROCK_IMAGE = "ubuntu:24.04"
@@ -40,15 +45,20 @@ _LABEL = "io.ndrchst.managed"
 
 
 def java_image_for(mc_version: str) -> str:
-    """Pick the right JRE image for a Minecraft version. Defaults to 21
-    if the version is unparseable (modern is the safer fallback)."""
+    """Pick the right JRE image for a Minecraft version. 26.1+ wants Java 25,
+    1.20.5 .. 25.x wants Java 21, older wants Java 17. Defaults to 21 if the
+    version is unparseable (the common modern case)."""
     try:
         parts = tuple(int(p) for p in mc_version.split(".")[:3])
         # pad to 3 parts
         parts = parts + (0,) * (3 - len(parts))
-        return JAVA_IMAGE_21 if parts >= _JAVA21_MIN_MC else JAVA_IMAGE_17
     except ValueError:
         return JAVA_IMAGE_21
+    if parts >= _JAVA25_MIN_MC:
+        return JAVA_IMAGE_25
+    if parts >= _JAVA21_MIN_MC:
+        return JAVA_IMAGE_21
+    return JAVA_IMAGE_17
 
 
 @dataclass(frozen=True, slots=True)

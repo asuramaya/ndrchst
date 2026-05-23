@@ -34,6 +34,7 @@ from ..runtime.installer import (
     record_install,
     remove_installed,
 )
+from ..runtime.docker import BEDROCK_IMAGE, java_image_for
 from ..runtime.lifecycle import SERVERS_ROOT_DEFAULT, Lifecycle
 from ..runtime.rcon import RCON, RCONError
 from ..store import servers as srv_store
@@ -709,9 +710,8 @@ def _config_ctx(request: Request, server: Server) -> dict:
     current spec so the user can sanity-check what the container actually has."""
     data_dir = _data_dir(request, server.id)
     summary = {
-        "image_hint": "eclipse-temurin:21-jre"
-            if server.family is Family.JAVA and server.version >= "1.20.5"
-            else ("eclipse-temurin:17-jre" if server.family is Family.JAVA else "ubuntu:24.04"),
+        "image_hint": java_image_for(server.version)
+            if server.family is Family.JAVA else BEDROCK_IMAGE,
         "data_dir": str(data_dir),
         "container_id": server.container_id or "(not created)",
         "ports": _summarize_ports(server),

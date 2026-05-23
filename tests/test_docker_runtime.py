@@ -1,7 +1,7 @@
 """Docker runtime tests using a fake docker client.
 
 Stresses:
-  - java_image_for picks Java 17 for <1.20.5, Java 21 for >=1.20.5
+  - java_image_for picks Java 17 for <1.20.5, 21 for 1.20.5..25.x, 25 for 26.1+
   - create_container removes a same-named container first (idempotency)
   - status mapping projects docker states to ServerStatus correctly,
     including exited-with-nonzero → CRASHED
@@ -158,6 +158,10 @@ def test_java_image_cutover():
     assert java_image_for("1.20.4") == "eclipse-temurin:17-jre"
     assert java_image_for("1.20.5") == "eclipse-temurin:21-jre"
     assert java_image_for("1.21.3") == "eclipse-temurin:21-jre"
+    assert java_image_for("1.21.11") == "eclipse-temurin:21-jre"
+    # 2026 year-based scheme (26.1+) requires Java 25
+    assert java_image_for("26.1") == "eclipse-temurin:25-jre"
+    assert java_image_for("26.1.2") == "eclipse-temurin:25-jre"
     # unparseable falls forward to 21
     assert java_image_for("snapshot-junk") == "eclipse-temurin:21-jre"
 
