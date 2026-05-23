@@ -14,10 +14,14 @@ public final class NdrchstPaperPlugin extends JavaPlugin {
     @Override
     public void onEnable() {
         getServer().getPluginManager().registerEvents(new GateListener(this, wallets), this);
+        getServer().getPluginManager().registerEvents(new ChatListener(wallets), this);
         getCommand("link").setExecutor(new LinkCommand(this, wallets));
         InfoCommands info = new InfoCommands(this, wallets);
         getCommand("tier").setExecutor(info);
         getCommand("price").setExecutor(info);
-        getLogger().info("ndrchst-paper enabled — online-mode wallet gate + $NDRCHST tiers");
+        PerkCommands perks = new PerkCommands();
+        getCommand("fly").setExecutor(perks);
+        getCommand("hat").setExecutor(perks);
+        getLogger().info("ndrchst-paper enabled — online-mode wallet gate + $NDRCHST tiers + perks");
     }
 }

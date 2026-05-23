@@ -1,5 +1,5 @@
 name: ndrchst
-version: 0.1.0
+version: 0.2.0
 main: com.ndrchst.paper.NdrchstPaperPlugin
 api-version: '1.21'
 authors: [ndrchst]
@@ -14,3 +14,16 @@ commands:
   price:
     description: Show the $NDRCHST ticker.
     usage: /price
+  fly:
+    description: Toggle flight (Gold+ perk).
+    usage: /fly
+  hat:
+    description: Wear your held item as a hat (Silver+ perk).
+    usage: /hat
+permissions:
+  ndrchst.perk.fly:
+    description: Creative flight via /fly (granted to gold+).
+    default: false
+  ndrchst.perk.hat:
+    description: Wear held item as a hat via /hat (granted to silver+).
+    default: false

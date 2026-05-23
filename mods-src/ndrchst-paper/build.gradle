@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'com.ndrchst.paper'
-version = '0.1.0'
+version = '0.2.0'
 base { archivesName = 'ndrchst-paper' }
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)

@@ -11,6 +11,8 @@ import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
+import java.util.UUID;
+
 /**
  * Online-mode gate. The pre-login event runs OFF the main thread, so the
  * (blocking) box lookup happens there; the result is stashed and applied on
@@ -29,11 +31,15 @@ final class GateListener implements Listener {
 
     @EventHandler
     public void onPreLogin(AsyncPlayerPreLoginEvent e) {
-        // TODO(bedrock): pull the xuid from Floodgate when present; uuid alone is
-        // enough for Java online-mode and Floodgate's synthetic uuid.
-        GateResult r = IdentityGateClient.gate(e.getUniqueId().toString(), null, e.getName());
+        // Floodgate (Bedrock) ids are `new UUID(0, xuid)` — MSB == 0, LSB == xuid.
+        // Java online-mode uuids never have a zero MSB, so this cleanly detects a
+        // Bedrock player and recovers the xuid with NO Floodgate dependency.
+        UUID id = e.getUniqueId();
+        String xuid = (id.getMostSignificantBits() == 0L)
+                ? Long.toUnsignedString(id.getLeastSignificantBits()) : null;
+        GateResult r = IdentityGateClient.gate(id.toString(), xuid, e.getName());
         if (r != null && r.ok()) {
-            wallets.set(e.getUniqueId(), r.wallet(), r.tier());
+            wallets.set(id, r.wallet(), r.tier());
         }
     }
 
