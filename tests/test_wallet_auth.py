@@ -405,6 +405,17 @@ def test_gate_link_approve_rejects_unknown_code(client):
     assert r.status_code == 404
 
 
+def test_gate_link_code_is_single_use(client):
+    """A code approves exactly once. A replay — e.g. a second wallet that learned
+    the code within the TTL — is rejected, so it can't overwrite the binding."""
+    pubkey, seed = _keypair(b"\x22" * 32)
+    start = client.post("/gate/link/start",
+                        json={"uuid": "99999999-8888-7777-6666-555555555555"}).json()
+    assert _gate_approve(client, pubkey, seed, start["user_code"]).status_code == 200
+    pubkey2, seed2 = _keypair(b"\x23" * 32)
+    assert _gate_approve(client, pubkey2, seed2, start["user_code"]).status_code == 404
+
+
 def test_gate_endpoints_are_bridge_gated(client, monkeypatch):
     """The plugin-facing gate endpoints reject non-internal callers (like
     /join/verify). TestClient counts as internal; force a public source IP."""

@@ -69,7 +69,13 @@ def approve(user_code: str, pubkey: str) -> dict | None:
     p = _by_id.get(pid)
     if p is None or p.exp < now:
         return None
+    if p.pubkey is not None:
+        return None  # already approved — the code is single-use
     p.pubkey = pubkey
+    # Burn the code so it can't be re-approved (a second wallet that learned the
+    # code could otherwise overwrite the binding within the TTL). The pairing
+    # itself stays under pair_id so the plugin's poll still resolves "approved".
+    _code_to_id.pop(p.user_code, None)
     return p.identity
 
 
