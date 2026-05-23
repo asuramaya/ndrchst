@@ -19,6 +19,10 @@
 //   /me                                            (session check)
 //   /client/auth/start  /client/auth/approve  /client/auth/poll  (device pairing)
 //   /link                                          (client pairing approval page)
+//   /gate/*                                        (cross-play identity link: the
+//        browser POSTs /gate/link/approve from the /link?m=g page. The other
+//        /gate/* endpoints are bridge-gated on the box, so they 403 to anyone
+//        arriving via this Worker — only the wallet-sig'd approve is usable.)
 //   /ranks                                         (live holders leaderboard)
 //
 // The box sets the session cookie with path=/ and NO Domain attribute. With a
@@ -40,6 +44,7 @@ function isDynamic(path) {
     path.startsWith("/skins/") ||     // per-wallet profile skins (box-stored)
     path.startsWith("/device/") ||    // /device/exchange
     path.startsWith("/auth/") ||
+    path.startsWith("/gate/") ||      // cross-play link: browser POSTs /gate/link/approve
     path.startsWith("/client/auth/")
   );
 }
