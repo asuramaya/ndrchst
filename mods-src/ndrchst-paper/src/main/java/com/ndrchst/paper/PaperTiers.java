@@ -64,6 +64,6 @@ final class PaperTiers {
                 "lp user " + p.getName() + " parent set ndrchst_" + s.key());
 
         p.sendPlayerListFooter(Component.text(
-                "$NDRCHST  ·  /tier  /price  ·  perks: /fly /hat", NamedTextColor.DARK_GRAY));
+                "$NDRCHST  ·  /ndrchst for status & commands", NamedTextColor.DARK_GRAY));
     }
 }

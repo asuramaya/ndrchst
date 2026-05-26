@@ -33,8 +33,8 @@ final class LinkCommand implements CommandExecutor {
             return true;
         }
         if (wallets.linked(p.getUniqueId())) {
-            p.sendMessage(Component.text("Already linked — you're tier "
-                    + wallets.tier(p.getUniqueId()) + ".", NamedTextColor.GREEN));
+            p.sendMessage(PaperTiers.badge(wallets.tier(p.getUniqueId()))
+                    .append(Component.text("  already linked.", NamedTextColor.GRAY)));
             return true;
         }
         final String uuid = p.getUniqueId().toString();
@@ -63,6 +63,12 @@ final class LinkCommand implements CommandExecutor {
             public void run() {
                 if (++tries > 150 || !p.isOnline()) {  // ~5 min at 2s
                     cancel();
+                    if (p.isOnline()) {
+                        p.sendMessage(Component.text("Link expired — run ", NamedTextColor.GRAY)
+                                .append(Component.text("/link", NamedTextColor.AQUA)
+                                        .clickEvent(ClickEvent.runCommand("/link")))
+                                .append(Component.text(" to try again.", NamedTextColor.GRAY)));
+                    }
                     return;
                 }
                 LinkStatus st = IdentityGateClient.linkPoll(pairId);
@@ -72,8 +78,8 @@ final class LinkCommand implements CommandExecutor {
                     plugin.getServer().getScheduler().runTask(plugin, () -> {
                         if (p.isOnline()) {
                             PaperTiers.apply(plugin, p, st.tier());
-                            p.sendMessage(Component.text("Linked! You're tier "
-                                    + st.tier() + ".", NamedTextColor.GREEN));
+                            p.sendMessage(PaperTiers.badge(st.tier())
+                                    .append(Component.text("  linked — perks applied.", NamedTextColor.GREEN)));
                         }
                     });
                 }

@@ -17,6 +17,7 @@ public final class NdrchstPaperPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new ChatListener(wallets), this);
         getCommand("link").setExecutor(new LinkCommand(this, wallets));
         InfoCommands info = new InfoCommands(this, wallets);
+        getCommand("ndrchst").setExecutor(info);
         getCommand("tier").setExecutor(info);
         getCommand("price").setExecutor(info);
         PerkCommands perks = new PerkCommands();

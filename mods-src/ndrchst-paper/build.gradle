@@ -3,10 +3,10 @@ plugins {
 }
 
 group = 'com.ndrchst.paper'
-version = '0.2.0'
+version = '0.4.0'
 base { archivesName = 'ndrchst-paper' }
 
-java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+java.toolchain.languageVersion = JavaLanguageVersion.of(25)
 
 repositories {
     mavenCentral()
@@ -15,7 +15,7 @@ repositories {
 
 dependencies {
     // Provided by the server at runtime; compile-only here.
-    compileOnly 'io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT'
+    compileOnly 'io.papermc.paper:paper-api:26.1.2.build.65-stable'
     compileOnly 'com.google.code.gson:gson:2.11.0'  // Paper bundles Gson
 }
 
