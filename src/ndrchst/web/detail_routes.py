@@ -26,6 +26,7 @@ from ..domain.models import Family, Server
 from ..mods.base import AssetKind
 from ..mods.modrinth import Modrinth
 from ..runtime import backup as backup_mod
+from ..runtime.docker import BEDROCK_IMAGE, java_image_for
 from ..runtime.installer import (
     install as install_asset,
 )
@@ -34,7 +35,6 @@ from ..runtime.installer import (
     record_install,
     remove_installed,
 )
-from ..runtime.docker import BEDROCK_IMAGE, java_image_for
 from ..runtime.lifecycle import SERVERS_ROOT_DEFAULT, Lifecycle
 from ..runtime.rcon import RCON, RCONError
 from ..store import servers as srv_store

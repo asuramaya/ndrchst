@@ -4,11 +4,11 @@ After=network.target
 
 [Service]
 Type=exec
-WorkingDirectory=/home/ndrchst-01/ndrchst-alpha
+WorkingDirectory=%h/ndrchst-alpha
 # Secrets live outside the repo (chmod 600). At minimum set
 # NDRCHST_SESSION_SECRET here, or wallet logins drop on every restart.
 EnvironmentFile=-%h/.config/ndrchst/public.env
-ExecStart=/home/ndrchst-01/ndrchst-alpha/.venv/bin/python -m uvicorn ndrchst.public:app --host 0.0.0.0 --port 8081
+ExecStart=%h/ndrchst-alpha/.venv/bin/python -m uvicorn ndrchst.public:app --host 0.0.0.0 --port 8081
 Restart=on-failure
 RestartSec=3s
 

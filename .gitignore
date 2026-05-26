@@ -44,6 +44,10 @@ secrets.*
 *.key
 id_rsa*
 
+# Operator's private runbook — real box identity (IPs, hostname, tunnel ID, SSH).
+# The tracked deploy/OPS.md is the generalized public version; this is the live one.
+deploy/OPS.local.md
+
 # Generated game-asset set (ripped textures, not committed — rebuilt by scripts/build_game_assets.py, staged to box + R2)
 src/ndrchst/web/static/game/
 

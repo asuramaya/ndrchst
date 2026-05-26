@@ -291,7 +291,7 @@ def test_download_client_serves_zip(tmp_path: Path, monkeypatch):
     s = _seed_server(db)
     # Build a bundle into a custom root and point the public surface at it
     clients_root = tmp_path / "clients"
-    client.build_bundle(s, public_host="100.89.8.49", clients_root=clients_root)
+    client.build_bundle(s, public_host="100.64.0.1", clients_root=clients_root)
     monkeypatch.setattr(client, "CLIENTS_ROOT_DEFAULT", clients_root)
 
     app = create_public_app(db_path=db)

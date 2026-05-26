@@ -48,11 +48,11 @@ routes = [
 # mapping it to http://127.0.0.1:8081 on the box. Leave blank to make the auth
 # endpoints return 503 (static surface still works).
 #
-# origin.ndrchst.com must route to the box :8081. The tunnel is DASHBOARD-managed
+# origin.<domain> must route to the box :8081. The tunnel is DASHBOARD-managed
 # (local cloudflared config.yml ingress is ignored), so add it as a Public
-# Hostname in Cloudflare Zero Trust → Tunnels → 05da0bcd-… (subdomain `origin`,
+# Hostname in Cloudflare Zero Trust → Tunnels → <your-tunnel> (subdomain `origin`,
 # HTTP, localhost:8081) — that creates the ingress + DNS together. Verify with
-# `curl https://origin.ndrchst.com/healthz` before `wrangler deploy`.
+# `curl https://origin.<domain>/healthz` before `wrangler deploy`.
 ORIGIN_BASE = "https://origin.ndrchst.com"
 
 [[r2_buckets]]

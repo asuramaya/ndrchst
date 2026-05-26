@@ -28,7 +28,7 @@ def _make_server(**overrides) -> Server:
 def test_build_bundle_produces_zip_with_pinned_config(tmp_path: Path):
     s = _make_server()
     b = client.build_bundle(
-        s, public_host="100.89.8.49", clients_root=tmp_path,
+        s, public_host="100.64.0.1", clients_root=tmp_path,
     )
     assert b.zip_path.exists()
     assert b.size > 1000  # non-trivial
@@ -45,7 +45,7 @@ def test_build_bundle_produces_zip_with_pinned_config(tmp_path: Path):
         assert "README.txt" in names
 
         cfg = zf.read("ndrchst_client/config.py").decode()
-        assert "SERVER_HOST = '100.89.8.49'" in cfg
+        assert "SERVER_HOST = '100.64.0.1'" in cfg
         assert "SERVER_PORT = 25574" in cfg
         assert "MC_VERSION = '1.21.11'" in cfg
         assert "SERVER_ID = 'abc123def456'" in cfg

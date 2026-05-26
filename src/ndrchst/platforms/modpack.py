@@ -6,7 +6,7 @@ unzips, and runs whichever modloader installer is bundled inside.
 
 The `version` field on this platform is the URL itself — not a SemVer
 string. We accept HTTPS URLs only (no `file://`, no `http://` for the
-public surface). Total download size is capped to protect ndrchst-01
+public surface). Total download size is capped to protect the host
 from rogue links.
 
 Layout we expect inside the zip, after unzipping into the data dir:

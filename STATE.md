@@ -1,16 +1,68 @@
 # ndrchst-alpha — state of the project
 
-Authoritative current-state doc, written 2026-05-18 after v0 close + worlds work, updated same day for the v0.1 sweep (doctor UDP, auto-snapshot, global assets view, JSON logging).
+Authoritative current-state doc. Originally written 2026-05-18 (v0 close + the
+v0.1 sweep); the lower sections still describe that control-plane foundation
+accurately. This top section reflects where the project actually is now.
 
 ## What this is
 
-A single-machine, OSS Minecraft server control plane. Python 3.12+, FastAPI + htmx + Jinja + SQLite + docker-py. Localhost-first. Docker-only runtime. Java + Bedrock first-class.
+A **token-gated modded-Minecraft stack** on one box: a Solana wallet is the
+player's identity, and on-chain holdings (% of supply) set their rank, perks, and
+daily reward. It grew out of — and still contains — a single-machine OSS server
+control plane (Python 3.12+, FastAPI + htmx + SQLite + docker-py; Java + Bedrock
+first-class). Five planes, one trust root. See
+[docs/architecture.md](docs/architecture.md) for the flows.
+
+| Plane | Where | Role |
+|---|---|---|
+| Control plane | `src/ndrchst/` (`api`, `web`, `runtime`, `:8080`) | run servers in Docker, Modrinth installs, RCON, backups — works standalone, no crypto |
+| Identity & economy | `public.py` (`:8081`) + `domain/wallet.py` + `runtime/solana.py` | SIWS wallet auth, holdings→tier, snapshot-based `/daily`; vendored ed25519, no web3 SDK |
+| Game adapters | `mods-src/` | one shared Java core → `ndrchst-auth` (NeoForge, token gate) + `ndrchst-paper` (Paper cross-play) |
+| Desktop client | `client/` | portablemc launcher; device-flow auth, CDN modpack sync, tunnel, self-update |
+| Edge | `cf/worker/` | Cloudflare Worker: static/artifacts from R2, dynamic proxied to the box |
 
 Predecessors:
 - `~/code/ndrchst/ndrchst/` — Python v2.3.0 (working but bloated, ~38k LOC)
 - `~/code/ndrchst/ndrchst_3/` — abandoned Rust SaaS pivot (do not resurrect)
 
-ndrchst-alpha v0.1 = ~7.0k LOC, 162 tests across 4 markers, 10 commits.
+Scale now: ~11k LOC Python (`src/`) + ~2k Java + a ~3k-LOC client + a 175-line
+Worker; ~440 tests across 4 markers. The v0.1 numbers below (~7k LOC, 162 tests)
+are the historical control-plane-only baseline.
+
+## The token-gated pivot (post-v0.1)
+
+Everything below the "Architecture decisions" heading is the control-plane
+foundation and is still current. On top of it, the project added:
+
+- **Wallet identity & tiers** — `domain/wallet.py` (vendored RFC 8032 ed25519
+  verify + base58, no dependency), the ladder `holder/bronze/silver/gold/diamond/
+  whale` by % of supply, `runtime/solana.py` holdings via raw RPC.
+- **Public surface** — `public.py` on `:8081`: SIWS sign-in, client device-flow
+  pairing, the in-game `/gate/*` link flow, `/daily` (24h cooldown read off an
+  *hourly snapshot*, so it can't be flash-farmed), skins, `/ranks`. Background
+  loops: `holdings_refresh` (hourly), `token_price` (DexScreener, 10m).
+- **Game adapters** — `mods-src/core/` (shared `Tier` + typed box HTTP clients)
+  compiled into `ndrchst-auth` (NeoForge 1.21.1 / ATM10) and `ndrchst-paper`
+  (Paper 26.1.x: online-mode cross-play, `/link`, LuckPerms perks).
+- **Desktop client** — `client/`, a portablemc launcher packaged with
+  PyInstaller. No private key touches it; it carries a device token and exchanges
+  it for a fresh join token per launch.
+- **Edge & distribution** — `cf/worker/` + R2: one canonical host, static from
+  R2, dynamic proxied to the box over a tunnel; client binaries with SHA-256
+  self-update.
+- **Trust boundary** — the mods decide nothing; `/gate /join /daily /ops` answer
+  the Docker bridge only (`_is_internal_caller`). Admin `:8080` is private-network
+  only; public `:8081` is the only internet-facing app.
+
+Operational runbook for the hosted deployment: [deploy/OPS.md](deploy/OPS.md)
+(the public, generalized version).
+
+---
+
+## Control-plane foundation (v0.1 — still current)
+
+The remainder of this doc describes the control plane as it stood at the v0.1
+close. It remains accurate for that layer.
 
 ## Layout
 
@@ -165,11 +217,11 @@ markers = [
 ]
 ```
 
-Counts as of 2026-05-19 (post v0.1 sweep + real-Docker bring-up on ndrchst-01):
+Counts as of 2026-05-19 (post v0.1 sweep + real-Docker bring-up on the box):
 - default: 150 unit tests (+28: doctor UDP, safety snapshot, global assets, JSON logging, image auto-pull, no-Docker determinism)
 - `-m live`: 9 (real uvicorn + curl every route + HTML structure assertions)
 - `-m integration`: 5 (live upstream APIs)
-- `-m docker`: 2 (Paper + Bedrock real container boot — passes on ndrchst-01, gated on dev machine)
+- `-m docker`: 2 (Paper + Bedrock real container boot — passes on the box, gated on dev machine)
 
 Total: **166 tests**, all passing. Lint clean.
 
@@ -196,13 +248,13 @@ CLI: `ndrchst run` (uvicorn on `:8080`, localhost), `ndrchst doctor`.
 
 ## v1 deferred items
 
-Tracked in detail at `~/.claude/projects/-home-asuramaya-code-ndrchst/memory/project_v1_deferred.md`. Summary of what remains after the v0.1 sweep + ndrchst-01 bring-up:
+Tracked in detail at `~/.claude/projects/-home-asuramaya-code-ndrchst/memory/project_v1_deferred.md`. Summary of what remains after the v0.1 sweep + the box bring-up:
 
-1. WebSocket console RCON/stdin live-container dispatch (currently stubbed; ndrchst-01 now has real Docker — could be wired now)
+1. WebSocket console RCON/stdin live-container dispatch (currently stubbed; the box now has real Docker — could be wired now)
 2. Async-uniform routes (currently mixed sync/async, works but fragile)
 3. Bedrock LevelDB world support (significant effort, low v0 value)
 
-Real Docker boot is now ✅ on ndrchst-01 (Ubuntu 26.04, Docker 29.5.1, kernel 7.0). Paper + Bedrock both verified end-to-end via `-m docker`.
+Real Docker boot is now ✅ on the box (Ubuntu 26.04, Docker 29.5.1, kernel 7.0). Paper + Bedrock both verified end-to-end via `-m docker`.
 
 Completed in v0.1 (2026-05-18, this sweep):
 - Doctor probes registered server ports with right protocol (UDP for Bedrock, TCP for Java)
@@ -224,7 +276,7 @@ New platforms shipped this sweep:
   `eclipse-temurin:21-jdk` container. Container cmd at boot is
   `bash run.sh nogui`; memory + user JVM flags ride on
   `JAVA_TOOL_OPTIONS` because we can't intercept run.sh's @-args files.
-  Verified end-to-end on ndrchst-01: install in ~16s, boot `Done (2.053s)`,
+  Verified end-to-end on the box: install in ~16s, boot `Done (2.053s)`,
   RCON `list` / `seed` / `time query daytime` all green.
 
 - **Modpack** — install from a server-pack zip URL. Streams the download
