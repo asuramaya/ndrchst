@@ -1,0 +1,16 @@
+# Forwards the cross-play Java server past Docker's userland docker-proxy, which
+# stalls on this box's constrained-uplink TCP backpressure. See the companion
+# ndr-mc-forward.sh for the full rationale. playit's Java tunnel must point its
+# local address at 127.0.0.1:<NDR_LISTEN_PORT>.
+[Unit]
+Description=ndrchst cross-play Java TCP forwarder (kernel bypass of docker-proxy)
+
+[Service]
+Type=simple
+Environment=NDR_LISTEN_PORT=25567
+ExecStart=%h/.local/bin/ndr-mc-forward.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

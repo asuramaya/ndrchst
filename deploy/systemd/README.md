@@ -1,11 +1,33 @@
-# systemd user units for ndrchst-01
+# systemd user units (the box)
 
-Two user-level services run the box:
+User-level services run the box:
 
 | Unit | Port | Purpose |
 |---|---|---|
 | `ndrchst-admin.service` | 8080 | Management plane. Tailscale-only — DO NOT route through Cloudflare. |
 | `ndrchst-public.service` | 8081 | Public surface — client bundle downloads + read-only server list. Cloudflare Tunnel fronts this at `play.ndrchst.com`. |
+| `ndr-mc-forward.service` | 25567 | Kernel-clean TCP forwarder for the cross-play Java server, bypassing Docker's userland docker-proxy (which stalls on this box's constrained ~1.6 Mbps uplink's TCP backpressure → keepalive kicks). playit's Java tunnel local address must point at `127.0.0.1:25567`. |
+
+## ndr-mc-forward (docker-proxy bypass)
+
+`ndr-mc-forward.sh` runs `socat 127.0.0.1:25567 → <container-ip>:25565`, re-resolving
+the container IP every 10s so it self-heals across container restart/recreate and
+box reboot. It listens on **25567, deliberately NOT the docker-publish port (25566)**:
+a forwarder squatting 25566 makes docker-proxy's bind fail when the container
+restarts → the restart fails and orphans the container's network
+(`NetworkSettings.Networks: {}`, DNS dead inside). If that ever happens, recover with
+`docker network connect bridge <container>` then a clean `docker restart`.
+
+```bash
+cp deploy/systemd/ndr-mc-forward.sh   ~/.local/bin/ && chmod +x ~/.local/bin/ndr-mc-forward.sh
+cp deploy/systemd/ndr-mc-forward.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now ndr-mc-forward.service
+```
+
+Override the container/ports via the unit's `Environment=` (`NDR_CONTAINER`,
+`NDR_LISTEN_PORT`, `NDR_TARGET_PORT`). Root cause + the uplink ceiling are
+documented in the cross-play keepalive memory.
 
 ## Install
 
