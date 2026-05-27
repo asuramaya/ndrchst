@@ -1,5 +1,9 @@
 # ndrchst
 
+
+![ndrchst: a weird experiment](logo.png)
+
+
 A token-gated modded-Minecraft stack that runs on one box. Link a Solana wallet
 and what you hold becomes your identity and your rank — your tier, your perks,
 and your daily crate all key off your on-chain balance. MIT licensed.
