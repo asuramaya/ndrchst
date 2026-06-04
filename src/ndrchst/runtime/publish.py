@@ -1,8 +1,9 @@
-"""Push a server's client artifacts to Cloudflare R2.
+"""Push a server's client artifacts + the static public pages to Cloudflare R2.
 
 This moves distribution off the residential box: once published, clients
-fetch config/manifest/mod-index/client.zip from Cloudflare's edge instead of
-the box's uplink. The box only does the one-time outbound upload per change.
+fetch config/manifest/mod-index/client.zip and the landing/play pages from
+Cloudflare's edge instead of the box's uplink. The box only does the one-time
+outbound upload per change.
 
 The big modpack pack zip (~200MB of static overrides art) is NOT hosted by
 us — the client pulls it straight from CurseForge's CDN (see
@@ -48,9 +49,14 @@ def publish_server(
     servers_root: Path,
     clients_root: Path,
     java_servers,
+    downloads_base: str = "",
 ) -> dict:
-    """Upload one server's client artifacts to R2. Returns a summary
-    {uploaded, keys, skipped_missing}."""
+    """Upload one server's client artifacts + the static public pages to R2.
+    Returns a summary {uploaded, keys, skipped_missing}."""
+    # Lazy import: web depends on runtime, so import the renderers here to
+    # avoid an import-time cycle.
+    from ..web.public_pages import render_landing, render_play
+
     sid = server.id
     pdir = clients_root / sid
     sdir = servers_root / sid
@@ -117,5 +123,12 @@ def publish_server(
         play_servers = _play_server_dicts(java_servers)
         put("servers.json", json.dumps(play_servers).encode("utf-8"),
             "application/json", _NO_CACHE)
+
+        # Static public pages (single source of truth: the same renderers the
+        # edge serves at / and /play).
+        put("index.html", render_landing(downloads_base=downloads_base).encode("utf-8"),
+            "text/html; charset=utf-8", _NO_CACHE)
+        put("play.html", render_play(play_servers, downloads_base=downloads_base).encode("utf-8"),
+            "text/html; charset=utf-8", _NO_CACHE)
 
     return {"uploaded": len(uploaded), "keys": uploaded, "skipped_missing": missing}

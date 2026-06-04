@@ -21,8 +21,9 @@ wrapped in a Cloudflare tunnel so the host IP stays hidden.
   game connection wrapped in a Cloudflare tunnel, and self-update with SHA-256
   verification. Launches in **offline mode** (a username) by default, or with a
   **Microsoft account** for online-mode / vanilla servers.
-- **Edge** — `cf/worker/`. A Cloudflare Worker serving per-server client
-  artifacts and the server catalog from R2, fully static.
+- **Edge** — `cf/worker/`. A Cloudflare Worker serving a static landing + server
+  list, per-server client artifacts, and the server catalog from R2 — fully
+  static, no dynamic origin.
 
 ## Design choices worth knowing
 

@@ -15,7 +15,7 @@ docker-py; Java + Bedrock first-class). Three planes. See
 |---|---|---|
 | Control plane | `src/ndrchst/` (`api`, `web`, `runtime`, `:8080`) | run servers in Docker, Modrinth installs, RCON, backups, client-bundle build + R2 publish |
 | Desktop client | `client/` | portablemc launcher; server-driven modpack/mod sync, tunnel, self-update; offline or Microsoft login |
-| Edge | `cf/worker/` | Cloudflare Worker: per-server client artifacts + `servers.json` served statically from R2 |
+| Edge | `cf/worker/` | Cloudflare Worker: static landing/play pages + per-server client artifacts + `servers.json`, served from R2 |
 
 Predecessors:
 - `~/code/ndrchst/ndrchst/` — Python v2.3.0 (working but bloated, ~38k LOC)

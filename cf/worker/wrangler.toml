@@ -9,10 +9,9 @@
 # The www/apex routes stay listed below ONLY so the Worker receives that traffic
 # and can issue the redirect; they serve no content of their own.
 #
-# The box publishes servers.json / client/<sid>/* (and any operator-provided
-# index.html / play.html) into the bucket (see src/ndrchst/runtime/publish.py);
-# this Worker maps static URLs to R2 keys. Deploy: `wrangler deploy` (from this
-# dir).
+# The box publishes index.html / play.html / servers.json / client/<sid>/* into
+# the bucket (see src/ndrchst/runtime/publish.py); this Worker maps static URLs
+# to R2 keys. Deploy: `wrangler deploy` (from this dir).
 #
 # Top-level keys (incl. `routes`) MUST come before the [[r2_buckets]] table —
 # TOML otherwise parses them as fields of that table.
