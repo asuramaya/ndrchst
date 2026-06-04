@@ -1,5 +1,7 @@
 # ndrchst
 
+![ndrchst: a weird experiment](logo.png)
+
 A modded-Minecraft stack that runs on one box: the control plane that creates
 and runs the servers, the desktop client players launch from, and the
 Cloudflare edge that distributes it. MIT licensed.
