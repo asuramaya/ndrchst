@@ -112,26 +112,23 @@ def launch(
     modpack_url: str | None = None,
     mods_sync_url: str | None = None,
     tunnel_hostname: str | None = None,
-    join_token: str | None = None,
+    auth_session=None,
     client_ram_mb: int = 8192,
     gpu: str = "auto",
 ) -> int:
-    """Install + run MC in offline mode, auto-connecting to the server.
+    """Install + run MC, auto-connecting to the server.
+
+    ``auth_session`` is the portablemc auth session the client launches with.
+    When None (the default), launch in offline mode with ``username`` — the
+    right choice for an offline-mode server. Pass a ``MicrosoftAuthSession``
+    (see online_auth.sign_in) to play a premium account on an online-mode
+    server.
 
     Blocks until MC exits. Returns 0 on clean exit.
     """
     data_dir = _data_dir(app_slug)
-    ctx = Context(main_dir=data_dir)
-
-    # Drop the wallet join token where the ndrchst-auth mod reads it during the
-    # connection handshake (game dir = data_dir). Fresh per launch; cleared if
-    # we're not signed in so a stale token can't linger.
     data_dir.mkdir(parents=True, exist_ok=True)
-    token_path = data_dir / "ndrchst-join.token"
-    if join_token:
-        token_path.write_text(join_token)
-    else:
-        token_path.unlink(missing_ok=True)
+    ctx = Context(main_dir=data_dir)
 
     version = _make_version(ctx, mc_version, neoforge_version)
     if neoforge_version:
@@ -191,7 +188,7 @@ def launch(
     except Exception as e:
         on_log(f"(couldn't seed servers.dat: {e})")
 
-    version.auth_session = OfflineAuthSession(username, uuid4().hex)
+    version.auth_session = auth_session or OfflineAuthSession(username, uuid4().hex)
     version.quick_play = QuickPlayMultiplayer(dial_host, dial_port)
     env = version.install(watcher=_GuiWatcher(on_log))
 
@@ -262,8 +259,9 @@ def launch(
     elif gpu == "integrated":
         on_log("GPU: using integrated GPU (system default)")
 
+    play_name = getattr(version.auth_session, "username", None) or username
     on_log(
-        f"Starting Minecraft as {username}, connecting to "
+        f"Starting Minecraft as {play_name}, connecting to "
         f"{dial_host}:{dial_port}"
         + (f" (via {tunnel_hostname})" if tunnel_hostname else "")
         + "…",

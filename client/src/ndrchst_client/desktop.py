@@ -100,7 +100,7 @@ def _install_linux(
         f"Exec={cmd} %u",
         "Terminal=false",
         "Categories=Game;",
-        "Keywords=minecraft;ndrchst;solana;modded;",
+        "Keywords=minecraft;ndrchst;modded;",
         # Declares this app as the handler for the ndrchst:// scheme so a deep
         # link from the website opens the installed client.
         "MimeType=x-scheme-handler/ndrchst;",

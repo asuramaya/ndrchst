@@ -1,9 +1,8 @@
-"""Push a server's client artifacts + the public pages to Cloudflare R2.
+"""Push a server's client artifacts to Cloudflare R2.
 
 This moves distribution off the residential box: once published, clients
-fetch config/manifest/mod-index/client.zip and the play/landing pages from
-Cloudflare's edge instead of the box's uplink. The box only does the
-one-time outbound upload per change.
+fetch config/manifest/mod-index/client.zip from Cloudflare's edge instead of
+the box's uplink. The box only does the one-time outbound upload per change.
 
 The big modpack pack zip (~200MB of static overrides art) is NOT hosted by
 us — the client pulls it straight from CurseForge's CDN (see
@@ -49,14 +48,9 @@ def publish_server(
     servers_root: Path,
     clients_root: Path,
     java_servers,
-    downloads_base: str = "",
 ) -> dict:
-    """Upload one server's artifacts + the public pages to R2. Returns a
-    summary {uploaded, keys, skipped_missing}."""
-    # Lazy import: web depends on runtime, so import the renderers here to
-    # avoid an import-time cycle.
-    from ..web.public_pages import render_landing, render_maintenance, render_play
-
+    """Upload one server's client artifacts to R2. Returns a summary
+    {uploaded, keys, skipped_missing}."""
     sid = server.id
     pdir = clients_root / sid
     sdir = servers_root / sid
@@ -118,16 +112,9 @@ def publish_server(
                 key = "game/" + f.relative_to(game_dir).as_posix()
                 put(key, f.read_bytes(), _ct.get(f.suffix, "application/octet-stream"), _IMMUTABLE)
 
-        # Public pages + a machine-readable server list (single source of
-        # truth: the same renderers the box's public app uses).
+        # Machine-readable server list — clients enumerate available servers
+        # and their per-server client/config URLs from this.
         play_servers = _play_server_dicts(java_servers)
-        put("index.html", render_landing().encode("utf-8"),
-            "text/html; charset=utf-8", _NO_CACHE)
-        put("play.html", render_play(play_servers, downloads_base=downloads_base).encode("utf-8"),
-            "text/html; charset=utf-8", _NO_CACHE)
-        # Static fallback the edge Worker serves when the box origin is down.
-        put("maintenance.html", render_maintenance().encode("utf-8"),
-            "text/html; charset=utf-8", _NO_CACHE)
         put("servers.json", json.dumps(play_servers).encode("utf-8"),
             "application/json", _NO_CACHE)
 

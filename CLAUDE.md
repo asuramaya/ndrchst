@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-Single-machine OSS Minecraft server control plane. Python 3.12+, FastAPI + htmx + Jinja + SQLite + docker-py. Java + Bedrock first-class. ~6.7k LOC, 138 tests, v0 closed.
+Single-machine OSS Minecraft server control plane, plus a desktop client distribution path (`client/` + `cf/worker/`). Python 3.12+, FastAPI + htmx + Jinja + SQLite + docker-py. Java + Bedrock first-class. ~6k LOC, ~300 tests. (A Solana token-gating layer was added then removed — see STATE.md.)
 
 **For a full state-of-the-project picture: read [STATE.md](STATE.md) first.**
 **For deploy / infra (the box, services, rsync deploy, Cloudflare edge, secrets): read [deploy/OPS.md](deploy/OPS.md).**

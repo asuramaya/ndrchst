@@ -6,56 +6,36 @@ accurately. This top section reflects where the project actually is now.
 
 ## What this is
 
-A **token-gated modded-Minecraft stack** on one box: a Solana wallet is the
-player's identity, and on-chain holdings (% of supply) set their rank, perks, and
-daily reward. It grew out of — and still contains — a single-machine OSS server
-control plane (Python 3.12+, FastAPI + htmx + SQLite + docker-py; Java + Bedrock
-first-class). Five planes, one trust root. See
+A single-machine OSS Minecraft server **control plane** plus a **desktop client
+distribution** system on one box (Python 3.12+, FastAPI + htmx + SQLite +
+docker-py; Java + Bedrock first-class). Three planes. See
 [docs/architecture.md](docs/architecture.md) for the flows.
 
 | Plane | Where | Role |
 |---|---|---|
-| Control plane | `src/ndrchst/` (`api`, `web`, `runtime`, `:8080`) | run servers in Docker, Modrinth installs, RCON, backups — works standalone, no crypto |
-| Identity & economy | `public.py` (`:8081`) + `domain/wallet.py` + `runtime/solana.py` | SIWS wallet auth, holdings→tier, snapshot-based `/daily`; vendored ed25519, no web3 SDK |
-| Game adapters | `mods-src/` | one shared Java core → `ndrchst-auth` (NeoForge, token gate) + `ndrchst-paper` (Paper cross-play) |
-| Desktop client | `client/` | portablemc launcher; device-flow auth, CDN modpack sync, tunnel, self-update |
-| Edge | `cf/worker/` | Cloudflare Worker: static/artifacts from R2, dynamic proxied to the box |
+| Control plane | `src/ndrchst/` (`api`, `web`, `runtime`, `:8080`) | run servers in Docker, Modrinth installs, RCON, backups, client-bundle build + R2 publish |
+| Desktop client | `client/` | portablemc launcher; server-driven modpack/mod sync, tunnel, self-update; offline or Microsoft login |
+| Edge | `cf/worker/` | Cloudflare Worker: per-server client artifacts + `servers.json` served statically from R2 |
 
 Predecessors:
 - `~/code/ndrchst/ndrchst/` — Python v2.3.0 (working but bloated, ~38k LOC)
 - `~/code/ndrchst/ndrchst_3/` — abandoned Rust SaaS pivot (do not resurrect)
 
-Scale now: ~11k LOC Python (`src/`) + ~2k Java + a ~3k-LOC client + a 175-line
-Worker; ~440 tests across 4 markers. The v0.1 numbers below (~7k LOC, 162 tests)
-are the historical control-plane-only baseline.
+Scale now: ~6k LOC Python (`src/`) + a ~3k-LOC client + a ~100-line Worker; ~300
+tests. The v0.1 numbers below (~7k LOC, 162 tests) are a historical baseline.
 
-## The token-gated pivot (post-v0.1)
+## Solana token-gating removed
 
-Everything below the "Architecture decisions" heading is the control-plane
-foundation and is still current. On top of it, the project added:
+The project briefly carried a Solana wallet token-gating layer (wallet identity,
+holdings→tier ranks, snapshot-based daily rewards, SIWS auth, in-game gate mods,
+a separate public app on `:8081`, and a dynamic edge proxy). **That entire layer
+was removed** — see git history for the `strip-solana` work. What remains is the
+single-machine control plane below plus the client/edge distribution path. The
+client now launches in offline mode (a username) by default, or with a Microsoft
+account for online-mode / vanilla servers (`client/.../online_auth.py`); its
+modpack/mod sync from the server was always wallet-free and is preserved intact.
 
-- **Wallet identity & tiers** — `domain/wallet.py` (vendored RFC 8032 ed25519
-  verify + base58, no dependency), the ladder `holder/bronze/silver/gold/diamond/
-  whale` by % of supply, `runtime/solana.py` holdings via raw RPC.
-- **Public surface** — `public.py` on `:8081`: SIWS sign-in, client device-flow
-  pairing, the in-game `/gate/*` link flow, `/daily` (24h cooldown read off an
-  *hourly snapshot*, so it can't be flash-farmed), skins, `/ranks`. Background
-  loops: `holdings_refresh` (hourly), `token_price` (DexScreener, 10m).
-- **Game adapters** — `mods-src/core/` (shared `Tier` + typed box HTTP clients)
-  compiled into `ndrchst-auth` (NeoForge 1.21.1 / ATM10) and `ndrchst-paper`
-  (Paper 26.1.x: online-mode cross-play, `/link`, LuckPerms perks).
-- **Desktop client** — `client/`, a portablemc launcher packaged with
-  PyInstaller. No private key touches it; it carries a device token and exchanges
-  it for a fresh join token per launch.
-- **Edge & distribution** — `cf/worker/` + R2: one canonical host, static from
-  R2, dynamic proxied to the box over a tunnel; client binaries with SHA-256
-  self-update.
-- **Trust boundary** — the mods decide nothing; `/gate /join /daily /ops` answer
-  the Docker bridge only (`_is_internal_caller`). Admin `:8080` is private-network
-  only; public `:8081` is the only internet-facing app.
-
-Operational runbook for the hosted deployment: [deploy/OPS.md](deploy/OPS.md)
-(the public, generalized version).
+Operational runbook for the hosted deployment: [deploy/OPS.md](deploy/OPS.md).
 
 ---
 

@@ -16,7 +16,7 @@ import webbrowser
 from pathlib import Path
 from tkinter import ttk
 
-from . import __version__, deeplink, desktop, updater, wallet_auth
+from . import __version__, deeplink, desktop, updater
 from .launcher import launch
 from .settings import load as load_config
 
@@ -30,13 +30,13 @@ _TELEGRAM_URL = "https://t.me/ndrchst"
 # bound (the memory creep that eventually took the window down).
 _MAX_LOG_LINES = 2000
 
-# End x Solana palette — matches the web surfaces (void purple + ender green).
+# End-void palette (void purple + ender green).
 _BG = "#0a0613"
 _PANEL = "#161029"
 _FG = "#f4f0ff"
 _MUTED = "#a99fc7"
-_ACCENT = "#14f195"  # ender green / Solana green
-_PURPLE = "#9945ff"  # Solana purple
+_ACCENT = "#14f195"  # ender green
+_PURPLE = "#9945ff"  # void purple
 _INK = "#04130c"     # dark text on the green accent
 
 # Themed UI assets (banner GIF + brand glyph + app icon), bundled into the zip.
@@ -227,12 +227,24 @@ def run() -> None:
     form.pack(fill=tk.X)
     form.columnconfigure(1, weight=1)
 
-    # Identity is your wallet — no manual username. The in-game name is the
-    # wallet-derived handle, shown read-only once signed in.
-    ttk.Label(form, text="Playing as").grid(row=0, column=0, sticky="w", pady=4)
-    name_var = tk.StringVar(value="— sign in with your wallet —")
-    ttk.Label(form, textvariable=name_var).grid(
-        row=0, column=1, sticky="w", padx=(10, 0), pady=4)
+    # Account: offline (a plain username, the default for offline-mode servers)
+    # or Microsoft (a premium account, for online-mode / vanilla servers). In
+    # Microsoft mode the name field holds the account email.
+    ttk.Label(form, text="Account").grid(row=0, column=0, sticky="w", pady=4)
+    acct = ttk.Frame(form)
+    acct.grid(row=0, column=1, sticky="we", padx=(10, 0), pady=4)
+    mode_var = tk.StringVar(
+        value="Microsoft" if prefs.get("account_mode") == "microsoft" else "Offline")
+    mode_combo = ttk.Combobox(acct, textvariable=mode_var, state="readonly",
+                              width=10, values=["Offline", "Microsoft"])
+    mode_combo.pack(side=tk.LEFT)
+    name_var = tk.StringVar(
+        value=prefs.get("username") or cfg.default_username or "Player")
+    name_entry = ttk.Entry(acct, textvariable=name_var)
+    name_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 0))
+
+    def _account_mode() -> str:
+        return "microsoft" if mode_var.get() == "Microsoft" else "offline"
 
     ttk.Label(form, text="Memory (GB)").grid(row=1, column=0, sticky="w", pady=4)
     ram_var = tk.StringVar(value=str(prefs.get("ram_gb", 8)))
@@ -254,30 +266,14 @@ def run() -> None:
     if platform.system() != "Linux":
         gpu_combo.configure(state="disabled")
 
-    # ---- Wallet sign-in -----------------------------------------------
-    wallet_row = ttk.Frame(root, padding=(16, 4))
-    wallet_row.pack(fill=tk.X)
-    wallet_btn = ttk.Button(wallet_row, text="Sign in with wallet")
-    wallet_btn.pack(side=tk.LEFT)
-    wallet_status = tk.StringVar(value="Not signed in")
-    ttk.Label(wallet_row, textvariable=wallet_status, style="Muted.TLabel").pack(
-        side=tk.LEFT, padx=12)
-
     # ---- Play + progress ----------------------------------------------
     action = ttk.Frame(root, padding=(16, 8))
     action.pack(fill=tk.X)
-    launch_btn = ttk.Button(action, text="Play", style="Accent.TButton",
-                            state=tk.DISABLED)
+    launch_btn = ttk.Button(action, text="Play", style="Accent.TButton")
     launch_btn.pack(side=tk.LEFT)
-    phase_var = tk.StringVar(value="Sign in with your wallet to play")
+    phase_var = tk.StringVar(value="Ready — press Play")
     ttk.Label(action, textvariable=phase_var, style="Muted.TLabel").pack(
         side=tk.LEFT, padx=12)
-
-    # Wallet sign-in is the mandated auth path: no wallet, no Play. mc_name is
-    # the wallet-derived in-game identity; join_token is the credential the
-    # ndrchst-auth mod presents to the server at connect time.
-    wallet_id: dict[str, str | None] = {
-        "mc_name": None, "join_token": None, "device_token": None}
 
     bar = ttk.Progressbar(root, mode="determinate", maximum=len(_PHASES))
     bar.pack(fill=tk.X, padx=16, pady=(0, 6))
@@ -330,28 +326,13 @@ def run() -> None:
     def set_controls(enabled: bool) -> None:
         widget_state = tk.NORMAL if enabled else tk.DISABLED
         ram_spin.config(state=widget_state)
+        name_entry.config(state=widget_state)
+        mode_combo.config(state="readonly" if enabled else tk.DISABLED)
         if platform.system() == "Linux":
             gpu_combo.config(state="readonly" if enabled else tk.DISABLED)
-        # Play is only available once a wallet is linked (mandated auth path).
-        signed_in = wallet_id["mc_name"] is not None
         launch_btn.config(
-            state=tk.NORMAL if (enabled and signed_in) else tk.DISABLED,
+            state=tk.NORMAL if enabled else tk.DISABLED,
             text="Play" if enabled else "Running…")
-
-    def apply_identity(ident: object, dev: str | None = None) -> None:
-        """Reflect a signed-in wallet identity in the UI. Main-thread only.
-        Shared by the manual sign-in, the device-token auto sign-in, and the
-        deep-link handoff so they can't drift apart."""
-        wallet_id["mc_name"] = ident.mc_name
-        wallet_id["join_token"] = ident.join_token
-        if dev:
-            wallet_id["device_token"] = dev
-        name_var.set(ident.mc_name)
-        tier = f"  ·  {ident.tier_name}" if ident.tier_name else "  ·  no rank"
-        wallet_status.set(f"{ident.display}{tier}")
-        wallet_btn.config(text="Signed in", state=tk.DISABLED)
-        launch_btn.config(state=tk.NORMAL)
-        phase_var.set("Ready — press Play")
 
     def reload_config() -> None:
         """Re-read config after a deep link swapped in a new server, and refresh
@@ -364,8 +345,8 @@ def run() -> None:
         _refresh_header()
 
     def apply_deeplink(url: str) -> None:
-        """Act on a ndrchst:// URL: pin the named server (fetch its config) and
-        redeem any one-time handoff code for an instant sign-in."""
+        """Act on a ndrchst:// URL: pin the named server by fetching its config
+        so a generic build becomes locked to that server."""
         dl = deeplink.parse(url)
         if dl is None or dl.action != "launch":
             return
@@ -374,63 +355,60 @@ def run() -> None:
             root.lift()
             root.focus_force()
         sid = dl.params.get("sid")
-        code = dl.params.get("code")
-        base = cfg.auth_base_url or wallet_auth.DEFAULT_BASE
+        if not sid:
+            return
+        base = cfg.site_base_url or ""
 
         def worker() -> None:
-            if sid:
-                try:
-                    deeplink.fetch_server_config(base, sid)
-                    emit_from_worker(f"Linked to server {sid}.")
-                    root.after(0, reload_config)
-                except (OSError, ValueError) as exc:
-                    # URLError is an OSError and JSONDecodeError a ValueError, so
-                    # this is any network/parse failure. Best-effort; logged only.
-                    emit_from_worker(f"Couldn't load that server's config: {exc}")
-            if code:
-                try:
-                    ident = wallet_auth.redeem_handoff(base, code)
-                except wallet_auth.WalletAuthError as exc:
-                    emit_from_worker(f"Sign-in handoff failed: {exc}")
-                    return
-                dev = ident.device_token or None
-                if dev:
-                    wallet_auth.write_device_token(dev)
-                root.after(0, lambda: apply_identity(ident, dev))
+            try:
+                deeplink.fetch_server_config(base, sid)
+                emit_from_worker(f"Linked to server {sid}.")
+                root.after(0, reload_config)
+            except (OSError, ValueError) as exc:
+                # URLError is an OSError and JSONDecodeError a ValueError, so
+                # this is any network/parse failure. Best-effort; logged only.
+                emit_from_worker(f"Couldn't load that server's config: {exc}")
 
         threading.Thread(target=worker, daemon=True).start()
 
     def on_launch() -> None:
-        username = wallet_id["mc_name"]
-        if not username:
-            append_log("Sign in with your wallet first.")
+        name = name_var.get().strip()
+        mode = _account_mode()
+        if not name:
+            append_log("Microsoft account email needed first."
+                       if mode == "microsoft" else "Enter a username first.")
             return
         try:
             ram_gb = max(2, int(float(ram_var.get())))
         except ValueError:
             ram_gb = 8
         gpu = dict(_GPU_CHOICES).get(gpu_var.get(), "auto")
-        _save_prefs({"ram_gb": ram_gb, "gpu_label": gpu_var.get()})  # remember for next time
+        # Remember the launch prefs + account for next time.
+        _save_prefs({"ram_gb": ram_gb, "gpu_label": gpu_var.get(),
+                     "account_mode": mode, "username": name})
         set_controls(False)
         phase_var.set("Starting…")
 
         def worker() -> None:
-            # Fetch a FRESH join token right before connecting (the device
-            # token is durable; the join token is short-lived) so a long first
-            # install can't let it expire. Falls back to the cached one.
-            jt = wallet_id["join_token"]
-            dev = wallet_id.get("device_token")
-            if dev:
+            # Online (premium) mode signs into Microsoft first and launches with
+            # that session; offline mode launches with the plain username.
+            auth_session = None
+            if mode == "microsoft":
+                from . import online_auth
                 try:
-                    jt = wallet_auth.exchange_device_token(
-                        cfg.auth_base_url or wallet_auth.DEFAULT_BASE, dev).join_token
-                except wallet_auth.WalletAuthError as exc:
-                    emit_from_worker(f"(couldn't refresh join token: {exc}; using cached)")
+                    auth_session = online_auth.sign_in(
+                        data_dir=Path.home() / f".{APP_SLUG}",
+                        email=name, on_log=emit_from_worker)
+                except online_auth.OnlineAuthError as exc:
+                    emit_from_worker(f"Microsoft sign-in failed: {exc}")
+                    root.after(0, lambda: (phase_var.set("Sign-in failed — see details"),
+                                           set_controls(True)))
+                    return
             try:
                 code = launch(
                     app_slug=APP_SLUG,
                     mc_version=cfg.mc_version,
-                    username=username,
+                    username=name,
                     server_host=cfg.server_host,
                     server_port=cfg.server_port,
                     on_log=emit_from_worker,
@@ -438,7 +416,7 @@ def run() -> None:
                     modpack_url=cfg.modpack_url,
                     mods_sync_url=cfg.mods_sync_url,
                     tunnel_hostname=cfg.tunnel_hostname,
-                    join_token=jt,
+                    auth_session=auth_session,
                     client_ram_mb=ram_gb * 1024,
                     gpu=gpu,
                 )
@@ -462,24 +440,6 @@ def run() -> None:
 
         threading.Thread(target=worker, daemon=True).start()
 
-    # ---- Wallet sign-in handler --------------------------------------
-    def on_wallet_signin() -> None:
-        wallet_btn.config(state=tk.DISABLED, text="Check your browser…")
-        base = cfg.auth_base_url or wallet_auth.DEFAULT_BASE
-
-        def worker() -> None:
-            try:
-                ident = wallet_auth.begin(base, on_log=emit_from_worker)
-            except wallet_auth.WalletAuthError as exc:
-                emit_from_worker(f"Wallet sign-in failed: {exc}")
-                root.after(0, lambda: wallet_btn.config(
-                    state=tk.NORMAL, text="Sign in with wallet"))
-                return
-
-            root.after(0, lambda: apply_identity(ident))
-
-        threading.Thread(target=worker, daemon=True).start()
-
     # ---- Self-update -------------------------------------------------
     def do_update(upd) -> None:
         update_btn.config(state=tk.DISABLED, text="Updating…")
@@ -494,9 +454,7 @@ def run() -> None:
             if not ok:
                 root.after(0, lambda: (
                     update_btn.config(state=tk.NORMAL, text="Update & restart"),
-                    launch_btn.config(
-                        state=tk.NORMAL if wallet_id["mc_name"] else tk.DISABLED,
-                        text="Play"),
+                    launch_btn.config(state=tk.NORMAL, text="Play"),
                     phase_var.set("Update failed — see details below")))
 
         threading.Thread(target=worker, daemon=True).start()
@@ -537,7 +495,6 @@ def run() -> None:
     ).start()
 
     launch_btn.config(command=on_launch)
-    wallet_btn.config(command=on_wallet_signin)
 
     # Keyboard shortcuts — Enter plays (when ready), Esc minimises, Ctrl+Q quits.
     def _play_if_ready(_e: object = None) -> None:
@@ -548,32 +505,17 @@ def run() -> None:
     root.bind("<Escape>", lambda _e: root.iconify())
     root.bind("<Control-q>", lambda _e: root.destroy())
 
-    # Auth-first: if this bundle was downloaded after signing in on the play
-    # page, it carries a device token — auto-sign-in, no button press needed.
-    def _try_device_signin() -> None:
-        dev = wallet_auth.read_device_token()
-        if not dev:
-            return
-        base = cfg.auth_base_url or wallet_auth.DEFAULT_BASE
-        try:
-            ident = wallet_auth.exchange_device_token(base, dev)
-        except wallet_auth.WalletAuthError as exc:
-            emit_from_worker(f"Device sign-in unavailable ({exc}) — use 'Sign in with wallet'.")
-            return
-
-        root.after(0, lambda: apply_identity(ident, dev))
-
-    threading.Thread(target=_try_device_signin, daemon=True).start()
-
     # Discovery: a generic build with no pinned server (downloaded directly, not
     # via a play-page deep link) finds the server from the public catalog
     # (servers.json on the edge) and pins it, so it can Play without a browser
-    # round-trip. Catalog metadata only — the join gate still runs through wallet
-    # auth. Skipped when already pinned, or when a deep link will pin one.
+    # round-trip. Catalog metadata only. Skipped when already pinned, or when a
+    # deep link will pin one.
     def _try_discover_server() -> None:
         if (cfg.server_id and cfg.server_host) or initial_url:
             return
-        base = cfg.auth_base_url or wallet_auth.DEFAULT_BASE
+        base = cfg.site_base_url or ""
+        if not base:
+            return
         try:
             servers = deeplink.list_servers(base)
         except (OSError, ValueError) as exc:

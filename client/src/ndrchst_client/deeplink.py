@@ -1,18 +1,14 @@
 """``ndrchst://`` deep links — open the installed client straight from the web.
 
-The play page builds links like::
+The website builds links like::
 
-    ndrchst://launch?sid=<server_id>&code=<one-time-handoff-code>
+    ndrchst://launch?sid=<server_id>
 
 Once the client is installed it registers itself as the handler for the
 ``ndrchst`` URL scheme (see desktop.py), so the OS launches this binary with the
 URL as an argument. :func:`parse` turns that into a :class:`DeepLink` the app
 acts on:
 
-  * ``code`` — a one-time handoff code, redeemed for a device token
-    (``wallet_auth.redeem_handoff``) so a freshly downloaded exe links to the
-    wallet without a second browser round-trip. The code, not a credential, is
-    what travelled in the URL.
   * ``sid``  — the server to play; the app fetches that server's ``config.json``
     and writes it as ``client-config.json`` (via ``NDRCHST_CLIENT_CONFIG``) so a
     generic build becomes pinned to that server.
@@ -78,9 +74,8 @@ def url_from_argv(argv: list[str]) -> str | None:
 def list_servers(base_url: str) -> list[dict]:
     """Fetch the public server catalog — the static ``servers.json`` the edge
     serves from R2 — so a generic build can discover and pin a server WITHOUT a
-    deep link. This is catalog metadata only (id, name, status, config_url); it
-    carries nothing that bypasses the join gate, which still runs through wallet
-    auth. Raises on network/parse failure."""
+    deep link. Catalog metadata only (id, name, status, config_url). Raises on
+    network/parse failure."""
     url = f"{base_url.rstrip('/')}/servers.json"
     req = urllib.request.Request(url, headers={"user-agent": _UA})
     with urllib.request.urlopen(req, timeout=15) as r:

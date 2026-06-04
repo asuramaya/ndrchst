@@ -23,15 +23,19 @@ exposed. Everything deployment-specific is read from env vars — see
 | Unit | Port | Exposure | Env |
 |---|---|---|---|
 | `ndrchst-admin.service` | 8080 | **Private-network only** — never route through Cloudflare. | `NDRCHST_PUBLIC_HOST`, `NDRCHST_EDGE_URL` |
-| `ndrchst-public.service` | 8081 | Public — the Cloudflare tunnel fronts it. | reads `~/.config/ndrchst/public.env` (optional) |
+
+The public client-distribution surface is **fully static** — served by the
+Cloudflare Worker from R2, with no box origin behind it (see "Cloudflare edge").
+The box runs the admin control plane plus the cloudflared tunnel (for MC game
+TCP).
 
 Unit files are in [`deploy/systemd/`](systemd/) (they use the `%h` specifier so
 they resolve to whatever user runs them). Install + linger instructions are in
 [`deploy/systemd/README.md`](systemd/README.md).
 
 ```bash
-ssh <box-host> 'systemctl --user status  ndrchst-public ndrchst-admin'
-ssh <box-host> 'systemctl --user restart ndrchst-public ndrchst-admin'
+ssh <box-host> 'systemctl --user status  ndrchst-admin'
+ssh <box-host> 'systemctl --user restart ndrchst-admin'
 ```
 
 **Docker-group gotcha:** if admin Docker calls fail with `PermissionError`, the
@@ -53,7 +57,7 @@ Surgical deploy (only the files you changed):
 git add <files> && git commit && git push origin main
 
 # 1. back up the box copies you're about to overwrite
-FILES="src/ndrchst/public.py ..."   # the exact files you changed
+FILES="src/ndrchst/runtime/lifecycle.py ..."   # the exact files you changed
 ssh <box-host> "cd ~/ndrchst-alpha && B=~/deploy-backups/\$(date +%Y%m%d-%H%M%S) \
   && mkdir -p \$B && for f in $FILES; do [ -e \"\$f\" ] && { mkdir -p \"\$B/\$(dirname \$f)\"; cp -a \"\$f\" \"\$B/\$f\"; }; done && echo \$B"
 
@@ -61,8 +65,8 @@ ssh <box-host> "cd ~/ndrchst-alpha && B=~/deploy-backups/\$(date +%Y%m%d-%H%M%S)
 rsync -avR $FILES <box-host>:/home/<user>/ndrchst-alpha/
 
 # 3. restart + health-check
-ssh <box-host> 'systemctl --user restart ndrchst-public ndrchst-admin'
-ssh <box-host> 'curl -fsS localhost:8081/healthz && echo && curl -fsS localhost:8080/healthz'
+ssh <box-host> 'systemctl --user restart ndrchst-admin'
+ssh <box-host> 'curl -fsS localhost:8080/healthz'
 ```
 
 Notes:
@@ -71,9 +75,8 @@ Notes:
   `schema.sql` and restart.
 - **`regenerate` + `r2-publish` are ADMIN (:8080) endpoints.** Changes to
   `runtime/client.py` (bundle build), `runtime/publish.py`, or anything those
-  import only take effect after **`ndrchst-admin`** restarts — restarting only
-  `ndrchst-public` runs the *old* code and silently ships a stale bundle.
-  Restart both, then regenerate + publish.
+  import only take effect after **`ndrchst-admin`** restarts — restart it, then
+  regenerate + publish.
 - **Game/UI assets are gitignored.** `src/ndrchst/web/static/game/` and
   `client/src/ndrchst_client/assets/` are built by
   `scripts/build_game_assets.py` (not committed). rsync both dirs to the box;
@@ -87,32 +90,19 @@ Notes:
 - **Worker:** [`cf/worker/`](../cf/worker/) — see `wrangler.toml` for the name,
   routes, and R2 bucket binding. Deploy **from dev**: `cd cf/worker && wrangler
   deploy`. `wrangler whoami` to check auth.
-- **What it does:** serves static pages + `client/<sid>/*` artifacts from R2;
-  **proxies the dynamic endpoints** (`/auth/*`, `/me`, `/client/auth/*`,
-  `/gate/*`, `/link`, `/ranks`) to `ORIGIN_BASE` (any method incl. POST). The
-  whole surface lives on **one host** (`play.<domain>`): `/` is the landing,
-  `/play` the app; the apex + `www` 301 to it. Cookies carry no Domain attr —
-  one host, host-scoped session, no cross-origin stranding.
-- **`ORIGIN_BASE` var:** MUST point at a tunnel hostname that routes to the
-  box's `:8081`, **separate from `play`** (which is the Worker). Blank → the
-  dynamic endpoints 503 (static surface still works). Comment the `routes` out
-  for a no-cutover validation deploy (lands on `workers.dev`).
+- **What it does:** serves `client/<sid>/*` artifacts, `servers.json`, the
+  client self-update binaries, and any operator-provided `index.html`/`play.html`
+  from R2 — all **static**, read-only, no box origin. The whole surface lives on
+  **one host** (`play.<domain>`); the apex + `www` 301 to it.
 
 ### Cutover sequence (play/www/apex → Worker)
 
-1. **Add an origin hostname for the box.** The tunnel is **dashboard-managed** —
-   cloudflared loads creds from `/etc/cloudflared/config.yml` but pulls its
-   **ingress from Cloudflare**, so editing the local `config.yml` ingress does
-   nothing. In **Cloudflare Zero Trust → Networks → Tunnels → `<tunnel-id>` →
-   Public Hostnames**, add: subdomain `origin`, your domain, type **HTTP**, URL
-   **`localhost:8081`** (creates ingress + DNS together). Verify
-   `curl https://origin.<domain>/healthz` → 200.
-2. Set `ORIGIN_BASE = "https://origin.<domain>"` in `cf/worker/wrangler.toml`.
-3. `cd cf/worker && wrangler deploy` (routes uncommented).
-4. **Republish pages + artifacts** so R2 has current static + `client/<sid>/*`:
+1. `cd cf/worker && wrangler deploy` (routes uncommented). Comment the `routes`
+   out first for a no-cutover validation deploy (lands on `workers.dev`).
+2. **Publish artifacts** so R2 has current `client/<sid>/*` + `servers.json`:
    `curl -X POST localhost:8080/servers/<server_id>/r2-publish` (on the box).
-5. Verify: `play.<domain>/` (landing, R2), `/play` (app), `/ranks` + `/me`
-   (proxied → box), `curl -I www.<domain>/` → 301 to play.
+3. Verify: `play.<domain>/client/<sid>/config.json` (R2),
+   `curl -I www.<domain>/` → 301 to play.
 
 ## Cloudflared tunnel (on the box)
 
@@ -120,19 +110,16 @@ Runs as a **system** service (`sudo systemctl {status,restart} cloudflared`),
 `ExecStart … --config /etc/cloudflared/config.yml tunnel run`. **Ingress is
 dashboard-managed** (Cloudflare Zero Trust → Tunnels) — the local `config.yml`
 only carries `tunnel:` / `credentials-file:`; its `ingress:` block is ignored.
-Reference ingress: `play.<domain> → http://localhost:8081`, `mc.<domain> →
-tcp://localhost:<mc-port>`, fallback 404.
+Reference ingress: `mc.<domain> → tcp://localhost:<mc-port>`, fallback 404.
+(`play.<domain>` is served by the Worker from R2, not the box — no tunnel
+ingress needed for it.)
 
 ## Secrets (never in the repo)
 
 | Secret | Location | How |
 |---|---|---|
-| `NDRCHST_SESSION_SECRET` | box `~/.config/ndrchst/public.env` (chmod 600) | `printf 'NDRCHST_SESSION_SECRET=%s\n' "$(openssl rand -hex 32)" >> ~/.config/ndrchst/public.env` — **without it, every restart logs out all wallets.** |
 | R2 keys (`NDRCHST_R2_*`) | box `~/.config/ndrchst/r2.env` (chmod 600) | SigV4 creds for R2 publish. |
 | GitHub | `gh auth` on dev | needs the `workflow` scope (commits touch `.github/workflows/`). |
-
-Optional in `public.env`: `NDRCHST_SOLANA_RPC`, `NDRCHST_TOKEN_MINT`,
-`NDRCHST_RANK_CMD` (e.g. `lp user {name} parent set {tier}`).
 
 ## Common admin ops (on the box, against :8080)
 
@@ -142,22 +129,18 @@ S=<server_id>   # find it: curl -s localhost:8080/api/servers | jq '.[].id,.[].n
 # Pin the modpack to the CurseForge CDN (box stops re-hosting the big zip)
 curl -X POST localhost:8080/servers/$S/client/regenerate -d cf_project_id=<pid> -d cf_file_id=<fid>
 
-# Rebuild the mods index; publish artifacts/pages to R2 (light), or heavy (+client.zip)
+# Rebuild the mods index; publish artifacts to R2 (light), or heavy (+client.zip)
 curl -X POST localhost:8080/servers/$S/mods/build-index
 curl -X POST localhost:8080/servers/$S/r2-publish
 curl -X POST "localhost:8080/servers/$S/r2-publish?heavy=true"
-
-# Wallet/rank loop
-curl -X POST localhost:8080/wallets/refresh                  # re-read chain, recompute tiers
-curl -X POST localhost:8080/servers/$S/wallets/sync          # push whitelist (+rank) over RCON
 ```
 
 ## Domains & token (reference deployment)
 
-- `play.ndrchst.com` — the whole public surface (landing `/` + app `/play`);
-  `ndrchst.com` / `www.ndrchst.com` 301 → play; `mc.ndrchst.com` MC game TCP
-  (via tunnel, origin IP never exposed); `dl.ndrchst.com` — R2 client binaries.
-- **$NDRCHST mint:** `FCNoxy62oN9HhjqM49StjRAzXqehquNRwNpRVL6qpump` (pump.fun).
+- `play.ndrchst.com` — the static client-distribution surface (client artifacts
+  + `servers.json`); `ndrchst.com` / `www.ndrchst.com` 301 → play;
+  `mc.ndrchst.com` MC game TCP (via tunnel, origin IP never exposed);
+  `dl.ndrchst.com` — R2 client binaries.
 
 ## Dev quickref (tests/lint before any deploy)
 

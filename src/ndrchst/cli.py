@@ -20,21 +20,6 @@ def run(
 
 
 @app.command()
-def public(
-    host: str = typer.Option("127.0.0.1", help="Bind address (default: localhost only)"),
-    port: int = typer.Option(8081, help="HTTP port for the public surface"),
-) -> None:
-    """Boot the ndrchst public surface (client downloads + server list).
-
-    Read-only; safe to expose. Run alongside `ndrchst run` (separate port,
-    separate process), then front each with a different hostname via your
-    reverse proxy (Cloudflare Tunnel, nginx, etc.).
-    """
-    configure_logging()
-    uvicorn.run("ndrchst.public:app", host=host, port=port)
-
-
-@app.command()
 def doctor() -> None:
     """Sanity-check the environment (Docker, ports, disk)."""
     from . import doctor as doctor_mod
