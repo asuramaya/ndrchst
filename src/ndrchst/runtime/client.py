@@ -161,10 +161,10 @@ def build_bundle(
         "modpack_url": modpack_url or None,
         "mods_sync_url": mods_sync_url,
         "neoforge_version": neoforge_version or None,
-        # Self-update + wallet-auth/deep-link bases. Derived from the edge so a
-        # per-server build self-updates and authenticates against the same host.
+        # Self-update + server-discovery/deep-link bases. Derived from the edge
+        # so a per-server build self-updates and resolves configs from the same host.
         "update_base_url": (f"{edge_url.rstrip('/')}/client" if edge_url else None),
-        "auth_base_url": edge_url or None,
+        "site_base_url": edge_url or None,
     }
 
     zip_buf = io.BytesIO()
@@ -268,7 +268,7 @@ def _render_config_py(cfg: dict) -> str:
         f"MODS_SYNC_URL = {cfg.get('mods_sync_url')!r}\n"
         f"TUNNEL_HOSTNAME = {cfg.get('tunnel_hostname')!r}\n"
         f"UPDATE_BASE_URL = {cfg.get('update_base_url')!r}\n"
-        f"AUTH_BASE_URL = {cfg.get('auth_base_url')!r}\n"
+        f"SITE_BASE_URL = {cfg.get('site_base_url')!r}\n"
         f"DEFAULT_USERNAME = {cfg['default_username']!r}\n"
         f"SERVER_ID = {cfg['server_id']!r}\n"
     )

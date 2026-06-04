@@ -397,12 +397,11 @@ class Lifecycle:
         return await self._docker.engine_info()
 
     async def publish_to_r2(self, server_id: str) -> dict:
-        """Push this server's client artifacts (incl. the small client.zip) + the
-        public pages to R2 so Cloudflare's edge serves them instead of the box.
-        No-op (and says so) when R2 isn't configured. The big modpack is never
-        pushed — the client pulls it from CurseForge's CDN."""
+        """Push this server's client artifacts (incl. the small client.zip) to
+        R2 so Cloudflare's edge serves them instead of the box. No-op (and says
+        so) when R2 isn't configured. The big modpack is never pushed — the
+        client pulls it from CurseForge's CDN."""
         import asyncio
-        import os
 
         from . import r2
         from .client import CLIENTS_ROOT_DEFAULT
@@ -417,7 +416,6 @@ class Lifecycle:
             publish_server,
             cfg=cfg, server=server, servers_root=self._root,
             clients_root=CLIENTS_ROOT_DEFAULT, java_servers=java,
-            downloads_base=os.environ.get("NDRCHST_CLIENT_DOWNLOADS_BASE", ""),
         )
         return {"published": True, **summary}
 

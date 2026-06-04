@@ -1,64 +1,28 @@
-// ndrchst edge Worker — serves the public surface from the R2 bucket so
-// the residential box stays out of the per-client hot path, and proxies the
-// handful of DYNAMIC endpoints (wallet auth + client pairing) back to the box
-// origin, which can't be static.
+// ndrchst edge Worker — serves the client-distribution surface from the R2
+// bucket so the residential box stays out of the per-client hot path. The
+// surface is entirely static now (no box origin to proxy to).
 //
 // The whole surface lives on ONE host (play.ndrchst.com); apex + www 301 here
 // (see fetch()), so every route below is served from that single origin.
 //
 // STATIC (from R2 bucket DL):
-//   GET /            → index.html    (the marketing landing)
-//   GET /play        → play.html     (the player / app page)
+//   GET /            → index.html    (operator-provided landing, if published)
+//   GET /play        → play.html     (operator-provided, if published)
 //   GET /client/<sid>/<...> → client/<sid>/<...>   (config, manifest, client.zip,
 //                                                 mods/index.json, mods/<jar>)
-//   GET /<other>     → <other>       (servers.json, …)
+//   GET /client/latest.json + binaries → client self-update artifacts
+//   GET /<other>     → <other>       (servers.json, game/*, …)
 //   GET /healthz     → "ok"
-//
-// DYNAMIC (proxied to env.ORIGIN_BASE, any method incl. POST):
-//   /auth/challenge  /auth/verify  /auth/logout   (Sign-In-With-Solana)
-//   /me                                            (session check)
-//   /client/auth/start  /client/auth/approve  /client/auth/poll  (device pairing)
-//   /link                                          (client pairing approval page)
-//   /gate/*                                        (cross-play identity link: the
-//        browser POSTs /gate/link/approve from the /link?m=g page. The other
-//        /gate/* endpoints are bridge-gated on the box, so they 403 to anyone
-//        arriving via this Worker — only the wallet-sig'd approve is usable.)
-//   /ranks                                         (live holders leaderboard)
-//
-// The box sets the session cookie with path=/ and NO Domain attribute. With a
-// single host that's exactly right: the cookie scopes to play.ndrchst.com and
-// never has to follow the user across origins. Proxying is transparent —
-// Set-Cookie flows straight back through to the one host.
 //
 // Object Content-Type / Cache-Control come from what the box stored on
 // upload (writeHttpMetadata), so the box controls freshness centrally.
-
-// Distinct from the static /client/<sid>/* artifacts: a hex server id is never
-// "auth", so /client/auth/* can't collide with a real server's client bundle.
-function isDynamic(path) {
-  return (
-    path === "/me" ||
-    path === "/link" ||
-    path === "/ranks" ||
-    path.startsWith("/me/") ||        // /me/client/<sid> download, /me/skin
-    path.startsWith("/skins/") ||     // per-wallet profile skins (box-stored)
-    path.startsWith("/device/") ||    // /device/exchange
-    path.startsWith("/auth/") ||
-    path.startsWith("/gate/") ||      // cross-play link: browser POSTs /gate/link/approve
-    path.startsWith("/client/auth/")
-  );
-}
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // One canonical host: play.ndrchst.com. The app (wallet session + client
-    // pairing) lives here and the session cookie is host-scoped (no Domain
-    // attr), so keeping the WHOLE surface — landing included — on this single
-    // origin is what stops sign-in from stranding when a player moves between
-    // the landing and the app. apex + www therefore just 301 here, preserving
+    // One canonical host: play.ndrchst.com. apex + www 301 here, preserving
     // path and query (so e.g. www.ndrchst.com/play → play.ndrchst.com/play).
     if (url.hostname === "ndrchst.com" || url.hostname === "www.ndrchst.com") {
       return Response.redirect("https://play.ndrchst.com" + path + url.search, 301);
@@ -68,23 +32,7 @@ export default {
       return new Response("ok", { headers: { "content-type": "text/plain" } });
     }
 
-    // Dynamic endpoints → proxy to the box origin (the box's own tunnel
-    // hostname, set as ORIGIN_BASE; NOT play/www, which now hit this Worker).
-    if (isDynamic(path)) {
-      if (!env.ORIGIN_BASE) return originDown(env, request);
-      const target = env.ORIGIN_BASE.replace(/\/+$/, "") + path + url.search;
-      try {
-        // Preserve method, headers (Cookie, Content-Type, …) and body.
-        const resp = await fetch(new Request(target, request));
-        // Gateway-class failures mean the box is down → maintenance fallback.
-        if (resp.status >= 502 && resp.status <= 504) return originDown(env, request);
-        return resp;
-      } catch (e) {
-        return originDown(env, request);
-      }
-    }
-
-    // Everything else is a static asset from R2 — read-only.
+    // Everything is a static asset from R2 — read-only.
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method Not Allowed", { status: 405 });
     }
@@ -124,27 +72,6 @@ export default {
     return new Response(request.method === "HEAD" ? null : obj.body, { headers });
   },
 };
-
-// Origin (the box) is unreachable. For a top-level HTML navigation, fall back to
-// the published maintenance page so downtime still looks like ndrchst; for API
-// callers (XHR/fetch expecting JSON), return a terse 503 they can handle.
-async function originDown(env, request) {
-  const accept = request.headers.get("accept") || "";
-  if (request.method === "GET" && accept.includes("text/html")) {
-    const obj = await env.DL.get("maintenance.html");
-    if (obj) {
-      const headers = new Headers();
-      obj.writeHttpMetadata(headers);
-      headers.set("cache-control", "no-store");
-      headers.set("retry-after", "30");
-      return new Response(obj.body, { status: 503, headers });
-    }
-  }
-  return new Response("ndrchst is temporarily unavailable", {
-    status: 503,
-    headers: { "content-type": "text/plain", "retry-after": "30" },
-  });
-}
 
 function notFound() {
   const body = `<!doctype html><meta charset=utf-8>

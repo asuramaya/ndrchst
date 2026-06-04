@@ -31,22 +31,23 @@ Docker to the default suite.
 
 ## How the app is shaped
 
-Five planes, one trust root — read [docs/architecture.md](docs/architecture.md)
-first. The Python control plane lives in `src/ndrchst/`:
+Three planes — read [docs/architecture.md](docs/architecture.md) first. The
+Python control plane lives in `src/ndrchst/`:
 
 - `platforms/` — install + version resolution per server type, behind one
   `Platform` protocol.
-- `runtime/` — everything that touches Docker, RCON, the chain, or R2.
-- `domain/` — pure logic, no network (wallet crypto, tokens, NBT, properties).
+- `runtime/` — everything that touches Docker, RCON, client bundles, or R2.
+- `domain/` — pure logic, no network (NBT, properties, players, worlds).
 - `store/` — SQLite, no ORM, additive `ALTER TABLE` migrations.
 - `web/` + `api/` — the htmx admin UI and the JSON API.
-- `public.py` — the separate public wallet/economy surface.
+
+The desktop launcher is a separate package in `client/`.
 
 ## Adding a feature
 
 The pattern that's held for every feature so far:
 
-1. Pure logic in `domain/<feature>.py` (or `runtime/` if it touches Docker/RCON/chain).
+1. Pure logic in `domain/<feature>.py` (or `runtime/` if it touches Docker/RCON).
 2. Unit tests in `tests/test_<feature>.py` — mock the network.
 3. A route: `web/<feature>_routes.py`, or a sub-route in `web/detail_routes.py`
    if it's a server-detail tab.
@@ -67,16 +68,7 @@ The pattern that's held for every feature so far:
 - **`.gitignore` must never contain a bare `servers/`.** It would silently
   swallow `src/ndrchst/web/templates/servers/`. There's a warning comment in the
   file. This has bitten before.
-- **The tier ladder has one home.** It's in `domain/wallet.py` (and mirrored once
-  in `mods-src/core/Tier.java`). Don't add a third copy — read it from source.
 - **Game/UI assets are generated, not committed** (`scripts/build_game_assets.py`).
-
-## The Java mods
-
-`mods-src/` is built with Gradle. The shared `core/` is compiled into both
-adapters via a `srcDir` include — there's no published artifact. Build details
-(toolchains, the container recipe, target MC/loader versions) are in each
-module's `build.gradle`.
 
 ## Secrets
 

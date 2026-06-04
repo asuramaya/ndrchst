@@ -33,6 +33,7 @@ def connect(path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
 def _init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
     _apply_additive_migrations(conn)
+    _drop_legacy_wallet_tables(conn)
 
 
 # Additive column migrations. Each line is idempotent — SQLite raises
@@ -46,9 +47,6 @@ _ADDITIVE_COLUMNS = (
     ("servers", "cf_project_id", "INTEGER"),
     ("servers", "cf_file_id", "INTEGER"),
     ("servers", "neoforge_version", "TEXT"),
-    ("wallet_links", "snapshot_tier", "TEXT"),
-    ("wallet_links", "snapshot_pct", "REAL"),
-    ("wallet_links", "snapshot_at", "TEXT"),
 )
 
 
@@ -60,3 +58,15 @@ def _apply_additive_migrations(conn: sqlite3.Connection) -> None:
             if "duplicate column" in str(e).lower():
                 continue
             raise
+
+
+# One-shot cleanup: the Solana wallet/token-gating layer was removed, but its
+# tables linger in databases created before that. IF EXISTS makes this safe on
+# fresh DBs and idempotent across reboots. Remove this helper once every
+# deployment has booted past it.
+_LEGACY_WALLET_TABLES = ("wallet_links", "daily_claims", "identity_links")
+
+
+def _drop_legacy_wallet_tables(conn: sqlite3.Connection) -> None:
+    for table in _LEGACY_WALLET_TABLES:
+        conn.execute(f"DROP TABLE IF EXISTS {table}")

@@ -15,12 +15,8 @@ from fastapi.templating import Jinja2Templates
 
 from ..api.deps import db, require_lifecycle, state
 from ..platforms import REGISTRY as PLATFORMS
-from ..runtime.holdings_refresh import refresh_all_holdings
 from ..runtime.lifecycle import CreateRequest, Lifecycle, LifecycleError
-from ..runtime.rcon import RCONError
-from ..runtime.whitelist_sync import sync_links_to_server
 from ..store import servers as srv_store
-from ..store import wallet_links as wl_store
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 
@@ -249,53 +245,6 @@ async def r2_publish(
     if not result.get("published"):
         return HTMLResponse(f"Not published: {result.get('reason')}")
     return HTMLResponse(f"Published {result.get('uploaded', 0)} objects to R2")
-
-
-@router.post("/servers/{server_id}/wallets/sync", response_class=HTMLResponse)
-async def wallets_sync(
-    server_id: str,
-    conn: sqlite3.Connection = Depends(db),
-) -> HTMLResponse:
-    """Push every linked wallet to this server's whitelist (and rank, if
-    NDRCHST_RANK_CMD is set) over RCON. Does not enable whitelist enforcement."""
-    server = srv_store.get(conn, server_id)
-    if server is None:
-        raise HTTPException(status_code=404, detail="server not found")
-    if server.rcon_port is None or server.rcon_password is None:
-        raise HTTPException(status_code=400, detail="server has no RCON configured")
-    links = wl_store.list_all(conn)
-    if not links:
-        return HTMLResponse("No linked wallets to sync.")
-    try:
-        results = await sync_links_to_server(
-            "127.0.0.1", server.rcon_port, server.rcon_password, links)
-    except (RCONError, OSError) as e:
-        raise HTTPException(status_code=502, detail=f"RCON unavailable: {e}") from e
-    synced = 0
-    ranked = 0
-    for link, res in zip(links, results, strict=True):
-        if res.whitelisted:
-            wl_store.mark_synced(conn, link.wallet)
-            synced += 1
-        if res.ranked:
-            ranked += 1
-    return HTMLResponse(f"Synced {synced}/{len(links)} wallets to whitelist; {ranked} ranked.")
-
-
-@router.post("/wallets/refresh", response_class=HTMLResponse)
-def wallets_refresh(
-    conn: sqlite3.Connection = Depends(db),
-) -> HTMLResponse:
-    """Re-read every linked wallet's on-chain holdings and recompute its tier.
-    Run before a whitelist/rank sync so sellers lose rank and buyers gain it.
-    Reads the chain once per wallet — single-operator admin, no batching."""
-    results = refresh_all_holdings(conn)
-    if not results:
-        return HTMLResponse("No linked wallets to refresh.")
-    changed = sum(1 for r in results if r.changed)
-    return HTMLResponse(
-        f"Refreshed {len(results)} wallets; {changed} tier change(s). "
-        f"Run wallet sync to push the new ranks.")
 
 
 @router.post("/servers/{server_id}/container/recreate", response_class=HTMLResponse)

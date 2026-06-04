@@ -1,18 +1,18 @@
-# Cloudflare Worker that serves the ndrchst public surface from R2 and proxies
-# the dynamic auth/pairing endpoints back to the box.
+# Cloudflare Worker that serves the ndrchst client-distribution surface from R2.
 #
-# The whole surface lives on ONE host now — play.ndrchst.com:
+# The whole surface lives on ONE host — play.ndrchst.com — and is fully static:
 #   play.ndrchst.com/      → index.html (landing)  /play → play.html (app)
-#   play.ndrchst.com/client/<sid>/*  → R2 artifacts
-#   play.ndrchst.com/auth/* /me /client/auth/* /link /ranks → proxied to ORIGIN_BASE
+#   play.ndrchst.com/client/<sid>/*  → R2 artifacts (config, client.zip, mods)
+#   play.ndrchst.com/client/latest.json + binaries  → client self-update
+#   play.ndrchst.com/servers.json    → server catalog
 #   ndrchst.com/* and www.ndrchst.com/*  → 301 to play.ndrchst.com (same path)
 # The www/apex routes stay listed below ONLY so the Worker receives that traffic
 # and can issue the redirect; they serve no content of their own.
 #
-# The box publishes index.html / play.html / servers.json / client/<sid>/*
-# into the bucket (see src/ndrchst/runtime/publish.py); this Worker maps
-# static URLs to R2 keys and forwards the dynamic endpoints to the box's own
-# tunnel hostname. Deploy: `wrangler deploy` (from this dir).
+# The box publishes servers.json / client/<sid>/* (and any operator-provided
+# index.html / play.html) into the bucket (see src/ndrchst/runtime/publish.py);
+# this Worker maps static URLs to R2 keys. Deploy: `wrangler deploy` (from this
+# dir).
 #
 # Top-level keys (incl. `routes`) MUST come before the [[r2_buckets]] table —
 # TOML otherwise parses them as fields of that table.
@@ -22,38 +22,17 @@ main = "src/worker.js"
 compatibility_date = "2024-11-01"
 
 # Public hostnames. Requires the zone `ndrchst.com` on this Cloudflare account.
+# The per-server artifacts are in R2 (light publish); the big modpack.zip is
+# intentionally NOT in R2 — the client pulls the pack from CurseForge's CDN
+# (see Lifecycle.modpack_cdn_url).
 #
-# CUTOVER PRECONDITIONS (both now satisfiable):
-#   1. The static pages + per-server artifacts are in R2 (light publish). The
-#      big modpack.zip is intentionally NOT in R2 anymore — the client pulls the
-#      pack from CurseForge's CDN (see Lifecycle.modpack_cdn_url), so it's no
-#      longer a cutover blocker.
-#   2. ORIGIN_BASE below points at a tunnel hostname that still routes to the
-#      box's public app (:8081), SEPARATE from play/www (which now hit this
-#      Worker). Without it the dynamic auth endpoints 503.
-#
-# Until ready, comment these two routes out: `wrangler deploy` then lands only
-# on the workers.dev URL for a no-cutover validation deploy.
+# Until ready, comment these routes out: `wrangler deploy` then lands only on
+# the workers.dev URL for a no-cutover validation deploy.
 routes = [
   { pattern = "play.ndrchst.com/*", zone_name = "ndrchst.com" },
   { pattern = "www.ndrchst.com/*", zone_name = "ndrchst.com" },
   { pattern = "ndrchst.com/*", zone_name = "ndrchst.com" },
 ]
-
-[vars]
-# Box origin for the DYNAMIC endpoints (wallet auth + client pairing). Set this
-# to the Cloudflare Tunnel hostname that fronts the box's public app on :8081 —
-# e.g. "https://origin.ndrchst.com". This MUST be a different hostname from
-# play/www (those resolve to this Worker now); create a tunnel ingress rule
-# mapping it to http://127.0.0.1:8081 on the box. Leave blank to make the auth
-# endpoints return 503 (static surface still works).
-#
-# origin.<domain> must route to the box :8081. The tunnel is DASHBOARD-managed
-# (local cloudflared config.yml ingress is ignored), so add it as a Public
-# Hostname in Cloudflare Zero Trust → Tunnels → <your-tunnel> (subdomain `origin`,
-# HTTP, localhost:8081) — that creates the ingress + DNS together. Verify with
-# `curl https://origin.<domain>/healthz` before `wrangler deploy`.
-ORIGIN_BASE = "https://origin.ndrchst.com"
 
 [[r2_buckets]]
 binding = "DL"

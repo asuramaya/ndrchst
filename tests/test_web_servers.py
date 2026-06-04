@@ -494,28 +494,6 @@ def test_regenerate_client_pins_cf_pack_and_bakes_cdn_url(
             client_mod.CLIENTS_ROOT_DEFAULT = original_root
 
 
-def test_wallets_refresh_recomputes_tiers(app_with_docker, monkeypatch):
-    """POST /wallets/refresh re-reads holdings (stubbed) and recomputes tiers
-    for every linked wallet, persisting the new rank."""
-    from ndrchst.store import wallet_links as wl
-    monkeypatch.setattr(
-        "ndrchst.runtime.solana.try_holdings_pct", lambda w, **k: 0.2)  # -> bronze
-    with TestClient(app_with_docker) as client:
-        conn = app_with_docker.state.ndrchst.conn
-        wl.upsert(conn, "WALLETA", "WALLET_A", "whale", 6.0)
-        r = client.post("/wallets/refresh")
-        assert r.status_code == 200
-        assert "1 tier change" in r.text
-        assert wl.get(conn, "WALLETA").tier == "bronze"
-
-
-def test_wallets_refresh_empty(app_with_docker):
-    with TestClient(app_with_docker) as client:
-        r = client.post("/wallets/refresh")
-        assert r.status_code == 200
-        assert "No linked wallets" in r.text
-
-
 def test_regenerate_client_persists_neoforge_version(app_with_docker, tmp_path):
     """neoforge_version is persisted, so a later BARE regenerate keeps the
     modloader baked in (a regression that would otherwise install vanilla)."""
