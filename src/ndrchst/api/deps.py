@@ -79,7 +79,7 @@ def make_lifespan(
 
         http_client = httpx.AsyncClient(
             timeout=120.0,
-            headers={"User-Agent": "ndrchst/0.0.1 (+github.com/asuramaya/ndrchst-alpha)"},
+            headers={"User-Agent": "ndrchst/0.0.1 (+github.com/asuramaya/ndrchst)"},
         )
         app.state.ndrchst = AppState(
             conn=conn, lifecycle=lifecycle, docker_error=docker_error,

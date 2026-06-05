@@ -1,4 +1,4 @@
-# ndrchst-alpha — state of the project
+# ndrchst — state of the project
 
 Authoritative current-state doc. Originally written 2026-05-18 (v0 close + the
 v0.1 sweep); the lower sections still describe that control-plane foundation
@@ -15,7 +15,7 @@ docker-py; Java + Bedrock first-class). Three planes. See
 |---|---|---|
 | Control plane | `src/ndrchst/` (`api`, `web`, `runtime`, `:8080`) | run servers in Docker, Modrinth installs, RCON, backups, client-bundle build + R2 publish |
 | Desktop client | `client/` | portablemc launcher; server-driven modpack/mod sync, tunnel, self-update; offline or Microsoft login |
-| Edge | `cf/worker/` | Cloudflare Worker: per-server client artifacts + `servers.json` served statically from R2 |
+| Edge | `cf/worker/` | Cloudflare Worker: static landing/play pages + per-server client artifacts + `servers.json`, served from R2 |
 
 Predecessors:
 - `~/code/ndrchst/ndrchst/` — Python v2.3.0 (working but bloated, ~38k LOC)
@@ -47,7 +47,7 @@ close. It remains accurate for that layer.
 ## Layout
 
 ```
-ndrchst-alpha/
+ndrchst/
 ├── pyproject.toml              uv-shaped (works with pip too); ruff + pytest + nbtlib + httpx
 ├── README.md                   user-facing one-pager
 ├── STATE.md                    this file — authoritative architecture/state doc
@@ -291,10 +291,13 @@ to the modpack platform.
 
 ## How to pick up
 
-1. `cd ~/code/ndrchst-alpha && .venv/bin/pytest -q` — should print `122 passed, 16 deselected`
-2. `.venv/bin/pytest -q -m live` — 9 pass (real uvicorn)
-3. `.venv/bin/pytest -q -m integration` — 5 pass (real APIs)
-4. `.venv/bin/ndrchst run` — open <http://localhost:8080>
-5. `.venv/bin/ndrchst doctor` — should show docker fail on the dev machine
+1. `.venv/bin/python -m pytest -q` — ~312 passed, 16 deselected (the venv shebangs
+   may be stale after a Python upgrade/move; invoke via `python -m`).
+2. `.venv/bin/python -m pytest -q -m live` — real uvicorn (some cases assume no
+   Docker + an empty default DB; see the dev-env memory note).
+3. `.venv/bin/python -m pytest -q -m integration` — real upstream APIs.
+4. `.venv/bin/python -m pytest -q -m docker` — real containers (Docker is now
+   available on the box).
+5. `.venv/bin/ndrchst run` — open <http://localhost:8080>; `ndrchst doctor` for preflight.
 6. Read `STATE.md` (this file) + `CLAUDE.md` for orientation
 7. Check `git log --oneline` for commit history (8 commits)

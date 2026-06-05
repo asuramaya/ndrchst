@@ -62,11 +62,12 @@ The workflow stamps `__version__` from the tag, builds all three binaries, then
 ## Pointing clients + the play page at it
 
 Both the self-updater and the play page's "standalone launcher" links read the
-same base URL. Set, wherever the client config / public app run:
+same base URL:
 
 - Client config / build: **`UPDATE_BASE_URL=https://dl.ndrchst.com/client`**
   (baked into `config.py` per drop, or via `client-config.json`).
-- Public app (play page download links): **`NDRCHST_CLIENT_DOWNLOADS_BASE=https://dl.ndrchst.com/client`**
+- Admin plane (renders the play-page download links on `r2-publish`):
+  **`NDRCHST_CLIENT_DOWNLOADS_BASE=https://dl.ndrchst.com/client`**
 
 On launch the client fetches `<UPDATE_BASE_URL>/latest.json`; if it advertises a
 newer `version` with an asset for the client's OS/arch, the launcher shows
@@ -135,6 +136,6 @@ wrangler deploy            # binds bucket ndrchst-dl, routes play.* + www.*
   client binaries + per-server objects without a Worker). This is the
   `*_DOWNLOADS_BASE` / `UPDATE_BASE_URL` host.
 
-Once the Worker is live and serving, the box's inbound `play.ndrchst.com`
-Cloudflare-tunnel route to `:8081` can be retired — the box becomes
-outbound-only (MC tunnel + R2 pushes). Only the MC game tunnel must stay.
+The box has no inbound web exposure: `play.ndrchst.com` is served entirely by
+the Worker from R2. The box is outbound-only (R2 pushes) plus the MC game tunnel,
+which is the only ingress that must stay.

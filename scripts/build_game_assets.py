@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
-"""Process raw Minecraft/ATM10 textures into the End-themed web + client asset
-set. Output is gitignored (we don't commit game binaries to the OSS repo); it's
-staged to the box + R2 at deploy time and bundled into the client.
+"""Process raw Minecraft textures into the End-themed asset set still in use:
+the web favicon and the client's Tkinter header (banner + brand glyph). Output
+is gitignored (we don't commit game binaries to the OSS repo); it's staged to
+the box + R2 at deploy time and bundled into the client.
 
-PROVENANCE of the raw inputs (not committed; re-extract to regenerate):
-  - Vanilla 1.21.1 client jar (Mojang piston-data CDN): end_sky, end_stone,
-    purpur_*, dragon_egg, ancient_debris_side, ender_eye, ender_pearl,
-    end_crystal, chorus_fruit + reward icons (diamond, gold_ingot,
-    experience_bottle, netherite_scrap/ingot, nether_star).
-  - ATM10 mod jars on the box: mysticalagriculture essences (inferium,
-    prudentium, tertium, imperium, supremium), allthemodium ingots
-    (allthemodium, vibranium, unobtainium).
+PROVENANCE of the raw inputs (not committed; re-extract to regenerate) — from
+the vanilla 1.21.1 client jar (Mojang piston-data CDN):
+  - end_sky  — tileable End starfield, source of the panning header banner.
+  - ender_eye — source of the favicon + the client brand glyph.
 
 Usage: python3 scripts/build_game_assets.py [RAW_DIR]
 """
@@ -26,18 +23,6 @@ RAW = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/ndrchst-assets/raw")
 OUT = ROOT / "src/ndrchst/web/static/game"
 # The client (Tkinter) bundles these for its themed, offline header.
 CLIENT_ASSETS = ROOT / "client/src/ndrchst_client/assets"
-
-# Reward item sprites surfaced on /ranks tier cards (filename in RAW == out name).
-ITEMS = [
-    "diamond", "gold_ingot", "experience_bottle", "netherite_scrap",
-    "netherite_ingot", "ancient_debris_side", "nether_star",
-    "inferium_essence", "prudentium_essence", "tertium_essence",
-    "imperium_essence", "supremium_essence",
-    "allthemodium_ingot", "vibranium_ingot", "unobtainium_ingot",
-]
-# Decorative End textures (crisp upscale).
-DECOR = ["ender_eye", "ender_pearl", "end_crystal", "purpur_block",
-         "end_stone", "dragon_egg", "chorus_fruit"]
 
 
 def _load(name: str) -> Image.Image:
@@ -71,24 +56,15 @@ def build_banner(dst: Path) -> None:
 
 
 def main() -> None:
-    (OUT / "items").mkdir(parents=True, exist_ok=True)
-    (OUT / "decor").mkdir(parents=True, exist_ok=True)
-    for name in ITEMS:
-        _crisp(_load(name), 64).save(OUT / "items" / f"{name}.png")
-    for name in DECOR:
-        _crisp(_load(name), 64).save(OUT / "decor" / f"{name}.png")
-    # Void background tile (kept native; CSS scales it pixelated).
-    _load("end_sky").save(OUT / "decor" / "end_sky.png")
-    # Brand glyph + favicon from the ender eye (teal-green = our accent).
-    _crisp(_load("ender_eye"), 128).save(OUT / "decor" / "brand.png")
+    OUT.mkdir(parents=True, exist_ok=True)
+    # Favicon from the ender eye — the Worker serves it at /favicon.ico, which
+    # browsers auto-request.
     _crisp(_load("ender_eye"), 32).save(OUT / "favicon.png")
-    build_banner(OUT / "decor" / "end_banner.gif")
     # Client UI assets (banner GIF + brand glyph) for the Tkinter header.
     CLIENT_ASSETS.mkdir(parents=True, exist_ok=True)
     build_banner(CLIENT_ASSETS / "end_banner.gif")
     _crisp(_load("ender_eye"), 48).save(CLIENT_ASSETS / "brand.png")
-    n = sum(1 for _ in OUT.rglob("*.*"))
-    print(f"built {n} web assets -> {OUT}\nbuilt 2 client assets -> {CLIENT_ASSETS}")
+    print(f"built favicon -> {OUT}\nbuilt 2 client assets -> {CLIENT_ASSETS}")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 [project]
 name = "ndrchst-client"
 version = "0.0.1"
-description = "Offline Minecraft client for ndrchst private-server clients."
+description = "Minecraft launcher for ndrchst servers — syncs the modpack and connects (offline or Microsoft account)."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = ["portablemc>=4.4"]

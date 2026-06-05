@@ -8,8 +8,8 @@ build a client, launch it) move through them.
 ```
                         ┌─────────────────────────────────────────┐
    player's browser ───▶│  Cloudflare Worker  (cf/worker)          │
-   / desktop client     │   static: client/<sid>/*, servers.json   │
-                        │   served from R2 — no box origin          │
+   / desktop client     │   static: /, /play, client/<sid>/*,       │
+                        │   servers.json — from R2, no box origin    │
                         └───────────────┬───────────────────────────┘
                                         │  artifacts published from the box
                                         ▼
@@ -69,9 +69,10 @@ that server's `config.json` and remembers it.
 
 The box stays mostly outbound. The admin plane publishes per-server artifacts —
 `config.json`, `manifest.json`, `mods/index.json` (+ substitution jars), and the
-small `client.zip` — plus `servers.json` into R2 (`runtime/publish.py`). The
-Worker (`cf/worker/`) serves those statically; there is no dynamic box origin
-behind it. The 200 MB modpack itself is pulled by the client straight from the
+small `client.zip` — plus `servers.json` and the static public pages
+(`index.html` landing + `play.html` server list, rendered wallet-free by
+`web/public_pages.py`) into R2 (`runtime/publish.py`). The Worker (`cf/worker/`)
+serves all of it statically; there is no dynamic box origin behind it. The 200 MB modpack itself is pulled by the client straight from the
 CurseForge CDN — the box never re-hosts it. Client binaries ship from R2 with a
 SHA-256 in `latest.json`; the launcher verifies it before swapping itself.
 
