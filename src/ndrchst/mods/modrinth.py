@@ -75,7 +75,7 @@ class Modrinth(Source):
         if self._client is None:
             self._client = httpx.AsyncClient(
                 timeout=30.0,
-                headers={"User-Agent": "ndrchst/0.0.1 (+github.com/asuramaya/ndrchst-alpha)"},
+                headers={"User-Agent": "ndrchst/0.0.1 (+github.com/asuramaya/ndrchst)"},
             )
         return self._client
 

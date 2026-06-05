@@ -4,7 +4,7 @@ version = "0.0.1"
 description = "Open-source, single-machine Minecraft server control plane (Java + Bedrock, Docker-only)."
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "ndrchst-alpha contributors" }]
+authors = [{ name = "ndrchst contributors" }]
 requires-python = ">=3.12"
 
 dependencies = [

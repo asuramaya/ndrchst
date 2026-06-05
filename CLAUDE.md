@@ -1,4 +1,4 @@
-# CLAUDE.md — ndrchst-alpha orientation
+# CLAUDE.md — ndrchst orientation
 
 ## TL;DR
 

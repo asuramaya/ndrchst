@@ -31,7 +31,7 @@ identifiers; fork-and-edit them for your own deployment.
   self-updater verifies it before swapping the running binary.
 - The admin plane (`:8080`) is intended to be reachable on a private network
   only (e.g. Tailscale) — do **not** route it through a public tunnel. Only the
-  read-only public surface (`:8081`) / the edge Worker faces the internet.
+  static edge Worker (R2-backed client artifacts + pages) faces the internet.
 
 ## Reporting
 
