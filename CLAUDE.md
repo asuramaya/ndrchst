@@ -9,21 +9,22 @@ Single-machine OSS Minecraft server control plane, plus a desktop client distrib
 
 ## Common commands
 
+Invoke tools as `.venv/bin/python -m <tool>` — the `.venv/bin/` script shebangs
+can be stale after a Python upgrade/move.
+
 ```bash
 # Run tests (default suite excludes integration/live/docker)
-.venv/bin/pytest -q
+.venv/bin/python -m pytest -q
 
-# Run live tests (real uvicorn + curl every route)
-.venv/bin/pytest -q -m live
+# Run live / integration tests (real uvicorn / live PaperMC/Modrinth/Mojang APIs)
+.venv/bin/python -m pytest -q -m live
+.venv/bin/python -m pytest -q -m integration
 
-# Run integration tests (live PaperMC/Modrinth/Mojang APIs)
-.venv/bin/pytest -q -m integration
-
-# Run Docker tests (would need a real daemon; skip on this dev machine)
-.venv/bin/pytest -q -m docker
+# Run Docker tests — real containers. Docker IS available on this box now.
+.venv/bin/python -m pytest -q -m docker
 
 # Lint
-.venv/bin/ruff check src tests
+.venv/bin/python -m ruff check src tests
 
 # Boot the app
 .venv/bin/ndrchst run            # uvicorn :8080 localhost
@@ -71,7 +72,7 @@ The pattern that's worked for every feature so far:
 3. HTML route in `web/<feature>_routes.py` OR add a sub-route in `web/detail_routes.py` if it's a tab
 4. Template partial in `web/templates/<feature>/` (or `templates/servers/tabs/_<feature>.html`)
 5. End-to-end test in `tests/test_web_*.py` or `tests/test_scenario_end_to_end.py`
-6. Verify: `pytest -q && pytest -q -m live && ruff check src tests`
+6. Verify: `.venv/bin/python -m pytest -q && .venv/bin/python -m pytest -q -m live && .venv/bin/python -m ruff check src tests`
 
 ## When asked to port from v2
 
@@ -85,6 +86,7 @@ If you have access to the auto-memory system, the most load-bearing files for th
 - `feedback_stress_before_handoff.md` — run tests/lint/live boot before reporting done
 - `project_ndrchst_alpha.md` — project framing
 - `project_v1_deferred.md` — what's intentionally not done yet
-- `project_no_local_docker.md` — this dev machine has no Docker daemon
+- `project_dev_env_state.md` — current dev-box state: Docker IS available now; the
+  `.venv` was rebuilt for Python 3.13 (invoke `.venv/bin/python -m …`)
 
 If you don't have memory access, the same context lives in this file + [STATE.md](STATE.md).
