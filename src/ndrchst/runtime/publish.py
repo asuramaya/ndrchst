@@ -109,8 +109,8 @@ def publish_server(
         else:
             missing.append(f"{pdir}/client.zip")
 
-        # End-themed game assets (icons, decor, favicon, banner) → R2 under
-        # game/, the same keys the box serves at /game and the pages reference.
+        # Static game assets (the favicon the Worker serves at /favicon.ico) →
+        # R2 under game/, mirroring what the box stages locally.
         game_dir = Path(__file__).resolve().parent.parent / "web" / "static" / "game"
         _ct = {".png": "image/png", ".gif": "image/gif"}
         for f in sorted(game_dir.rglob("*")):
